@@ -1,0 +1,20 @@
+# Code Owners for CMMP
+
+# Global default owner
+* @developers
+
+# Security-sensitive paths require security-team review
+/packages/security/ @security-team
+/.github/workflows/ @devops-team
+/infrastructure/ @devops-team
+/apps/api/src/auth/ @security-team
+/docs/security-architecture.md @security-team
+/docs/threat-model.md @security-team
+
+# Database changes require database team review
+/packages/database/ @database-team
+/apps/api/src/prisma/ @database-team
+
+# Documentation
+/docs/ @documentation-team
+/README.md @documentation-team

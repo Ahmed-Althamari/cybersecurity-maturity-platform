@@ -1,0 +1,37 @@
+{
+  "compilerOptions": {
+    "target": "ES2020",
+    "lib": ["ES2020", "DOM", "DOM.Iterable"],
+    "jsx": "react-jsx",
+    "module": "ESNext",
+    "moduleResolution": "node",
+    "resolveJsonModule": true,
+    "allowJs": true,
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+    "declaration": true,
+    "declarationMap": true,
+    "sourceMap": true,
+    "outDir": "./dist",
+    "baseUrl": ".",
+    "paths": {
+      "@/*": ["./*"],
+      "@ui/*": ["./packages/ui/src/*"],
+      "@db/*": ["./packages/database/src/*"],
+      "@security/*": ["./packages/security/src/*"],
+      "@framework/*": ["./packages/framework-engine/src/*"],
+      "@scoring/*": ["./packages/scoring-engine/src/*"],
+      "@shared/*": ["./packages/shared/src/*"],
+      "@import/*": ["./packages/import-engine/src/*"],
+      "@reporting/*": ["./packages/reporting/src/*"]
+    }
+  },
+  "exclude": [
+    "node_modules",
+    "dist",
+    "build",
+    ".next"
+  ]
+}

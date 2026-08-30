@@ -1,0 +1,22 @@
+{
+  "name": "@cmmp/reporting",
+  "version": "0.1.0",
+  "description": "Report generation engine",
+  "license": "MIT",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "type-check": "tsc --noEmit",
+    "clean": "rm -rf dist"
+  },
+  "dependencies": {
+    "@cmmp/shared": "workspace:*",
+    "pdfkit": "^0.13.0",
+    "xlsx": "^0.18.5"
+  },
+  "devDependencies": {
+    "@types/node": "^20.9.0",
+    "typescript": "^5.2.2"
+  }
+}

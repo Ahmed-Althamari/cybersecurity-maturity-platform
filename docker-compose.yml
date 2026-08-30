@@ -1,0 +1,90 @@
+version: '3.8'
+
+services:
+  postgres:
+    image: postgres:15-alpine
+    container_name: cmmp-postgres
+    environment:
+      POSTGRES_USER: cmmp_user
+      POSTGRES_PASSWORD: cmmp_password
+      POSTGRES_DB: cmmp_db
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./infrastructure/init-db.sql:/docker-entrypoint-initdb.d/init.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U cmmp_user -d cmmp_db"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - cmmp-network
+
+  redis:
+    image: redis:7-alpine
+    container_name: cmmp-redis
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - cmmp-network
+
+  api:
+    build:
+      context: .
+      dockerfile: ./infrastructure/Dockerfile.api
+    container_name: cmmp-api
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      NODE_ENV: development
+      DATABASE_URL: postgresql://cmmp_user:cmmp_password@postgres:5432/cmmp_db?schema=public
+      REDIS_URL: redis://redis:6379
+      NEXTAUTH_SECRET: dev-secret-not-for-production
+      NEXTAUTH_URL: http://localhost:3000
+    ports:
+      - "3001:3001"
+    volumes:
+      - .:/app
+      - /app/node_modules
+    command: npm run dev
+    networks:
+      - cmmp-network
+
+  web:
+    build:
+      context: .
+      dockerfile: ./infrastructure/Dockerfile.web
+    container_name: cmmp-web
+    depends_on:
+      - api
+    environment:
+      NODE_ENV: development
+      NEXT_PUBLIC_API_URL: http://localhost:3001
+      NEXTAUTH_URL: http://localhost:3000
+      NEXTAUTH_SECRET: dev-secret-not-for-production
+    ports:
+      - "3000:3000"
+    volumes:
+      - .:/app
+      - /app/node_modules
+      - /app/.next
+    command: npm run dev
+    networks:
+      - cmmp-network
+
+volumes:
+  pgdata:
+    driver: local
+
+networks:
+  cmmp-network:
+    driver: bridge

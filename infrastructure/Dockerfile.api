@@ -1,0 +1,36 @@
+FROM node:18-alpine AS builder
+
+WORKDIR /app
+
+# Install dependencies
+COPY package*.json ./
+COPY pnpm-lock.yaml* ./
+RUN npm install -g pnpm && pnpm install
+
+# Build
+COPY . .
+RUN pnpm run build
+
+# Production stage
+FROM node:18-alpine
+
+WORKDIR /app
+
+ENV NODE_ENV=production
+
+# Install only production dependencies
+COPY package*.json ./
+COPY pnpm-lock.yaml* ./
+RUN npm install -g pnpm && pnpm install --prod
+
+# Copy built application
+COPY --from=builder /app/dist ./dist
+COPY --from=builder /app/apps/api/dist ./apps/api/dist
+COPY --from=builder /app/apps/api/node_modules ./apps/api/node_modules
+
+EXPOSE 3001
+
+HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
+  CMD node -e "require('http').get('http://localhost:3001/health', (r) => {if (r.statusCode !== 200) throw new Error(r.statusCode)})"
+
+CMD ["node", "apps/api/dist/main.js"]

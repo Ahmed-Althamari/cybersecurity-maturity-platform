@@ -1,0 +1,22 @@
+{
+  "name": "@cmmp/database",
+  "version": "0.1.0",
+  "description": "CMMP Database Schema & Migrations",
+  "license": "MIT",
+  "scripts": {
+    "migrate": "prisma migrate deploy",
+    "migrate:dev": "prisma migrate dev",
+    "generate": "prisma generate",
+    "studio": "prisma studio",
+    "seed": "node prisma/seed.js",
+    "db:push": "prisma db push",
+    "format": "prisma format"
+  },
+  "devDependencies": {
+    "@prisma/cli": "^5.4.1",
+    "prisma": "^5.4.1"
+  },
+  "dependencies": {
+    "@prisma/client": "^5.4.1"
+  }
+}
