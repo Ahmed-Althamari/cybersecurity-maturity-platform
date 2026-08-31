@@ -33,7 +33,7 @@ async function main() {
   await prisma.category.deleteMany();
   await prisma.function.deleteMany();
   await prisma.framework.deleteMany();
-  await prisma.userRole.deleteMany();
+  await prisma.userRoleAssignment.deleteMany();
   await prisma.user.deleteMany();
   await prisma.organisation.deleteMany();
   await prisma.tenant.deleteMany();
@@ -136,14 +136,14 @@ async function main() {
       email: "admin@example.local",
       name: "Administrator",
       isActive: true,
-      userRoles: {
+      userRoleAssignments: {
         create: {
           role: "PLATFORM_ADMIN",
           tenantId: tenant.id,
         },
       },
     },
-    include: { userRoles: true },
+    include: { userRoleAssignments: true },
   });
 
   // CISO user
@@ -154,7 +154,7 @@ async function main() {
       email: "ciso@example.local",
       name: "Chief Information Security Officer",
       isActive: true,
-      userRoles: {
+      userRoleAssignments: {
         create: {
           role: "CISO",
           tenantId: tenant.id,
@@ -172,7 +172,7 @@ async function main() {
       email: "assessor@example.local",
       name: "Security Assessor",
       isActive: true,
-      userRoles: {
+      userRoleAssignments: {
         create: {
           role: "ASSESSOR",
           tenantId: tenant.id,
@@ -190,7 +190,7 @@ async function main() {
       email: "viewer@example.local",
       name: "Read-Only Viewer",
       isActive: true,
-      userRoles: {
+      userRoleAssignments: {
         create: {
           role: "READ_ONLY_VIEWER",
           tenantId: tenant.id,

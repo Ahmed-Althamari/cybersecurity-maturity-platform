@@ -79,53 +79,54 @@ enum UserRole {
 // ============================================================================
 
 model Tenant {
-  id               String   @id @default(uuid())
-  name             String
-  slug             String   @unique
-  description      String?
-  isActive         Boolean  @default(true)
-  createdAt        DateTime @default(now())
-  updatedAt        DateTime @updatedAt
-  deletedAt        DateTime?
+  id          String    @id @default(uuid())
+  name        String
+  slug        String    @unique
+  description String?
+  isActive    Boolean   @default(true)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  deletedAt   DateTime?
 
   // Relations
-  organisations    Organisation[]
-  users            User[]
-  frameworks       Framework[]
-  auditEvents      AuditEvent[]
+  organisations Organisation[]
+  users         User[]
+  frameworks    Framework[]
+  auditEvents   AuditEvent[]
+  Benchmark     Benchmark[]
 
-  @@map("tenants")
   @@index([isActive])
+  @@map("tenants")
 }
 
 model Organisation {
-  id               String   @id @default(uuid())
-  tenantId         String
-  tenant           Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  id       String @id @default(uuid())
+  tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
-  name             String
-  slug             String
-  description      String?
-  country          String?
-  industry         String?
-  size             String?
-  isActive         Boolean  @default(true)
-  createdAt        DateTime @default(now())
-  updatedAt        DateTime @updatedAt
-  deletedAt        DateTime?
+  name        String
+  slug        String
+  description String?
+  country     String?
+  industry    String?
+  size        String?
+  isActive    Boolean   @default(true)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  deletedAt   DateTime?
 
   // Relations
-  users            User[]
-  assessments      Assessment[]
-  risks            Risk[]
+  users                  User[]
+  assessments            Assessment[]
+  risks                  Risk[]
   remediationInitiatives RemediationInitiative[]
-  securityCapabilities SecurityCapability[]
-  benchmarks       Benchmark[]
+  securityCapabilities   SecurityCapability[]
+  benchmarks             Benchmark[]
 
   @@unique([tenantId, slug])
-  @@map("organisations")
   @@index([tenantId])
   @@index([isActive])
+  @@map("organisations")
 }
 
 // ============================================================================
@@ -133,62 +134,62 @@ model Organisation {
 // ============================================================================
 
 model User {
-  id               String   @id @default(uuid())
-  tenantId         String
-  tenant           Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  organisationId   String?
-  organisation     Organisation? @relation(fields: [organisationId], references: [id])
+  id             String        @id @default(uuid())
+  tenantId       String
+  tenant         Tenant        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  organisationId String?
+  organisation   Organisation? @relation(fields: [organisationId], references: [id])
 
-  email            String
-  name             String
-  passwordHash     String?
-  isActive         Boolean  @default(true)
-  emailVerified    DateTime?
-  lastLogin        DateTime?
-  createdAt        DateTime @default(now())
-  updatedAt        DateTime @updatedAt
-  deletedAt        DateTime?
+  email         String
+  name          String
+  passwordHash  String?
+  isActive      Boolean   @default(true)
+  emailVerified DateTime?
+  lastLogin     DateTime?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  deletedAt     DateTime?
 
   // Relations
-  userRoles        UserRole[]
-  auditEvents      AuditEvent[]
-  assessmentCreated Assessment[] @relation("createdBy")
-  assessmentUpdated Assessment[] @relation("updatedBy")
+  auditEvents        AuditEvent[]
+  assessmentCreated  Assessment[]         @relation("createdBy")
+  assessmentUpdated  Assessment[]         @relation("updatedBy")
+  userRoleAssignments UserRoleAssignment[]
 
   @@unique([tenantId, email])
-  @@map("users")
   @@index([tenantId])
   @@index([organisationId])
   @@index([isActive])
   @@index([email])
+  @@map("users")
 }
 
 model Role {
-  id               String   @id @default(uuid())
-  name             String   @unique
-  description      String?
-  permissions      String[] // JSON array of permission strings
+  id          String   @id @default(uuid())
+  name        String   @unique
+  description String?
+  permissions String[] // JSON array of permission strings
 
   @@map("roles")
 }
 
-model UserRole {
-  id               String   @id @default(uuid())
-  userId           String
-  user             User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  
-  role             String   // Enum value from UserRole
-  tenantId         String
-  organisationId   String?
-  
-  createdAt        DateTime @default(now())
-  updatedAt        DateTime @updatedAt
-  deletedAt        DateTime?
+model UserRoleAssignment {
+  id     String @id @default(uuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  role           String // Enum value from UserRole
+  tenantId       String
+  organisationId String?
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
 
   @@unique([userId, tenantId, role, organisationId])
-  @@map("user_roles")
   @@index([userId])
   @@index([tenantId])
+  @@map("user_roles")
 }
 
 // ============================================================================
@@ -196,100 +197,100 @@ model UserRole {
 // ============================================================================
 
 model Framework {
-  id               String   @id @default(uuid())
-  tenantId         String
-  tenant           Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  id       String @id @default(uuid())
+  tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
-  name             String
-  slug             String
-  description      String?
-  version          String
-  frameWorkType    String   // e.g., "NIST_CSF", "ISO_27001", "CIS"
-  isActive         Boolean  @default(true)
-  createdAt        DateTime @default(now())
-  updatedAt        DateTime @updatedAt
-  deletedAt        DateTime?
+  name          String
+  slug          String
+  description   String?
+  version       String
+  frameWorkType String // e.g., "NIST_CSF", "ISO_27001", "CIS"
+  isActive      Boolean   @default(true)
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  deletedAt     DateTime?
 
   // Relations
-  functions        Function[]
+  functions           Function[]
   assessmentTemplates AssessmentTemplate[]
-  benchmarks       Benchmark[]
+  benchmarks          Benchmark[]
 
   @@unique([tenantId, slug, version])
-  @@map("frameworks")
   @@index([tenantId])
   @@index([frameWorkType])
+  @@map("frameworks")
 }
 
 model Function {
-  id               String   @id @default(uuid())
-  frameworkId      String
-  framework        Framework @relation(fields: [frameworkId], references: [id], onDelete: Cascade)
+  id          String    @id @default(uuid())
+  frameworkId String
+  framework   Framework @relation(fields: [frameworkId], references: [id], onDelete: Cascade)
 
-  code             String   // e.g., "GV", "ID", "PR", "DE", "RS", "RC"
-  name             String   // e.g., "Govern"
-  description      String?
-  displayOrder     Int      @default(0)
+  code         String // e.g., "GV", "ID", "PR", "DE", "RS", "RC"
+  name         String // e.g., "Govern"
+  description  String?
+  displayOrder Int     @default(0)
 
   // Relations
-  categories       Category[]
+  categories Category[]
 
   @@unique([frameworkId, code])
-  @@map("functions")
   @@index([frameworkId])
+  @@map("functions")
 }
 
 model Category {
-  id               String   @id @default(uuid())
-  functionId       String
-  function         Function @relation(fields: [functionId], references: [id], onDelete: Cascade)
+  id         String   @id @default(uuid())
+  functionId String
+  function   Function @relation(fields: [functionId], references: [id], onDelete: Cascade)
 
-  code             String   // e.g., "GV.RM"
-  name             String   // e.g., "Risk Management"
-  description      String?
-  displayOrder     Int      @default(0)
+  code         String // e.g., "GV.RM"
+  name         String // e.g., "Risk Management"
+  description  String?
+  displayOrder Int     @default(0)
 
   // Relations
-  subcategories    Subcategory[]
+  subcategories Subcategory[]
 
   @@unique([functionId, code])
-  @@map("categories")
   @@index([functionId])
+  @@map("categories")
 }
 
 model Subcategory {
-  id               String   @id @default(uuid())
-  categoryId       String
-  category         Category @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+  id         String   @id @default(uuid())
+  categoryId String
+  category   Category @relation(fields: [categoryId], references: [id], onDelete: Cascade)
 
-  code             String   // e.g., "GV.RM-01"
-  name             String
-  description      String?
-  displayOrder     Int      @default(0)
+  code         String // e.g., "GV.RM-01"
+  name         String
+  description  String?
+  displayOrder Int     @default(0)
 
   // Relations
   assessmentQuestions AssessmentQuestion[]
 
   @@unique([categoryId, code])
-  @@map("subcategories")
   @@index([categoryId])
+  @@map("subcategories")
 }
 
 model AssessmentQuestion {
-  id               String   @id @default(uuid())
-  subcategoryId    String
-  subcategory      Subcategory @relation(fields: [subcategoryId], references: [id], onDelete: Cascade)
+  id            String      @id @default(uuid())
+  subcategoryId String
+  subcategory   Subcategory @relation(fields: [subcategoryId], references: [id], onDelete: Cascade)
 
-  question         String
-  guidance         String?
-  examples         String?  // JSON array of examples
-  referenceLinks   String?  // JSON array of reference URLs
+  question       String
+  guidance       String?
+  examples       String? // JSON array of examples
+  referenceLinks String? // JSON array of reference URLs
 
   // Relations
-  assessmentItems  AssessmentItem[]
+  assessmentItems AssessmentItem[]
 
-  @@map("assessment_questions")
   @@index([subcategoryId])
+  @@map("assessment_questions")
 }
 
 // ============================================================================
@@ -297,32 +298,32 @@ model AssessmentQuestion {
 // ============================================================================
 
 model MaturityModel {
-  id               String   @id @default(uuid())
-  
-  name             String   @unique
-  description      String?
-  scale            Int      @default(5) // 1-5 by default
-  isDefault        Boolean  @default(false)
+  id String @id @default(uuid())
+
+  name        String  @unique
+  description String?
+  scale       Int     @default(5) // 1-5 by default
+  isDefault   Boolean @default(false)
 
   // Relations
-  levels           MaturityModelLevel[]
+  levels MaturityModelLevel[]
 
   @@map("maturity_models")
 }
 
 model MaturityModelLevel {
-  id               String   @id @default(uuid())
-  modelId          String
-  model            MaturityModel @relation(fields: [modelId], references: [id], onDelete: Cascade)
+  id      String        @id @default(uuid())
+  modelId String
+  model   MaturityModel @relation(fields: [modelId], references: [id], onDelete: Cascade)
 
-  level            Int      // 1-5
-  name             String   // "Initial", "Developing", "Defined", "Managed", "Optimised"
-  description      String?
-  color            String?  // Hex color for UI
+  level       Int // 1-5
+  name        String // "Initial", "Developing", "Defined", "Managed", "Optimised"
+  description String?
+  color       String? // Hex color for UI
 
   @@unique([modelId, level])
-  @@map("maturity_model_levels")
   @@index([modelId])
+  @@map("maturity_model_levels")
 }
 
 // ============================================================================
@@ -330,118 +331,118 @@ model MaturityModelLevel {
 // ============================================================================
 
 model AssessmentTemplate {
-  id               String   @id @default(uuid())
-  frameworkId      String
-  framework        Framework @relation(fields: [frameworkId], references: [id])
+  id          String    @id @default(uuid())
+  frameworkId String
+  framework   Framework @relation(fields: [frameworkId], references: [id])
 
-  name             String
-  description      String?
-  isDefault        Boolean  @default(false)
+  name        String
+  description String?
+  isDefault   Boolean @default(false)
 
   // Relations
-  assessments      Assessment[]
+  assessments Assessment[]
 
-  @@map("assessment_templates")
   @@index([frameworkId])
+  @@map("assessment_templates")
 }
 
 model Assessment {
-  id               String   @id @default(uuid())
-  tenantId         String
-  organisationId   String
-  organisation     Organisation @relation(fields: [organisationId], references: [id])
+  id             String       @id @default(uuid())
+  tenantId       String
+  organisationId String
+  organisation   Organisation @relation(fields: [organisationId], references: [id])
 
-  templateId       String?
-  template         AssessmentTemplate? @relation(fields: [templateId], references: [id])
+  templateId String?
+  template   AssessmentTemplate? @relation(fields: [templateId], references: [id])
 
-  name             String
-  description      String?
-  status           String   @default("DRAFT") // DRAFT, IN_PROGRESS, SUBMITTED, APPROVED, ARCHIVED
-  
-  assessmentDate   DateTime
-  completionPercentage Int @default(0)
-  
-  currentMaturity  Float?   // Overall current maturity score
-  targetMaturity   Float?   // Overall target maturity score
-  maturityGap      Float?   // Gap = Target - Current
+  name        String
+  description String?
+  status      String  @default("DRAFT") // DRAFT, IN_PROGRESS, SUBMITTED, APPROVED, ARCHIVED
 
-  createdById      String
-  createdBy        User     @relation("createdBy", fields: [createdById], references: [id])
-  updatedById      String
-  updatedBy        User     @relation("updatedBy", fields: [updatedById], references: [id])
+  assessmentDate       DateTime
+  completionPercentage Int      @default(0)
 
-  createdAt        DateTime @default(now())
-  updatedAt        DateTime @updatedAt
-  deletedAt        DateTime?
+  currentMaturity Float? // Overall current maturity score
+  targetMaturity  Float? // Overall target maturity score
+  maturityGap     Float? // Gap = Target - Current
+
+  createdById String
+  createdBy   User   @relation("createdBy", fields: [createdById], references: [id])
+  updatedById String
+  updatedBy   User   @relation("updatedBy", fields: [updatedById], references: [id])
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
 
   // Relations
-  items            AssessmentItem[]
-  evidence         Evidence[]
-  history          AssessmentHistory[]
+  items    AssessmentItem[]
+  evidence Evidence[]
+  history  AssessmentHistory[]
 
   @@unique([organisationId, name, deletedAt])
-  @@map("assessments")
   @@index([organisationId])
   @@index([status])
   @@index([tenantId])
+  @@map("assessments")
 }
 
 model AssessmentItem {
-  id               String   @id @default(uuid())
-  assessmentId     String
-  assessment       Assessment @relation(fields: [assessmentId], references: [id], onDelete: Cascade)
+  id           String     @id @default(uuid())
+  assessmentId String
+  assessment   Assessment @relation(fields: [assessmentId], references: [id], onDelete: Cascade)
 
-  questionId       String
-  question         AssessmentQuestion @relation(fields: [questionId], references: [id])
+  questionId String
+  question   AssessmentQuestion @relation(fields: [questionId], references: [id])
 
   // Scoring data
-  currentMaturity  MaturityLevel @default(NOT_APPLICABLE)
-  targetMaturity   MaturityLevel @default(DEFINED)
-  weight           Float    @default(1.0)
-  
+  currentMaturity MaturityLevel @default(NOT_APPLICABLE)
+  targetMaturity  MaturityLevel @default(DEFINED)
+  weight          Float         @default(1.0)
+
   // Risk & business data
-  riskLevel        RiskLevel @default(MEDIUM)
-  businessCriticality Int @default(3) // 1-5 scale
-  controlStatus    ControlStatus @default(NOT_STARTED)
+  riskLevel           RiskLevel     @default(MEDIUM)
+  businessCriticality Int           @default(3) // 1-5 scale
+  controlStatus       ControlStatus @default(NOT_STARTED)
 
   // Assessment data
   rationale        String?
   evidence         String?
   assessorComments String?
-  
+
   // Ownership
-  ownerName        String?
-  ownerEmail       String?
+  ownerName          String?
+  ownerEmail         String?
   remediationDueDate DateTime?
 
-  createdAt        DateTime @default(now())
-  updatedAt        DateTime @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   // Relations
-  risks            Risk[]
-  recommendations  Recommendation[]
+  risks           Risk[]
+  recommendations Recommendation[]
 
   @@unique([assessmentId, questionId])
-  @@map("assessment_items")
   @@index([assessmentId])
   @@index([questionId])
+  @@map("assessment_items")
 }
 
 model AssessmentHistory {
-  id               String   @id @default(uuid())
-  assessmentId     String
-  assessment       Assessment @relation(fields: [assessmentId], references: [id], onDelete: Cascade)
+  id           String     @id @default(uuid())
+  assessmentId String
+  assessment   Assessment @relation(fields: [assessmentId], references: [id], onDelete: Cascade)
 
-  version          Int      // Version number
-  status           String   // Status at this point
-  currentMaturity  Float?   // Maturity at this point
-  targetMaturity   Float?
-  
-  createdAt        DateTime @default(now())
+  version         Int // Version number
+  status          String // Status at this point
+  currentMaturity Float? // Maturity at this point
+  targetMaturity  Float?
+
+  createdAt DateTime @default(now())
 
   @@unique([assessmentId, version])
-  @@map("assessment_histories")
   @@index([assessmentId])
+  @@map("assessment_histories")
 }
 
 // ============================================================================
@@ -449,25 +450,25 @@ model AssessmentHistory {
 // ============================================================================
 
 model Evidence {
-  id               String   @id @default(uuid())
-  tenantId         String
-  assessmentId     String
-  assessment       Assessment @relation(fields: [assessmentId], references: [id], onDelete: Cascade)
+  id           String     @id @default(uuid())
+  tenantId     String
+  assessmentId String
+  assessment   Assessment @relation(fields: [assessmentId], references: [id], onDelete: Cascade)
 
-  fileName         String
-  mimeType         String
-  fileSize         Int
-  storagePath      String?  // S3, GCS, Azure Blob path
-  
-  description      String?
-  uploadedAt       DateTime @default(now())
-  deletedAt        DateTime?
+  fileName    String
+  mimeType    String
+  fileSize    Int
+  storagePath String? // S3, GCS, Azure Blob path
+
+  description String?
+  uploadedAt  DateTime  @default(now())
+  deletedAt   DateTime?
 
   // Relations
 
-  @@map("evidence")
   @@index([assessmentId])
   @@index([tenantId])
+  @@map("evidence")
 }
 
 // ============================================================================
@@ -475,46 +476,46 @@ model Evidence {
 // ============================================================================
 
 model Risk {
-  id               String   @id @default(uuid())
-  tenantId         String
-  organisationId   String
-  organisation     Organisation @relation(fields: [organisationId], references: [id])
+  id             String       @id @default(uuid())
+  tenantId       String
+  organisationId String
+  organisation   Organisation @relation(fields: [organisationId], references: [id])
 
-  title            String
-  description      String?
-  threat           String?
-  vulnerability    String?
+  title         String
+  description   String?
+  threat        String?
+  vulnerability String?
 
   // Assessment linkage
   assessmentItemId String?
   assessmentItem   AssessmentItem? @relation(fields: [assessmentItemId], references: [id])
 
   // Risk metrics
-  likelihood       Int      @default(3) // 1-5
-  impact           Int      @default(3) // 1-5
-  inherentRiskScore Int?    // Calculated: likelihood × impact
-  residualRiskScore Int?    // After controls
-  riskLevel        RiskLevel @default(MEDIUM)
+  likelihood        Int       @default(3) // 1-5
+  impact            Int       @default(3) // 1-5
+  inherentRiskScore Int? // Calculated: likelihood × impact
+  residualRiskScore Int? // After controls
+  riskLevel         RiskLevel @default(MEDIUM)
 
   // Management
-  owner            String?
-  treatment        String   @default("MONITOR") // MITIGATE, ACCEPT, AVOID, TRANSFER
-  targetDate       DateTime?
-  status           String   @default("OPEN") // OPEN, IN_PROGRESS, CLOSED
-  
-  createdAt        DateTime @default(now())
-  updatedAt        DateTime @updatedAt
-  deletedAt        DateTime?
+  owner      String?
+  treatment  String    @default("MONITOR") // MITIGATE, ACCEPT, AVOID, TRANSFER
+  targetDate DateTime?
+  status     String    @default("OPEN") // OPEN, IN_PROGRESS, CLOSED
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
 
   // Relations
-  recommendations  Recommendation[]
-  initiatives      RemediationInitiative[]
+  recommendations Recommendation[]
+  initiatives     RemediationInitiative[]
 
-  @@map("risks")
   @@index([organisationId])
   @@index([riskLevel])
   @@index([status])
   @@index([tenantId])
+  @@map("risks")
 }
 
 // ============================================================================
@@ -522,73 +523,73 @@ model Risk {
 // ============================================================================
 
 model Recommendation {
-  id               String   @id @default(uuid())
-  tenantId         String
+  id       String @id @default(uuid())
+  tenantId String
 
-  title            String
-  description      String?
-  priority         Int      @default(3) // 1-5
+  title       String
+  description String?
+  priority    Int     @default(3) // 1-5
 
   // Linkage
   assessmentItemId String?
   assessmentItem   AssessmentItem? @relation(fields: [assessmentItemId], references: [id])
   riskId           String?
-  risk             Risk?    @relation(fields: [riskId], references: [id])
+  risk             Risk?           @relation(fields: [riskId], references: [id])
 
   // Remediation
-  initiativeId     String?
-  initiative       RemediationInitiative? @relation(fields: [initiativeId], references: [id])
+  initiativeId String?
+  initiative   RemediationInitiative? @relation(fields: [initiativeId], references: [id])
 
-  status           String   @default("OPEN")
-  
-  createdAt        DateTime @default(now())
-  updatedAt        DateTime @updatedAt
+  status String @default("OPEN")
 
-  @@map("recommendations")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
   @@index([assessmentItemId])
   @@index([riskId])
+  @@map("recommendations")
 }
 
 model RemediationInitiative {
-  id               String   @id @default(uuid())
-  tenantId         String
-  organisationId   String
-  organisation     Organisation @relation(fields: [organisationId], references: [id])
+  id             String       @id @default(uuid())
+  tenantId       String
+  organisationId String
+  organisation   Organisation @relation(fields: [organisationId], references: [id])
 
-  title            String
-  description      String?
+  title       String
+  description String?
 
   // Classification
   securityCapability String? // e.g., "Identity & Access Management"
-  priority         Int      @default(3) // 1-5 scale
-  complexity       Int      @default(3) // 1-5 scale
-  
+  priority           Int     @default(3) // 1-5 scale
+  complexity         Int     @default(3) // 1-5 scale
+
   // Metrics
-  currentMaturity  MaturityLevel @default(INITIAL)
-  targetMaturity   MaturityLevel @default(DEFINED)
-  estimatedCost    Float?
-  
+  currentMaturity MaturityLevel @default(INITIAL)
+  targetMaturity  MaturityLevel @default(DEFINED)
+  estimatedCost   Float?
+
   // Timeline
-  startDate        DateTime?
+  startDate            DateTime?
   targetCompletionDate DateTime?
   actualCompletionDate DateTime?
-  status           String   @default("PLANNED") // PLANNED, IN_PROGRESS, COMPLETED, BLOCKED, ON_HOLD
+  status               String    @default("PLANNED") // PLANNED, IN_PROGRESS, COMPLETED, BLOCKED, ON_HOLD
 
   // Ownership
-  owner            String?
-  
-  createdAt        DateTime @default(now())
-  updatedAt        DateTime @updatedAt
-  deletedAt        DateTime?
+  owner String?
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
 
   // Relations
-  recommendations  Recommendation[]
-  risks            Risk[]
+  recommendations Recommendation[]
+  risks           Risk[]
 
-  @@map("remediation_initiatives")
   @@index([organisationId])
   @@index([status])
   @@index([priority])
+  @@map("remediation_initiatives")
 }
 
 // ============================================================================
@@ -596,62 +597,62 @@ model RemediationInitiative {
 // ============================================================================
 
 model SecurityCapability {
-  id               String   @id @default(uuid())
-  tenantId         String
-  organisationId   String
-  organisation     Organisation @relation(fields: [organisationId], references: [id])
+  id             String       @id @default(uuid())
+  tenantId       String
+  organisationId String
+  organisation   Organisation @relation(fields: [organisationId], references: [id])
 
-  name             String
-  description      String?
-  category         String?  // e.g., "Governance", "Protect", "Detect"
+  name        String
+  description String?
+  category    String? // e.g., "Governance", "Protect", "Detect"
 
-  currentMaturity  MaturityLevel @default(INITIAL)
-  targetMaturity   MaturityLevel @default(DEFINED)
+  currentMaturity MaturityLevel @default(INITIAL)
+  targetMaturity  MaturityLevel @default(DEFINED)
 
-  owner            String?
-  risks            String?  // JSON array of related risks
-  
-  createdAt        DateTime @default(now())
-  updatedAt        DateTime @updatedAt
+  owner String?
+  risks String? // JSON array of related risks
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   // Relations
-  technologies     CapabilityTechnology[]
+  technologies CapabilityTechnology[]
 
   @@unique([organisationId, name])
-  @@map("security_capabilities")
   @@index([organisationId])
+  @@map("security_capabilities")
 }
 
 model Technology {
-  id               String   @id @default(uuid())
-  
-  name             String   @unique
-  description      String?
-  category         String?
-  vendor           String?
+  id String @id @default(uuid())
+
+  name        String  @unique
+  description String?
+  category    String?
+  vendor      String?
 
   // Relations
-  capabilities     CapabilityTechnology[]
+  capabilities CapabilityTechnology[]
 
   @@map("technologies")
 }
 
 model CapabilityTechnology {
-  id               String   @id @default(uuid())
-  capabilityId     String
-  capability       SecurityCapability @relation(fields: [capabilityId], references: [id], onDelete: Cascade)
-  
-  technologyId     String
-  technology       Technology @relation(fields: [technologyId], references: [id], onDelete: Cascade)
+  id           String             @id @default(uuid())
+  capabilityId String
+  capability   SecurityCapability @relation(fields: [capabilityId], references: [id], onDelete: Cascade)
 
-  utilization      Int      @default(0) // 0-100%
-  status           String   @default("ACTIVE") // ACTIVE, PLANNED, DEPRECATED
-  notes            String?
+  technologyId String
+  technology   Technology @relation(fields: [technologyId], references: [id], onDelete: Cascade)
+
+  utilization Int     @default(0) // 0-100%
+  status      String  @default("ACTIVE") // ACTIVE, PLANNED, DEPRECATED
+  notes       String?
 
   @@unique([capabilityId, technologyId])
-  @@map("capability_technologies")
   @@index([capabilityId])
   @@index([technologyId])
+  @@map("capability_technologies")
 }
 
 // ============================================================================
@@ -659,29 +660,29 @@ model CapabilityTechnology {
 // ============================================================================
 
 model Benchmark {
-  id               String   @id @default(uuid())
-  tenantId         String
-  tenant           Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  
-  organisationId   String?
-  organisation     Organisation? @relation(fields: [organisationId], references: [id])
+  id       String @id @default(uuid())
+  tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
-  frameworkId      String?
-  framework        Framework? @relation(fields: [frameworkId], references: [id])
+  organisationId String?
+  organisation   Organisation? @relation(fields: [organisationId], references: [id])
 
-  name             String
-  description      String?
-  dataType         String   // "INDUSTRY_AVERAGE", "ANONYMIZED", "CUSTOM"
-  
+  frameworkId String?
+  framework   Framework? @relation(fields: [frameworkId], references: [id])
+
+  name        String
+  description String?
+  dataType    String // "INDUSTRY_AVERAGE", "ANONYMIZED", "CUSTOM"
+
   // Benchmark data
-  maturityData     String?  // JSON with function scores
+  maturityData String? // JSON with function scores
 
-  createdAt        DateTime @default(now())
-  updatedAt        DateTime @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
-  @@map("benchmarks")
   @@index([tenantId])
   @@index([organisationId])
+  @@map("benchmarks")
 }
 
 // ============================================================================
@@ -689,33 +690,33 @@ model Benchmark {
 // ============================================================================
 
 model AuditEvent {
-  id               String   @id @default(uuid())
-  tenantId         String
-  tenant           Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  id       String @id @default(uuid())
+  tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
-  userId           String
-  user             User     @relation(fields: [userId], references: [id], onDelete: Restrict)
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Restrict)
 
-  action           AuditAction
-  resource         String   // "Assessment", "Risk", "User", etc.
-  resourceId       String?  // ID of affected resource
-  
-  description      String?
-  previousValue    String?  // JSON of previous state
-  newValue         String?  // JSON of new state
-  
-  ipAddress        String?
-  userAgent        String?
-  correlationId    String?  // For tracing request chains
+  action     AuditAction
+  resource   String // "Assessment", "Risk", "User", etc.
+  resourceId String? // ID of affected resource
 
-  createdAt        DateTime @default(now())
+  description   String?
+  previousValue String? // JSON of previous state
+  newValue      String? // JSON of new state
 
-  @@map("audit_events")
+  ipAddress     String?
+  userAgent     String?
+  correlationId String? // For tracing request chains
+
+  createdAt DateTime @default(now())
+
   @@index([tenantId])
   @@index([userId])
   @@index([action])
   @@index([createdAt])
   @@index([correlationId])
+  @@map("audit_events")
 }
 
 // ============================================================================
@@ -723,23 +724,23 @@ model AuditEvent {
 // ============================================================================
 
 model DashboardConfiguration {
-  id               String   @id @default(uuid())
-  organisationId   String
-  
-  name             String
-  description      String?
-  isDefault        Boolean  @default(false)
-  
-  layout           String   // JSON with layout configuration
-  widgets          String   // JSON with widget configuration
-  filters          String?  // JSON with default filters
-  
-  createdAt        DateTime @default(now())
-  updatedAt        DateTime @updatedAt
+  id             String @id @default(uuid())
+  organisationId String
+
+  name        String
+  description String?
+  isDefault   Boolean @default(false)
+
+  layout  String // JSON with layout configuration
+  widgets String // JSON with widget configuration
+  filters String? // JSON with default filters
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   @@unique([organisationId, name])
-  @@map("dashboard_configurations")
   @@index([organisationId])
+  @@map("dashboard_configurations")
 }
 
 // ============================================================================
@@ -747,44 +748,44 @@ model DashboardConfiguration {
 // ============================================================================
 
 model ImportJob {
-  id               String   @id @default(uuid())
-  organisationId   String
-  
-  fileName         String
-  fileSize         Int
-  recordCount      Int
-  
-  status           String   @default("PENDING") // PENDING, PROCESSING, COMPLETED, FAILED
-  successCount     Int      @default(0)
-  errorCount       Int      @default(0)
-  warningCount     Int      @default(0)
-  
-  errorReport      String?  // JSON with error details
-  
-  createdAt        DateTime @default(now())
-  completedAt      DateTime?
+  id             String @id @default(uuid())
+  organisationId String
+
+  fileName    String
+  fileSize    Int
+  recordCount Int
+
+  status       String @default("PENDING") // PENDING, PROCESSING, COMPLETED, FAILED
+  successCount Int    @default(0)
+  errorCount   Int    @default(0)
+  warningCount Int    @default(0)
+
+  errorReport String? // JSON with error details
+
+  createdAt   DateTime  @default(now())
+  completedAt DateTime?
 
   // Relations
-  records          ImportRecord[]
+  records ImportRecord[]
 
-  @@map("import_jobs")
   @@index([organisationId])
   @@index([status])
+  @@map("import_jobs")
 }
 
 model ImportRecord {
-  id               String   @id @default(uuid())
-  jobId            String
-  job              ImportJob @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  id    String    @id @default(uuid())
+  jobId String
+  job   ImportJob @relation(fields: [jobId], references: [id], onDelete: Cascade)
 
-  rowNumber        Int
-  status           String   // "VALID", "WARNING", "ERROR"
-  message          String?
-  
-  rawData          String   // JSON of original row
-  parsedData       String?  // JSON of parsed & mapped data
+  rowNumber Int
+  status    String // "VALID", "WARNING", "ERROR"
+  message   String?
 
-  @@map("import_records")
+  rawData    String // JSON of original row
+  parsedData String? // JSON of parsed & mapped data
+
   @@index([jobId])
   @@index([status])
+  @@map("import_records")
 }

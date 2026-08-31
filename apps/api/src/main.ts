@@ -1,12 +1,13 @@
 import { NestFactory } from '@nestjs/core';
 import { ValidationPipe } from '@nestjs/common';
+import type { Request, Response, NextFunction } from 'express';
 import { AppModule } from './app.module';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
 
   // Global prefix
-  app.setGlobal Prefix('api/v1');
+  app.setGlobalPrefix('api/v1');
 
   // Validation pipe
   app.useGlobalPipes(
@@ -29,7 +30,7 @@ async function bootstrap() {
   });
 
   // Security headers
-  app.use((req, res, next) => {
+  app.use((req: Request, res: Response, next: NextFunction) => {
     res.setHeader('X-Content-Type-Options', 'nosniff');
     res.setHeader('X-Frame-Options', 'DENY');
     res.setHeader('X-XSS-Protection', '1; mode=block');

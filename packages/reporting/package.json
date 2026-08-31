@@ -11,7 +11,7 @@
     "clean": "rm -rf dist"
   },
   "dependencies": {
-    "@cmmp/shared": "workspace:*",
+    "@cmmp/shared": "*",
     "pdfkit": "^0.13.0",
     "xlsx": "^0.18.5"
   },

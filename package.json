@@ -19,9 +19,9 @@
     "type-check": "turbo run type-check",
     "clean": "turbo run clean && rm -rf node_modules",
     "format": "prettier --write \"**/*.{ts,tsx,js,jsx,json,md}\"",
-    "db:migrate": "cd apps/api && npx prisma migrate deploy",
-    "db:seed": "cd apps/api && npx prisma db seed",
-    "db:studio": "cd apps/api && npx prisma studio",
+    "db:migrate": "cd packages/database && npx prisma migrate deploy",
+    "db:seed": "cd packages/database && npx prisma db seed",
+    "db:studio": "cd packages/database && npx prisma studio",
     "security:audit": "npm audit --audit-level=moderate",
     "docker:build": "docker-compose build",
     "docker:up": "docker-compose up -d",
@@ -36,5 +36,15 @@
   "engines": {
     "node": ">=18.0.0",
     "npm": ">=9.0.0"
+  },
+  "allowScripts": {
+    "@nestjs/core@10.4.22": true,
+    "core-js-pure@3.50.0": true,
+    "unrs-resolver@1.12.2": true,
+    "fsevents@2.3.3": true,
+    "fsevents@2.3.2": true,
+    "@prisma/client": true,
+    "@prisma/engines": true,
+    "prisma": true
   }
 }
