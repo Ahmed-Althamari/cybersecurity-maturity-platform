@@ -1,30 +1,42 @@
 import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import {
-  FRAMEWORK_TREE_INCLUDE,
   FrameworkNotFoundError,
   FrameworkValidationError,
   assertValidFrameworkDefinition,
   buildFrameworkComponentDescriptor,
-  hydrateFrameworkTree,
   loadFrameworkTree,
+  persistFrameworkDefinition,
 } from '@cmmp/framework-engine';
-import type { FrameworkQueryClient, RawFrameworkRecord } from '@cmmp/framework-engine';
+import type {
+  FrameworkQueryClient,
+  FrameworkWriteClient,
+  RawFrameworkRecord,
+} from '@cmmp/framework-engine';
 import { PrismaService } from '../prisma/prisma.service';
 
 @Injectable()
 export class FrameworkService {
   constructor(private prisma: PrismaService) {}
 
-  // Adapts the generated Prisma client to the loader's minimal structural
-  // interface. Kept as an explicit object literal (rather than passing
-  // `this.prisma` directly) so the cast lives in one obvious place instead
-  // of relying on Prisma's generic delegate types happening to satisfy the
-  // package-agnostic interface.
+  // Adapts the generated Prisma client to the framework-engine package's
+  // minimal structural interfaces. Kept as explicit object literals (rather
+  // than passing `this.prisma` directly) so the cast lives in one obvious
+  // place instead of relying on Prisma's generic delegate types happening
+  // to satisfy the package-agnostic interfaces.
   private get queryClient(): FrameworkQueryClient {
     return {
       framework: {
         findFirst: (args) =>
           this.prisma.framework.findFirst(args as never) as unknown as Promise<RawFrameworkRecord | null>,
+      },
+    };
+  }
+
+  private get writeClient(): FrameworkWriteClient {
+    return {
+      framework: {
+        create: (args) =>
+          this.prisma.framework.create(args as never) as unknown as Promise<RawFrameworkRecord>,
       },
     };
   }
@@ -94,53 +106,7 @@ export class FrameworkService {
     }
 
     try {
-      const record = await this.prisma.framework.create({
-        data: {
-          tenantId,
-          name: definition.name,
-          slug: definition.slug,
-          version: definition.version,
-          frameWorkType: definition.frameworkType,
-          description: definition.description,
-          functions: {
-            create: definition.functions.map((fn, fnIndex) => ({
-              code: fn.code,
-              name: fn.name,
-              description: fn.description,
-              displayOrder: fn.displayOrder ?? fnIndex,
-              categories: {
-                create: fn.categories.map((category, categoryIndex) => ({
-                  code: category.code,
-                  name: category.name,
-                  description: category.description,
-                  displayOrder: category.displayOrder ?? categoryIndex,
-                  subcategories: {
-                    create: category.subcategories.map((subcategory, subcategoryIndex) => ({
-                      code: subcategory.code,
-                      name: subcategory.name,
-                      description: subcategory.description,
-                      displayOrder: subcategory.displayOrder ?? subcategoryIndex,
-                      assessmentQuestions: {
-                        create: (subcategory.questions ?? []).map((question) => ({
-                          question: question.question,
-                          guidance: question.guidance,
-                          examples: question.examples ? JSON.stringify(question.examples) : null,
-                          referenceLinks: question.referenceLinks
-                            ? JSON.stringify(question.referenceLinks)
-                            : null,
-                        })),
-                      },
-                    })),
-                  },
-                })),
-              },
-            })),
-          },
-        },
-        include: FRAMEWORK_TREE_INCLUDE,
-      });
-
-      return hydrateFrameworkTree(record as any);
+      return await persistFrameworkDefinition(this.writeClient, tenantId, definition);
     } catch (error) {
       if (isUniqueConstraintError(error)) {
         throw new ConflictException(

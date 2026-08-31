@@ -4,8 +4,8 @@ Last Updated: 2026-08-31
 
 ## Overall Progress
 
-**Phase**: 4 / 17
-**Completion**: ~24%
+**Phase**: 5 / 17
+**Completion**: ~29%
 
 ## Completed ✅
 
@@ -103,6 +103,49 @@ Last Updated: 2026-08-31
       blocked on the same no-Docker/Postgres sandbox limitation noted under
       Phase 2/3
 
+### Phase 5: NIST CSF Framework Data
+- [x] NIST CSF 2.0 complete hierarchy — all 6 Functions, 22 Categories, and
+      106 Subcategory outcomes, authored as a framework-agnostic
+      `FrameworkDefinition` (`packages/framework-engine/src/definitions/nist-csf-2.0.json`
+      + typed wrapper `nist-csf-2-0.ts`)
+- [x] Functions (GOVERN, IDENTIFY, PROTECT, DETECT, RESPOND, RECOVER)
+- [x] Categories — all 22 official CSF 2.0 category codes (GV.OC, GV.RM,
+      GV.RR, GV.PO, GV.OV, GV.SC, ID.AM, ID.RA, ID.IM, PR.AA, PR.AT, PR.DS,
+      PR.PS, PR.IR, DE.CM, DE.AE, RS.MA, RS.AN, RS.CO, RS.MI, RC.RP, RC.CO)
+- [x] Subcategories & Outcomes — every official outcome statement, with the
+      correct (non-contiguous) numbering CSF 2.0 actually uses per category
+      (e.g. `ID.AM` skips `-06`, `DE.CM` is `01,02,03,06,09`, `RS.CO` is
+      `02,03` — matching NIST's published core, not a re-numbered sequence)
+- [x] Assessment questions — one auto-generated question per subcategory
+      (NIST CSF has no separate "question" concept), carrying the
+      subcategory's official Implementation Examples as assessor guidance
+- [x] Framework seed data — `prisma/seed.ts` now loads the full NIST CSF 2.0
+      hierarchy through `persistFrameworkDefinition()` (the same shared
+      helper `POST /frameworks` uses), replacing the previous 3-category
+      hand-rolled sample
+- [x] Shared `persistFrameworkDefinition()` extracted into
+      `@cmmp/framework-engine` so the seed script and the API's
+      `FrameworkService.create` use one implementation instead of two
+      parallel ones
+- [x] Tests: 8 new tests (24 total in `packages/framework-engine`) — official
+      totals (6/22/106), NIST function-code order, subcategory-code
+      namespacing, one question per subcategory, and a full-scale
+      `persistFrameworkDefinition` run over all 106 subcategories
+
+  **Data provenance & a caveat worth reading before relying on this for real
+  compliance work**: the CSF 2.0 Core and Implementation Examples are public
+  domain, sourced from NIST's own Cybersecurity and Privacy Reference Tool
+  (CPRT). This sandbox could not reach `nist.gov`/`csrc.nist.gov` directly
+  (network egress policy blocks those hosts), so the data was pulled from a
+  third-party structured mirror of the CPRT export
+  (`github.com/MarianoFacundoArch/nist-csf-evidence-gap-analysis-tool`,
+  `data/csf-core.json`) rather than fetched from NIST directly. The
+  resulting counts match NIST's published totals exactly (6/22/106, verified
+  by test), which is a strong integrity signal, but nobody in this session
+  diffed it byte-for-byte against NIST CSWP 29. Spot-check outcome wording
+  against the official publication before treating this as an authoritative
+  compliance mapping.
+
 ## Known Issues 🐛
 
 - Root `.eslintrc.json` references `eslint-plugin-security`,
@@ -119,14 +162,6 @@ Last Updated: 2026-08-31
   binary; `packages/database`'s own `build` script only runs `tsc`.
 
 ## Not Started ⭕
-
-### Phase 5: NIST CSF Framework Data
-- [ ] NIST CSF 2.0 complete hierarchy
-- [ ] Functions (GOVERN, IDENTIFY, PROTECT, DETECT, RESPOND, RECOVER)
-- [ ] Categories (GV.RM, GV.SC, ID.BE, etc.)
-- [ ] Subcategories & Outcomes
-- [ ] Assessment questions
-- [ ] Framework seed data
 
 ### Phase 6: Assessment Engine
 - [ ] Assessment model
@@ -330,15 +365,17 @@ None recorded yet
 1. **Generate the first Prisma migration** once a Postgres instance is
    reachable (`docker compose up postgres`, then
    `npm run db:generate && cd packages/database && npx prisma migrate dev`)
-2. **Begin Phase 5**: NIST CSF Framework Data — author the full NIST CSF 2.0
-   hierarchy (functions, categories, subcategories, assessment questions) as
-   a `FrameworkDefinition` (see `packages/framework-engine/src/types.ts`) and
-   load it through `POST /frameworks`, replacing the current seed script's
-   sample subset with the complete framework
+2. **Begin Phase 6**: Assessment Engine — Assessment/AssessmentItem creation
+   against a loaded `FrameworkTree` (now that NIST CSF 2.0's full 106
+   subcategories/questions exist to assess against), draft/submitted state
+   transitions, and assessment history tracking
 3. Wire the Next.js frontend to the new `/api/v1/auth/login`,
    `/api/v1/users`, and `/api/v1/frameworks*` endpoints (login page,
    session/token storage, framework selection UI)
-4. Fix the repo-wide ESLint plugin gap (see Known Issues)
+4. Spot-check the seeded NIST CSF 2.0 outcome text against the official
+   NIST CSWP 29 publication (see the Phase 5 data-provenance note above) —
+   this sandbox couldn't reach nist.gov directly to verify byte-for-byte
+5. Fix the repo-wide ESLint plugin gap (see Known Issues)
 
 ## Contact & Questions
 

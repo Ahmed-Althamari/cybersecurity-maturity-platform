@@ -3,6 +3,8 @@
 
 import { PrismaClient, MaturityLevel, RiskLevel, ControlStatus } from "@prisma/client";
 import * as bcrypt from "bcryptjs";
+import { NIST_CSF_2_0, persistFrameworkDefinition } from "@cmmp/framework-engine";
+import type { FrameworkWriteClient, RawFrameworkRecord } from "@cmmp/framework-engine";
 
 const prisma = new PrismaClient();
 
@@ -213,160 +215,36 @@ async function main() {
   // ============================================================================
   // FRAMEWORK - NIST CSF 2.0
   // ============================================================================
-  console.log("Creating NIST CSF 2.0 framework...");
-  const nistFramework = await prisma.framework.create({
-    data: {
-      tenantId: tenant.id,
-      name: "NIST Cybersecurity Framework 2.0",
-      slug: "nist-csf-2.0",
-      description: "NIST Cybersecurity Framework version 2.0",
-      version: "2.0",
-      frameWorkType: "NIST_CSF",
-      isActive: true,
+  // Loads the complete NIST CSF 2.0 core (6 Functions, 22 Categories, 106
+  // Subcategory outcomes) through the same framework-agnostic engine
+  // (@cmmp/framework-engine, ADR-006) and persistence path
+  // (persistFrameworkDefinition) the API's POST /frameworks uses — the seed
+  // script exercises the real import pipeline rather than hand-rolling a
+  // parallel one. See NIST_CSF_2_0's own doc comment for data provenance.
+  console.log("Creating NIST CSF 2.0 framework (6 functions, 22 categories, 106 subcategories)...");
+  // Adapts the generated Prisma client to @cmmp/framework-engine's minimal
+  // structural FrameworkWriteClient interface (same approach as
+  // apps/api/src/framework/framework.service.ts) rather than relying on
+  // Prisma's generic delegate type happening to satisfy it.
+  const frameworkWriteClient: FrameworkWriteClient = {
+    framework: {
+      create: (args) => prisma.framework.create(args as never) as unknown as Promise<RawFrameworkRecord>,
     },
-  });
-
-  // Create NIST Functions
-  console.log("Creating NIST Functions...");
-  const functions = [
-    { code: "GV", name: "Govern", description: "Establish the vision and strategy" },
-    { code: "ID", name: "Identify", description: "Develop understanding of cybersecurity risk" },
-    { code: "PR", name: "Protect", description: "Develop and implement safeguards" },
-    { code: "DE", name: "Detect", description: "Develop and implement detection procedures" },
-    { code: "RS", name: "Respond", description: "Develop response procedures" },
-    { code: "RC", name: "Recover", description: "Develop recovery procedures" },
-  ];
-
-  const createdFunctions = await Promise.all(
-    functions.map((fn, idx) =>
-      prisma.function.create({
-        data: {
-          frameworkId: nistFramework.id,
-          code: fn.code,
-          name: fn.name,
-          description: fn.description,
-          displayOrder: idx,
-        },
-      })
-    )
+  };
+  const nistFrameworkTree = await persistFrameworkDefinition(
+    frameworkWriteClient,
+    tenant.id,
+    NIST_CSF_2_0,
   );
 
-  // Create sample categories for Govern function
-  console.log("Creating sample NIST categories...");
-  const governFunction = createdFunctions.find((f) => f.code === "GV");
-  const categories = [
-    {
-      code: "GV.RM",
-      name: "Risk Management Strategy",
-      description: "Risk management strategy development and execution",
-    },
-    {
-      code: "GV.SC",
-      name: "Supply Chain Risk Management",
-      description: "Manage supply chain risk",
-    },
-    {
-      code: "GV.RO",
-      name: "Roles, Responsibilities, and Authorities",
-      description: "Define roles, responsibilities, and authorities",
-    },
-  ];
-
-  const createdCategories = await Promise.all(
-    categories.map((cat, idx) =>
-      prisma.category.create({
-        data: {
-          functionId: governFunction!.id,
-          code: cat.code,
-          name: cat.name,
-          description: cat.description,
-          displayOrder: idx,
-        },
-      })
-    )
-  );
-
-  // Create sample subcategories
-  console.log("Creating sample NIST subcategories...");
-  const rmCategory = createdCategories.find((c) => c.code === "GV.RM");
-  const subcategories = [
-    {
-      code: "GV.RM-01",
-      name: "Risk Management Process Governance",
-      description: "Establish and execute risk management processes",
-    },
-    {
-      code: "GV.RM-02",
-      name: "Risk Identification",
-      description: "Identify cybersecurity risks",
-    },
-    {
-      code: "GV.RM-03",
-      name: "Risk Analysis",
-      description: "Analyze cybersecurity risks",
-    },
-  ];
-
-  const createdSubcategories = await Promise.all(
-    subcategories.map((subcat, idx) =>
-      prisma.subcategory.create({
-        data: {
-          categoryId: rmCategory!.id,
-          code: subcat.code,
-          name: subcat.name,
-          description: subcat.description,
-          displayOrder: idx,
-        },
-      })
-    )
-  );
-
-  // Create assessment questions
-  console.log("Creating assessment questions...");
-  const questions = [
-    {
-      question: "Has the organization established cybersecurity risk management objectives?",
-      guidance: "Document how risk management aligns with organizational objectives",
-    },
-    {
-      question:
-        "Does the organization have documented processes to identify cybersecurity risks?",
-      guidance:
-        "Include risk identification methodologies and frequency of identification activities",
-    },
-    {
-      question:
-        "Are identified cybersecurity risks formally analyzed and prioritized?",
-      guidance: "Document risk analysis frameworks and prioritization criteria",
-    },
-  ];
-
-  const createdQuestions = await Promise.all(
-    questions.map((q, idx) =>
-      prisma.assessmentQuestion.create({
-        data: {
-          subcategoryId: createdSubcategories[idx].id,
-          question: q.question,
-          guidance: q.guidance,
-        },
-      })
-    )
-  );
-
-  // Create sample categories for other functions
-  console.log("Creating additional NIST categories...");
-  for (const func of createdFunctions) {
-    if (func.code !== "GV") {
-      await prisma.category.create({
-        data: {
-          functionId: func.id,
-          code: `${func.code}.XX`,
-          name: `${func.name} - Sample Category`,
-          description: `Sample category for ${func.name}`,
-        },
-      });
-    }
-  }
+  const governFunction = nistFrameworkTree.functions.find((fn) => fn.code === "GV");
+  const rmCategory = governFunction?.categories.find((cat) => cat.code === "GV.RM");
+  // The demo assessment below narrates a risk-management story, so it draws
+  // its 3 sample assessment items from GV.RM's first 3 subcategories
+  // (risk objectives, risk appetite, enterprise risk integration).
+  const createdQuestions = (rmCategory?.subcategories ?? [])
+    .slice(0, 3)
+    .map((subcategory) => subcategory.questions[0]);
 
   // ============================================================================
   // ASSESSMENT
