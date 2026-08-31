@@ -1,8 +1,10 @@
 import { Controller, Post, Body, Get, UseGuards, Req } from '@nestjs/common';
+import type { Request } from 'express';
+
 import { AuthService } from './auth.service';
 import { LoginDto } from './dto/login.dto';
 import { JwtAuthGuard } from './guards/jwt-auth.guard';
-import type { Request } from 'express';
+import type { AuthenticatedRequest } from './types/authenticated-request';
 
 @Controller('auth')
 export class AuthController {
@@ -22,7 +24,7 @@ export class AuthController {
   @Post('refresh')
   @UseGuards(JwtAuthGuard)
   async refresh(@Req() req: Request) {
-    const token = (req as any).headers.authorization?.replace('Bearer ', '');
+    const token = req.headers.authorization?.replace('Bearer ', '');
     if (!token) {
       throw new Error('No token provided');
     }
@@ -31,8 +33,8 @@ export class AuthController {
 
   @Get('me')
   @UseGuards(JwtAuthGuard)
-  async getCurrentUser(@Req() req: Request) {
-    const user = (req as any).user;
+  async getCurrentUser(@Req() req: AuthenticatedRequest) {
+    const user = req.user;
     return {
       id: user.sub,
       email: user.email,

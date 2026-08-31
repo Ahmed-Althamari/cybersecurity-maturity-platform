@@ -1,7 +1,9 @@
 import { Injectable, UnauthorizedException } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import * as bcrypt from 'bcryptjs';
+
 import { PrismaService } from '../prisma/prisma.service';
+
 import { LoginDto } from './dto/login.dto';
 
 export interface JwtPayload {
@@ -85,7 +87,15 @@ export class AuthService {
 
   async refreshToken(token: string) {
     const payload = await this.validateToken(token);
-    const { iat, exp, ...rest } = payload as JwtPayload & { iat?: number; exp?: number };
+    const rest: JwtPayload = {
+      sub: payload.sub,
+      email: payload.email,
+      name: payload.name,
+      tenantId: payload.tenantId,
+      organisationId: payload.organisationId,
+      role: payload.role,
+      roles: payload.roles,
+    };
     const newToken = this.jwtService.sign(rest);
     return { access_token: newToken };
   }
