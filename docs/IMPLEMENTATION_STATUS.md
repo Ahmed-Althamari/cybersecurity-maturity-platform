@@ -4,8 +4,8 @@ Last Updated: 2026-08-31
 
 ## Overall Progress
 
-**Phase**: 3 / 17
-**Completion**: ~20%
+**Phase**: 4 / 17
+**Completion**: ~24%
 
 ## Completed ✅
 
@@ -66,6 +66,43 @@ Last Updated: 2026-08-31
       sandbox (no Docker/Postgres). Verified instead via: `tsc --noEmit`,
       `nest build`, and Jest unit tests with a mocked `PrismaService`.
 
+### Phase 4: Framework Engine
+- [x] Framework type definitions (`packages/framework-engine/src/types.ts`) —
+      Zod schemas + TS types for a framework-agnostic `FrameworkDefinition`
+      (authoring/import shape) and a hydrated `FrameworkTree` (post-persistence
+      shape with real IDs), per ADR-006
+- [x] Framework loader (`loader.ts`) — `loadFrameworkTree()` hydrates a full
+      Framework → Function → Category → Subcategory → Question hierarchy
+      ordered by `displayOrder`, from a minimal structural `FrameworkQueryClient`
+      interface rather than a hard dependency on `@prisma/client`, so the
+      package stays persistence-agnostic and unit-testable with plain mocks
+- [x] NIST CSF configuration structure — the generic `FrameworkDefinition`
+      shape (function → category → subcategory → question) is what Phase 5's
+      NIST CSF 2.0 seed data will be authored against; no NIST-specific code
+      lives in the engine itself
+- [x] Framework validation (`validator.ts`) — `validateFrameworkDefinition()` /
+      `assertValidFrameworkDefinition()` combine Zod shape validation with
+      structural checks (sibling code uniqueness at every level, case-insensitive)
+- [x] Dynamic component generation (`component-descriptor.ts`) —
+      `buildFrameworkComponentDescriptor()` reduces a `FrameworkTree` into a
+      compact, framework-agnostic descriptor (function list with an assigned
+      color and category/subcategory/question counts) the frontend can walk
+      to render nav/radar/heatmap components without hard-coding NIST CSF's
+      six functions
+- [x] `FrameworkModule` wired into the NestJS API (`apps/api/src/framework/`):
+      `GET /frameworks`, `GET /frameworks/:slug`, `GET /frameworks/:slug/components`,
+      `POST /frameworks/validate` (dry-run), `POST /frameworks` (tenant-scoped
+      create, `PLATFORM_ADMIN`/`ORGANISATION_ADMIN` only, nested Prisma create
+      from a validated definition)
+- [x] Unit tests: 16 tests in `packages/framework-engine` (validator, loader,
+      component descriptor) + 10 tests in `apps/api` (`framework.service.spec.ts`
+      — tenant isolation, not-found mapping, validation-without-persisting,
+      unique-constraint → `ConflictException`)
+- [x] Verified via `tsc --noEmit`, `nest build`, and Jest across both packages
+      (all green); end-to-end verification against a live database is still
+      blocked on the same no-Docker/Postgres sandbox limitation noted under
+      Phase 2/3
+
 ## Known Issues 🐛
 
 - Root `.eslintrc.json` references `eslint-plugin-security`,
@@ -82,13 +119,6 @@ Last Updated: 2026-08-31
   binary; `packages/database`'s own `build` script only runs `tsc`.
 
 ## Not Started ⭕
-
-### Phase 4: Framework Engine
-- [ ] Framework type definitions
-- [ ] Framework loader
-- [ ] NIST CSF configuration structure
-- [ ] Framework validation
-- [ ] Dynamic component generation
 
 ### Phase 5: NIST CSF Framework Data
 - [ ] NIST CSF 2.0 complete hierarchy
@@ -300,11 +330,14 @@ None recorded yet
 1. **Generate the first Prisma migration** once a Postgres instance is
    reachable (`docker compose up postgres`, then
    `npm run db:generate && cd packages/database && npx prisma migrate dev`)
-2. **Begin Phase 4**: Framework Engine — framework/function/category loader
-   that reads `Framework`/`Function`/`Category`/`Subcategory` from the DB
-   instead of hard-coding NIST CSF, per ADR-006
-3. Wire the Next.js frontend to the new `/api/v1/auth/login` and
-   `/api/v1/users` endpoints (login page, session/token storage)
+2. **Begin Phase 5**: NIST CSF Framework Data — author the full NIST CSF 2.0
+   hierarchy (functions, categories, subcategories, assessment questions) as
+   a `FrameworkDefinition` (see `packages/framework-engine/src/types.ts`) and
+   load it through `POST /frameworks`, replacing the current seed script's
+   sample subset with the complete framework
+3. Wire the Next.js frontend to the new `/api/v1/auth/login`,
+   `/api/v1/users`, and `/api/v1/frameworks*` endpoints (login page,
+   session/token storage, framework selection UI)
 4. Fix the repo-wide ESLint plugin gap (see Known Issues)
 
 ## Contact & Questions

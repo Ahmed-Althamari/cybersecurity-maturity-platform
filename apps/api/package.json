@@ -17,6 +17,7 @@
   },
   "dependencies": {
     "@cmmp/database": "*",
+    "@cmmp/framework-engine": "*",
     "@cmmp/shared": "*",
     "@nestjs/common": "^10.2.8",
     "@nestjs/config": "^3.1.1",
