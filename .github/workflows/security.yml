@@ -34,10 +34,25 @@ jobs:
           languages: ${{ matrix.language }}
           queries: security-and-quality
 
+      # Uploading to the Security tab requires GitHub Advanced Security,
+      # which isn't available on a private repo without a paid add-on
+      # (confirmed by a failed run: "Code scanning is not enabled for this
+      # repository", 403 on the code-scanning API). Not enabling that
+      # without asking first. The analysis still runs for real; results
+      # are archived as a SARIF artifact instead of uploaded. Switch
+      # `upload` back to `always` if/when GHAS gets enabled.
       - name: Perform CodeQL Analysis
         uses: github/codeql-action/analyze@v3
         with:
           category: '/language:${{ matrix.language }}'
+          upload: never
+          output: sarif-results
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: codeql-sarif-${{ matrix.language }}
+          path: sarif-results
+          retention-days: 30
 
   gitleaks:
     name: Secret Scan (Gitleaks)
