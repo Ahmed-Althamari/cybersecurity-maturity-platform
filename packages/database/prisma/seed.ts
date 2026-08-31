@@ -2,11 +2,17 @@
 // Seed script for CMMP database
 
 import { PrismaClient, MaturityLevel, RiskLevel, ControlStatus } from "@prisma/client";
+import * as bcrypt from "bcryptjs";
 
 const prisma = new PrismaClient();
 
+// Local-development-only demo password. Never used in production: production
+// deployments must create users with their own credentials via the API.
+const DEMO_PASSWORD = process.env.DEMO_USER_PASSWORD || "DemoPassword123!";
+
 async function main() {
   console.log("🌱 Starting database seed...");
+  const demoPasswordHash = await bcrypt.hash(DEMO_PASSWORD, 12);
 
   // ============================================================================
   // CLEANUP (for development)
@@ -135,6 +141,7 @@ async function main() {
       organisationId: organisation.id,
       email: "admin@example.local",
       name: "Administrator",
+      passwordHash: demoPasswordHash,
       isActive: true,
       userRoleAssignments: {
         create: {
@@ -153,6 +160,7 @@ async function main() {
       organisationId: organisation.id,
       email: "ciso@example.local",
       name: "Chief Information Security Officer",
+      passwordHash: demoPasswordHash,
       isActive: true,
       userRoleAssignments: {
         create: {
@@ -171,6 +179,7 @@ async function main() {
       organisationId: organisation.id,
       email: "assessor@example.local",
       name: "Security Assessor",
+      passwordHash: demoPasswordHash,
       isActive: true,
       userRoleAssignments: {
         create: {
@@ -189,6 +198,7 @@ async function main() {
       organisationId: organisation.id,
       email: "viewer@example.local",
       name: "Read-Only Viewer",
+      passwordHash: demoPasswordHash,
       isActive: true,
       userRoleAssignments: {
         create: {
@@ -657,12 +667,13 @@ async function main() {
   // ============================================================================
   console.log("✅ Database seed completed successfully!");
   console.log("");
-  console.log("Demo Credentials:");
-  console.log("================");
+  console.log("Demo Credentials (LOCAL DEVELOPMENT ONLY - never use in production):");
+  console.log("=====================================================================");
   console.log(`Admin (Platform):  admin@example.local`);
   console.log(`CISO:              ciso@example.local`);
   console.log(`Assessor:          assessor@example.local`);
   console.log(`Viewer:            viewer@example.local`);
+  console.log(`Password (all):    ${DEMO_PASSWORD} (override via DEMO_USER_PASSWORD)`);
   console.log("");
   console.log("Organization:");
   console.log("=============");

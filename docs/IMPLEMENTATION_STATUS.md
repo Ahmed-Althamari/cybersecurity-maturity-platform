@@ -1,11 +1,11 @@
 # CMMP Implementation Status
 
-Last Updated: 2026-08-30
+Last Updated: 2026-08-31
 
 ## Overall Progress
 
-**Phase**: 1 / 17
-**Completion**: ~5%
+**Phase**: 3 / 17
+**Completion**: ~20%
 
 ## Completed ✅
 
@@ -29,23 +29,59 @@ Last Updated: 2026-08-30
 - [x] .github/CODEOWNERS
 - [x] IMPLEMENTATION_STATUS.md tracker
 
-## In Progress 🔄
-
 ### Phase 2: Database Schema Design
-- [ ] Prisma schema design
-- [ ] Entity definitions
-- [ ] Relationships setup
-- [ ] Migrations structure
-- [ ] Seed data scripts
-
-## Not Started ⭕
+- [x] Prisma schema design (28 models: Tenant, Organisation, User, Role,
+      Framework/Function/Category/Subcategory, Assessment*, Risk,
+      RemediationInitiative, SecurityCapability, AuditEvent, ImportJob, etc.)
+- [x] Entity definitions with tenant scoping on every major table
+- [x] Relationships setup
+- [x] Seed data script (`packages/database/prisma/seed.ts`) — NIST CSF sample
+      hierarchy, demo tenant/org/users, sample assessment/risks/initiatives
+- [ ] Migrations structure — schema is migration-ready but no migration has
+      been generated yet; requires a reachable Postgres instance
+      (`npm run db:generate` then `prisma migrate dev` from
+      `packages/database`). Not runnable in this sandbox (no Docker/Postgres
+      available).
 
 ### Phase 3: Authentication & RBAC
-- [ ] NextAuth.js configuration
-- [ ] JWT strategy
-- [ ] Role definitions
-- [ ] Permission middleware
-- [ ] User model & schema
+- [x] JWT strategy (`passport-jwt`, `@nestjs/jwt`)
+- [x] Login backed by real Prisma `User` lookup (no more hardcoded demo
+      credentials in code)
+- [x] Password hashing with `bcryptjs` (pure-JS, no native build step —
+      chosen over `bcrypt` because this repo's `allowScripts` install-script
+      allowlist intentionally blocks unreviewed native postinstall scripts)
+- [x] Role definitions (`UserRole` enum in `@cmmp/shared`)
+- [x] `RolesGuard` + `@Roles()` decorator for endpoint-level RBAC
+- [x] `UsersService`/`UsersController` wired to Prisma with tenant-scoped
+      queries (every read/write filters by `tenantId`)
+- [x] Unit tests: login success/failure paths, tenant-isolation on
+      `findOne`/`findAll`, password-hash-not-plaintext, duplicate-email
+      rejection (`auth.service.spec.ts`, `users.service.spec.ts` — 9 tests)
+- [ ] NextAuth.js configuration on the Next.js frontend (not started — the
+      NestJS API issues its own JWTs for now; frontend session wiring is
+      still open)
+- [ ] Token revocation / refresh-token rotation (current `refresh` endpoint
+      re-signs a valid token; no blacklist or rotation yet)
+- [ ] End-to-end verification against a live database — not possible in this
+      sandbox (no Docker/Postgres). Verified instead via: `tsc --noEmit`,
+      `nest build`, and Jest unit tests with a mocked `PrismaService`.
+
+## Known Issues 🐛
+
+- Root `.eslintrc.json` references `eslint-plugin-security`,
+  `eslint-plugin-react`, `eslint-plugin-react-hooks`, `eslint-plugin-import`,
+  and `eslint-config-next`, none of which are installed anywhere in the repo
+  (pre-existing since Phase 1 — `npm run lint` currently fails repo-wide,
+  not something introduced in Phase 3). Needs its own fix: either install
+  the missing plugins at the root, or split frontend/backend ESLint configs.
+- `packages/database`'s local `prisma` devDependency resolves inconsistently
+  under npm workspaces (`@prisma/client`'s `peerDependencies: { prisma: "*" }`
+  can pull in a newer major version than the pinned `^5.22.0`, marked
+  "invalid" by `npm ls`). Workaround in place: always run Prisma generate
+  from the repo root (`npm run db:generate`), not via the workspace-local
+  binary; `packages/database`'s own `build` script only runs `tsc`.
+
+## Not Started ⭕
 
 ### Phase 4: Framework Engine
 - [ ] Framework type definitions
@@ -168,10 +204,6 @@ Last Updated: 2026-08-30
 - [ ] ADRs (Architecture Decision Records)
 - [ ] Threat model & STRIDE analysis
 
-## Known Issues 🐛
-
-None yet - Project just initialized
-
 ## Blockers 🚫
 
 None currently
@@ -265,12 +297,15 @@ None recorded yet
 
 ## Next Steps
 
-1. **Initialize Git repository** (local or GitHub)
-2. **Begin Phase 2**: Database schema design
-3. **Install dependencies** and verify build
-4. **Create Prisma schema** with all entities
-5. **Generate database migrations**
-6. **Create seed data** for NIST CSF
+1. **Generate the first Prisma migration** once a Postgres instance is
+   reachable (`docker compose up postgres`, then
+   `npm run db:generate && cd packages/database && npx prisma migrate dev`)
+2. **Begin Phase 4**: Framework Engine — framework/function/category loader
+   that reads `Framework`/`Function`/`Category`/`Subcategory` from the DB
+   instead of hard-coding NIST CSF, per ADR-006
+3. Wire the Next.js frontend to the new `/api/v1/auth/login` and
+   `/api/v1/users` endpoints (login page, session/token storage)
+4. Fix the repo-wide ESLint plugin gap (see Known Issues)
 
 ## Contact & Questions
 

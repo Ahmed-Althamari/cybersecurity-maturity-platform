@@ -7,13 +7,14 @@ package-lock.json
 pnpm-lock.yaml
 
 # Testing
-/coverage
+coverage/
 
 # Production
-/build
-/dist
-/.next
-/out
+build/
+dist/
+.next/
+out/
+next-env.d.ts
 
 # Environment variables
 .env

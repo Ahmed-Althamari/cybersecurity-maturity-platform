@@ -19,6 +19,7 @@
     "type-check": "turbo run type-check",
     "clean": "turbo run clean && rm -rf node_modules",
     "format": "prettier --write \"**/*.{ts,tsx,js,jsx,json,md}\"",
+    "db:generate": "npx prisma generate --schema packages/database/prisma/schema.prisma",
     "db:migrate": "cd packages/database && npx prisma migrate deploy",
     "db:seed": "cd packages/database && npx prisma db seed",
     "db:studio": "cd packages/database && npx prisma studio",
