@@ -13,10 +13,12 @@
       "outputs": []
     },
     "test": {
+      "dependsOn": ["^build"],
       "outputs": ["coverage/**"],
       "cache": false
     },
     "type-check": {
+      "dependsOn": ["^build"],
       "outputs": []
     },
     "dev": {

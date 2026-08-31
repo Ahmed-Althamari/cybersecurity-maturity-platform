@@ -21,6 +21,7 @@ jobs:
     permissions:
       contents: read
       security-events: write
+      actions: read
     strategy:
       matrix:
         language: ['javascript-typescript']
@@ -43,6 +44,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
+      pull-requests: read
     steps:
       - uses: actions/checkout@v4
         with:
@@ -67,18 +69,12 @@ jobs:
       # security-gate policy. Adjust --audit-level as the threshold is tuned.
       - run: npm audit --audit-level=high
 
-  dependency-review:
-    name: Dependency Review
-    runs-on: ubuntu-latest
-    if: github.event_name == 'pull_request'
-    permissions:
-      contents: read
-      pull-requests: write
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/dependency-review-action@v4
-        with:
-          fail-on-severity: high
+  # actions/dependency-review-action requires GitHub Advanced Security,
+  # which isn't available on a private repo without a paid GHAS add-on
+  # (confirmed by a failed run: "Dependency review is not supported on
+  # this repository"). Not enabling that without asking first — npm audit
+  # above plus Dependabot (dependabot.yml) already cover this need for
+  # free. Revisit if the repo goes public or GHAS gets purchased.
 
   sbom:
     name: Generate SBOM

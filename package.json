@@ -51,5 +51,8 @@
     "@prisma/client": true,
     "@prisma/engines": true,
     "prisma": true
+  },
+  "dependencies": {
+    "@prisma/client": "^5.22.0"
   }
 }
