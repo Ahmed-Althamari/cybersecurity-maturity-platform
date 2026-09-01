@@ -8,6 +8,7 @@ import { AssessmentsModule } from './assessments/assessments.module';
 import { ImportModule } from './import/import.module';
 import { DashboardModule } from './dashboard/dashboard.module';
 import { RisksModule } from './risks/risks.module';
+import { InitiativesModule } from './initiatives/initiatives.module';
 
 @Module({
   imports: [
@@ -23,6 +24,7 @@ import { RisksModule } from './risks/risks.module';
     ImportModule,
     DashboardModule,
     RisksModule,
+    InitiativesModule,
   ],
   controllers: [],
   providers: [],

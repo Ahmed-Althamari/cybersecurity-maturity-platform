@@ -4,8 +4,8 @@ Last Updated: 2026-09-01
 
 ## Overall Progress
 
-**Phase**: 11 / 17
-**Completion**: ~65%
+**Phase**: 12 / 17
+**Completion**: ~71%
 
 ## First End-to-End Verification Against a Live Database
 
@@ -468,6 +468,60 @@ Chromium against the running Next.js + NestJS + Postgres stack), not just
   (today `assessmentItemId` is only settable via the API, not the risk
   creation form).
 
+### Phase 12: Remediation Roadmap
+- [x] Initiative model — used as-is from Phase 2's schema
+      (`RemediationInitiative`); no schema changes needed
+- [x] Auto-generation from gaps — `POST /assessments/:id/roadmap/generate`
+      (`apps/api/src/initiatives/roadmap.controller.ts`) calls
+      `ScoringService.computeGapAnalysis` (Phase 7) at function-level and
+      creates one draft initiative per gap at or above a threshold
+      (`?minGap=`, default 0.5); current/target maturity come from the
+      gap's scores via `scoring-engine`'s own `scoreToMaturityLevel`, so
+      the roadmap never invents a maturity label independently of the
+      scoring engine's scale
+- [x] Prioritization algorithm — a gap's `riskLevel` (already computed by
+      the Phase 7 gap-analysis engine from gap magnitude) maps to both a
+      1-5 `priority` (1 = most urgent, matching the schema's existing seed
+      data convention) and a target-completion timeline (CRITICAL/HIGH -> 
+      90 days, MEDIUM -> 180 days, LOW/MINIMAL -> 365 days); complexity is
+      a separate small heuristic on the gap's own magnitude (bigger gap =
+      assumed more complex), not derived from priority
+- [x] Timeline views (3, 6, 12 month) — `GET /initiatives/timeline` buckets
+      every non-completed initiative by how far out its
+      `targetCompletionDate` is (`next3Months`/`next6Months`/
+      `next12Months`/`beyondOrUnscheduled`, the last bucket also catching
+      completed and undated initiatives)
+- [x] Roadmap UI — `pages/roadmap/index.tsx`: a 4-column timeline board
+      with priority badges, capability labels, due dates, and an inline
+      status dropdown per card; a "Generate Roadmap from Gaps" button on
+      the assessment dashboard (`pages/assessments/[id].tsx`) drives the
+      auto-generation endpoint for that assessment
+- [x] Status tracking — `PATCH /initiatives/:id` accepts any of the
+      schema's five statuses (`PLANNED`/`IN_PROGRESS`/`COMPLETED`/
+      `BLOCKED`/`ON_HOLD`); unlike `AssessmentsService`'s workflow, there's
+      deliberately no rigid transition graph here — remediation status is
+      a plain field practitioners set directly, not an audited lifecycle
+- [x] Risk linking symmetric with Phase 11: `POST`/`DELETE
+      /initiatives/:id/risks/:riskId` connect/disconnect the same
+      Risk↔RemediationInitiative many-to-many `RisksService.linkInitiative`
+      already uses, just from the initiative side
+- [x] Tests: 9 new tests in `apps/api` (`InitiativesService` — tenant
+      isolation, risk linking, timeline bucketing across all four bands,
+      and generate-from-gaps' priority/complexity/maturity/date derivation
+      including the minGap exclusion) — 86 tests total in `apps/api`
+- [x] Live-verified in a real browser: clicked "Generate Roadmap from
+      Gaps" on the real seeded assessment (created 1 new initiative from
+      its one remaining function-level gap), confirmed all 4 initiatives
+      (3 from seed data, 1 auto-generated) appear correctly bucketed by
+      due date on the roadmap page, changed a status via the inline
+      dropdown and confirmed it persisted
+
+  **Not built this pass**: an initiative picker for the risk detail page
+  (noted in Phase 11) is now unblocked by `GET /initiatives`, but the UI
+  wiring wasn't added; a `SecurityCapability`-aware categorization (today
+  `securityCapability` is just the function's display name, not a link to
+  the separate `SecurityCapability` model).
+
 ## Known Issues 🐛
 
 - Root `.eslintrc.json` references `eslint-plugin-security`,
@@ -484,14 +538,6 @@ Chromium against the running Next.js + NestJS + Postgres stack), not just
   binary; `packages/database`'s own `build` script only runs `tsc`.
 
 ## Not Started ⭕
-
-### Phase 12: Remediation Roadmap
-- [ ] Initiative model
-- [ ] Auto-generation from gaps
-- [ ] Prioritization algorithm
-- [ ] Timeline views (3, 6, 12 month)
-- [ ] Roadmap UI
-- [ ] Status tracking
 
 ### Phase 13: Audit Logging
 - [ ] Audit event model
@@ -646,20 +692,20 @@ None recorded yet
 
 1. ~~Generate the first Prisma migration~~ — done this session (see "First
    End-to-End Verification" above); the migration is checked in
-2. **Begin Phase 12**: Remediation Roadmap — auto-generating
-   `RemediationInitiative`s from gaps (`ScoringService.computeGapAnalysis`
-   already identifies them), a prioritization algorithm, 3/6/12-month
-   timeline views, and a roadmap UI; `RisksService.linkInitiative` already
-   gives initiatives a way to attach to risks, but nothing creates or
-   ranks initiatives yet
-3. Round out the Phase 10/11 frontend gaps: an assessment-taking flow
-   (create an assessment, walk its 106 items, `PATCH` responses — today
-   only the read-side dashboard has UI), a framework selection UI, a
+2. **Begin Phase 13**: Audit Logging — an immutable audit trail
+   (`AuditEvent` already exists in the schema with an `AuditAction` enum,
+   unused so far) covering at minimum: login/logout, every create/update/
+   delete across assessments/risks/initiatives/frameworks, and import
+   jobs; a logging middleware/interceptor rather than sprinkling manual
+   log calls through every service; an audit log API and a dashboard view
+3. Round out earlier frontend gaps: an assessment-taking flow (create an
+   assessment, walk its 106 items, `PATCH` responses — today only the
+   read-side dashboard has UI), a framework selection UI, a
    column-mapping step for spreadsheet import, an initiative *picker* for
-   the risk detail page (today it takes a raw initiative ID), and a
-   category/subcategory-level `levels` query param on
-   `GET .../dashboard/gaps` (the engine already supports it) for the
-   still-missing security maturity heatmap and maturity distribution
+   the risk detail page (`GET /initiatives` exists now, just not wired
+   into that page), and a category/subcategory-level `levels` query
+   param on `GET .../dashboard/gaps` (the engine already supports it) for
+   the still-missing security maturity heatmap and maturity distribution
    views.
 4. Spot-check the seeded NIST CSF 2.0 outcome text against the official
    NIST CSWP 29 publication (see the Phase 5 data-provenance note above) —

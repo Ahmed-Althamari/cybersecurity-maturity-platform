@@ -20,6 +20,26 @@ export default function AssessmentDashboardPage() {
 
   const [dashboard, setDashboard] = useState<ExecutiveDashboard | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [generating, setGenerating] = useState(false);
+  const [generateMessage, setGenerateMessage] = useState<string | null>(null);
+
+  async function handleGenerateRoadmap() {
+    if (!assessmentId) return;
+    setGenerating(true);
+    setGenerateMessage(null);
+    try {
+      const created = await api.generateRoadmap(session!.accessToken, assessmentId);
+      setGenerateMessage(
+        created.length === 0
+          ? 'No new initiatives needed -- no gaps above the threshold.'
+          : `Created ${created.length} initiative${created.length === 1 ? '' : 's'}. View them on the Roadmap.`,
+      );
+    } catch (err) {
+      setGenerateMessage(err instanceof ApiError ? err.message : 'Failed to generate roadmap');
+    } finally {
+      setGenerating(false);
+    }
+  }
 
   useEffect(() => {
     if (status === 'unauthenticated') {
@@ -67,6 +87,9 @@ export default function AssessmentDashboardPage() {
               <h1 className="mt-1 text-3xl font-bold text-white">Executive Dashboard</h1>
             </div>
             <div className="flex gap-2">
+              <Link href="/roadmap">
+                <Button variant="outline">Roadmap</Button>
+              </Link>
               <Link href="/risks">
                 <Button variant="outline">Risk Register</Button>
               </Link>
@@ -114,7 +137,15 @@ export default function AssessmentDashboardPage() {
 
           <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
             <RiskSummaryPanel summary={riskSummary} />
-            <RoadmapPanel status={roadmapStatus} />
+            <div className="space-y-3">
+              <RoadmapPanel status={roadmapStatus} />
+              <div className="flex items-center gap-3">
+                <Button variant="outline" onClick={handleGenerateRoadmap} disabled={generating}>
+                  {generating ? 'Generating…' : 'Generate Roadmap from Gaps'}
+                </Button>
+                {generateMessage && <p className="text-sm text-slate-400">{generateMessage}</p>}
+              </div>
+            </div>
           </div>
         </div>
       </div>

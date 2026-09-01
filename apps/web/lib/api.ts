@@ -102,6 +102,32 @@ export interface UpdateRiskInput {
   targetDate?: string;
 }
 
+export interface InitiativeDetail {
+  id: string;
+  organisationId: string;
+  title: string;
+  description: string | null;
+  securityCapability: string | null;
+  priority: number;
+  complexity: number;
+  currentMaturity: string;
+  targetMaturity: string;
+  estimatedCost: number | null;
+  startDate: string | null;
+  targetCompletionDate: string | null;
+  status: string;
+  owner: string | null;
+  risks: { id: string; title: string; riskLevel: string; status: string }[];
+  createdAt: string;
+}
+
+export interface InitiativeTimeline {
+  next3Months: InitiativeDetail[];
+  next6Months: InitiativeDetail[];
+  next12Months: InitiativeDetail[];
+  beyondOrUnscheduled: InitiativeDetail[];
+}
+
 export const api = {
   listAssessments: (token: string) => apiFetch<AssessmentSummary[]>(token, '/assessments'),
 
@@ -109,6 +135,20 @@ export const api = {
     apiFetch<ExecutiveDashboard>(token, `/assessments/${assessmentId}/dashboard`),
 
   listRisks: (token: string) => apiFetch<RiskDetail[]>(token, '/risks?sortBy=score'),
+
+  getRoadmapTimeline: (token: string) => apiFetch<InitiativeTimeline>(token, '/initiatives/timeline'),
+
+  generateRoadmap: (token: string, assessmentId: string) =>
+    apiFetch<InitiativeDetail[]>(token, `/assessments/${assessmentId}/roadmap/generate`, {
+      method: 'POST',
+      body: JSON.stringify({}),
+    }),
+
+  updateInitiativeStatus: (token: string, initiativeId: string, statusValue: string) =>
+    apiFetch<InitiativeDetail>(token, `/initiatives/${initiativeId}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ status: statusValue }),
+    }),
 
   getRisk: (token: string, riskId: string) => apiFetch<RiskDetail>(token, `/risks/${riskId}`),
 
