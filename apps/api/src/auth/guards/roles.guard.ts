@@ -1,5 +1,5 @@
 import { Injectable, CanActivate, ExecutionContext, ForbiddenException } from '@nestjs/common';
-import type { UserRole } from '@cmmp/shared';
+
 import { ROLES_KEY } from '../decorators/roles.decorator';
 
 @Injectable()

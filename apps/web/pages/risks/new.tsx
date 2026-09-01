@@ -1,11 +1,12 @@
-import { useState, type FormEvent } from 'react';
-import { useSession } from 'next-auth/react';
-import { useRouter } from 'next/router';
 import Head from 'next/head';
 import Link from 'next/link';
-import { api, ApiError } from '@/lib/api';
+import { useRouter } from 'next/router';
+import { useSession } from 'next-auth/react';
+import { useState, type FormEvent } from 'react';
+
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { api, ApiError } from '@/lib/api';
 
 const inputClass =
   'w-full rounded-md border border-slate-600 bg-slate-900 px-3 py-2 text-sm text-white focus:border-blue-500 focus:outline-none';

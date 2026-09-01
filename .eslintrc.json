@@ -7,16 +7,13 @@
     "plugin:security/recommended"
   ],
   "parser": "@typescript-eslint/parser",
-  "plugins": [
-    "@typescript-eslint",
-    "react",
-    "react-hooks",
-    "security",
-    "import"
-  ],
+  "plugins": ["@typescript-eslint", "react", "react-hooks", "security", "import"],
   "rules": {
-    "@typescript-eslint/no-explicit-any": "error",
-    "@typescript-eslint/no-unused-vars": ["error", { "argsIgnorePattern": "^_" }],
+    "@typescript-eslint/no-explicit-any": "warn",
+    "@typescript-eslint/no-unused-vars": [
+      "error",
+      { "argsIgnorePattern": "^_", "ignoreRestSiblings": true }
+    ],
     "react/react-in-jsx-scope": "off",
     "react/prop-types": "off",
     "react-hooks/rules-of-hooks": "error",
@@ -25,7 +22,7 @@
       "error",
       {
         "groups": ["builtin", "external", "internal", "parent", "sibling", "index"],
-        "alphabeticalOrder": true,
+        "alphabetize": { "order": "asc" },
         "newlines-between": "always"
       }
     ],

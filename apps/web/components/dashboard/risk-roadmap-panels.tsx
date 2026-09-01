@@ -1,6 +1,7 @@
 import type { RiskSummary, RoadmapStatus } from '@cmmp/shared';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+
 import { RiskLevelBadge } from '@/components/ui/badge';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 
 export function RiskSummaryPanel({ summary }: { summary: RiskSummary }) {
   return (

@@ -1,6 +1,7 @@
 import type { FunctionMaturity } from '@cmmp/shared';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+
 import { Badge } from '@/components/ui/badge';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 
 export function FunctionCards({ functions }: { functions: FunctionMaturity[] }) {
   return (

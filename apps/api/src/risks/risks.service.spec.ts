@@ -1,6 +1,8 @@
 import { BadRequestException, NotFoundException } from '@nestjs/common';
-import { RisksService, suggestRiskLevel } from './risks.service';
+
 import { PrismaService } from '../prisma/prisma.service';
+
+import { RisksService, suggestRiskLevel } from './risks.service';
 
 function baseRisk(overrides: Partial<Record<string, unknown>> = {}) {
   return {

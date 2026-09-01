@@ -1,7 +1,9 @@
 import { Module } from '@nestjs/common';
-import { FrameworkService } from './framework.service';
-import { FrameworkController } from './framework.controller';
+
 import { PrismaModule } from '../prisma/prisma.module';
+
+import { FrameworkController } from './framework.controller';
+import { FrameworkService } from './framework.service';
 
 @Module({
   imports: [PrismaModule],

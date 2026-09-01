@@ -1,12 +1,13 @@
-import { useEffect, useState } from 'react';
-import { useSession, signOut } from 'next-auth/react';
-import { useRouter } from 'next/router';
 import Head from 'next/head';
 import Link from 'next/link';
-import { api, ApiError, type RiskDetail } from '@/lib/api';
-import { Card, CardContent } from '@/components/ui/card';
+import { useRouter } from 'next/router';
+import { useSession, signOut } from 'next-auth/react';
+import { useEffect, useState } from 'react';
+
 import { RiskLevelBadge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { Card, CardContent } from '@/components/ui/card';
+import { api, ApiError, type RiskDetail } from '@/lib/api';
 
 export default function RisksPage() {
   const { data: session, status } = useSession();

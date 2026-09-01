@@ -1,6 +1,8 @@
 import { AuditAction } from '@cmmp/shared';
-import { AuditService } from './audit.service';
+
 import { PrismaService } from '../prisma/prisma.service';
+
+import { AuditService } from './audit.service';
 
 describe('AuditService', () => {
   let service: AuditService;

@@ -1,9 +1,11 @@
 import { UnauthorizedException } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import * as bcrypt from 'bcryptjs';
-import { AuthService } from './auth.service';
-import { PrismaService } from '../prisma/prisma.service';
+
 import { AuditService } from '../audit/audit.service';
+import { PrismaService } from '../prisma/prisma.service';
+
+import { AuthService } from './auth.service';
 
 describe('AuthService', () => {
   let authService: AuthService;

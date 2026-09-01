@@ -1,3 +1,4 @@
+import type { FunctionMaturity } from '@cmmp/shared';
 import {
   PolarAngleAxis,
   PolarGrid,
@@ -8,7 +9,7 @@ import {
   Legend,
   Tooltip,
 } from 'recharts';
-import type { FunctionMaturity } from '@cmmp/shared';
+
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 
 export function MaturityRadarChart({ functions }: { functions: FunctionMaturity[] }) {

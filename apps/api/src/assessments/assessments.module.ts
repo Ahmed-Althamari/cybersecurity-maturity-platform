@@ -1,9 +1,11 @@
 import { Module } from '@nestjs/common';
-import { AssessmentsService } from './assessments.service';
-import { AssessmentsController } from './assessments.controller';
-import { PrismaModule } from '../prisma/prisma.module';
+
 import { FrameworkModule } from '../framework/framework.module';
+import { PrismaModule } from '../prisma/prisma.module';
 import { ScoringModule } from '../scoring/scoring.module';
+
+import { AssessmentsController } from './assessments.controller';
+import { AssessmentsService } from './assessments.service';
 
 @Module({
   imports: [PrismaModule, FrameworkModule, ScoringModule],

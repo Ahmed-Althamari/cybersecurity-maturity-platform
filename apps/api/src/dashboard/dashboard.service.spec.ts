@@ -1,7 +1,8 @@
-import { DashboardService } from './dashboard.service';
-import { PrismaService } from '../prisma/prisma.service';
 import { AssessmentsService } from '../assessments/assessments.service';
+import { PrismaService } from '../prisma/prisma.service';
 import { ScoringService } from '../scoring/scoring.service';
+
+import { DashboardService } from './dashboard.service';
 
 function scoreTree() {
   return {

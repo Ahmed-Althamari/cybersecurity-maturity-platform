@@ -1,6 +1,8 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { RiskLevel } from '@cmmp/shared';
+import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+
 import { PrismaService } from '../prisma/prisma.service';
+
 import { CreateRiskDto } from './dto/create-risk.dto';
 import { UpdateRiskDto } from './dto/update-risk.dto';
 

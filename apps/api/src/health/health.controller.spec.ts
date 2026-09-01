@@ -1,6 +1,8 @@
 import { ServiceUnavailableException } from '@nestjs/common';
-import { HealthController } from './health.controller';
+
 import { PrismaService } from '../prisma/prisma.service';
+
+import { HealthController } from './health.controller';
 
 describe('HealthController', () => {
   let controller: HealthController;

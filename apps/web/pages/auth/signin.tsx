@@ -1,7 +1,8 @@
-import { useState, type FormEvent } from 'react';
-import { signIn } from 'next-auth/react';
-import { useRouter } from 'next/router';
 import Head from 'next/head';
+import { useRouter } from 'next/router';
+import { signIn } from 'next-auth/react';
+import { useState, type FormEvent } from 'react';
+
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 

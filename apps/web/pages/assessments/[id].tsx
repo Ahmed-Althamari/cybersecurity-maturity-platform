@@ -1,17 +1,18 @@
-import { useEffect, useState } from 'react';
-import { useSession, signOut } from 'next-auth/react';
-import { useRouter } from 'next/router';
+import type { ExecutiveDashboard } from '@cmmp/shared';
 import Head from 'next/head';
 import Link from 'next/link';
-import type { ExecutiveDashboard } from '@cmmp/shared';
-import { api, ApiError } from '@/lib/api';
-import { Button } from '@/components/ui/button';
+import { useRouter } from 'next/router';
+import { useSession, signOut } from 'next-auth/react';
+import { useEffect, useState } from 'react';
+
+import { FunctionCards } from '@/components/dashboard/function-cards';
+import { GapBarChart } from '@/components/dashboard/gap-bar-chart';
 import { KpiCard } from '@/components/dashboard/kpi-card';
 import { MaturityRadarChart } from '@/components/dashboard/maturity-radar-chart';
-import { GapBarChart } from '@/components/dashboard/gap-bar-chart';
-import { FunctionCards } from '@/components/dashboard/function-cards';
-import { TopGapsTable } from '@/components/dashboard/top-gaps-table';
 import { RiskSummaryPanel, RoadmapPanel } from '@/components/dashboard/risk-roadmap-panels';
+import { TopGapsTable } from '@/components/dashboard/top-gaps-table';
+import { Button } from '@/components/ui/button';
+import { api, ApiError } from '@/lib/api';
 
 export default function AssessmentDashboardPage() {
   const { data: session, status } = useSession();

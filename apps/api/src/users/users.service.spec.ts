@@ -1,6 +1,8 @@
 import { ConflictException, NotFoundException } from '@nestjs/common';
-import { UsersService } from './users.service';
+
 import { PrismaService } from '../prisma/prisma.service';
+
+import { UsersService } from './users.service';
 
 describe('UsersService', () => {
   let usersService: UsersService;

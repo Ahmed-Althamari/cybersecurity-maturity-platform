@@ -1,9 +1,11 @@
+import { AuditAction } from '@cmmp/shared';
 import { Injectable, UnauthorizedException } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import * as bcrypt from 'bcryptjs';
-import { AuditAction } from '@cmmp/shared';
-import { PrismaService } from '../prisma/prisma.service';
+
 import { AuditService } from '../audit/audit.service';
+import { PrismaService } from '../prisma/prisma.service';
+
 import { LoginDto } from './dto/login.dto';
 
 export interface JwtPayload {

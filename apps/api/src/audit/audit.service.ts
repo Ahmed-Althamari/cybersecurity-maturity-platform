@@ -1,5 +1,6 @@
-import { Injectable, Logger } from '@nestjs/common';
 import { AuditAction } from '@cmmp/shared';
+import { Injectable, Logger } from '@nestjs/common';
+
 import { PrismaService } from '../prisma/prisma.service';
 
 // Serialized response bodies can be large (e.g. a freshly-created

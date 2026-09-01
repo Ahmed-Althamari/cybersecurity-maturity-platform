@@ -1,7 +1,9 @@
 import { randomUUID } from 'crypto';
-import { CallHandler, ExecutionContext, Injectable, NestInterceptor } from '@nestjs/common';
+
 import { AuditAction } from '@cmmp/shared';
+import { CallHandler, ExecutionContext, Injectable, NestInterceptor } from '@nestjs/common';
 import { Observable, tap } from 'rxjs';
+
 import { AuditService } from './audit.service';
 
 const ACTION_BY_METHOD: Record<string, AuditAction> = {

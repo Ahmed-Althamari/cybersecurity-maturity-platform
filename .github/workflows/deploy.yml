@@ -1,0 +1,99 @@
+name: Deploy
+
+# Builds and publishes the api/web images to GHCR on every push to main that
+# passes CI, and on version tags. This project has no live hosting target
+# yet (see docs/IMPLEMENTATION_STATUS.md) -- pushing images to a registry is
+# the deployable artifact; the "deploy to <environment>" step at the bottom
+# is a placeholder for whoever picks a host (ECS/Cloud Run/Fly/etc.) to fill
+# in, gated behind a GitHub Environment so it needs an approval/real secrets
+# before it can run anywhere.
+on:
+  push:
+    branches: [main]
+    tags: ["v*.*.*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  # Deploying broken code is worse than not deploying -- re-run the same
+  # gates CI already defines rather than assuming a green `main` stays green
+  # between merge and this workflow's own trigger.
+  verify:
+    name: Verify (lint, type-check, test, build)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+
+      - run: npm ci
+      - run: npm run db:generate
+      - run: npm run lint
+      - run: npm run type-check
+      - run: npm test
+      - run: npm run build
+
+  build-and-push:
+    name: Build & push (${{ matrix.image }})
+    needs: verify
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - image: api
+            dockerfile: infrastructure/Dockerfile.api
+          - image: web
+            dockerfile: infrastructure/Dockerfile.web
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: docker/metadata-action@v5
+        id: meta
+        with:
+          images: ghcr.io/${{ github.repository }}/${{ matrix.image }}
+          tags: |
+            type=sha,format=long
+            type=ref,event=branch
+            type=semver,pattern={{version}}
+
+      - uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ${{ matrix.dockerfile }}
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha,scope=${{ matrix.image }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.image }}
+
+  deploy:
+    name: Deploy to production
+    needs: build-and-push
+    runs-on: ubuntu-latest
+    # A GitHub Environment (Settings -> Environments -> "production") lets a
+    # repo admin require manual approval and hold the real DATABASE_URL/
+    # JWT_SECRET/etc. as environment secrets, rather than this workflow
+    # running unattended the moment it's merged.
+    environment: production
+    steps:
+      - name: Deploy
+        run: |
+          echo "No hosting target is configured for this project yet."
+          echo "Images are published to ghcr.io/${{ github.repository }}/{api,web}:sha-${{ github.sha }}."
+          echo "Replace this step with the real deploy command for wherever"
+          echo "this ends up running (ECS/Cloud Run/Fly/a VM pulling the image"
+          echo "and running docker compose) once that target is chosen."

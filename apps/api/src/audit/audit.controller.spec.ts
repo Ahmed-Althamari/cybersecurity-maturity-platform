@@ -1,6 +1,8 @@
 import { UserRole } from '@cmmp/shared';
-import { AuditController } from './audit.controller';
+
 import { ROLES_KEY } from '../auth/decorators/roles.decorator';
+
+import { AuditController } from './audit.controller';
 
 describe('AuditController RBAC wiring', () => {
   // Regression: @Roles() was originally applied at the *class* decorator

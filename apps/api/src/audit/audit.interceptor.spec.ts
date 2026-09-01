@@ -1,5 +1,6 @@
-import { of } from 'rxjs';
 import type { CallHandler, ExecutionContext } from '@nestjs/common';
+import { of } from 'rxjs';
+
 import { AuditInterceptor } from './audit.interceptor';
 import { AuditService } from './audit.service';
 

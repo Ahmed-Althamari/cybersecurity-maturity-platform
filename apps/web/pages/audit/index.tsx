@@ -1,13 +1,14 @@
-import { useEffect, useState } from 'react';
-import { useSession, signOut } from 'next-auth/react';
-import { useRouter } from 'next/router';
+import type { AuditEventSummary } from '@cmmp/shared';
 import Head from 'next/head';
 import Link from 'next/link';
-import { api, ApiError } from '@/lib/api';
-import type { AuditEventSummary } from '@cmmp/shared';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { useRouter } from 'next/router';
+import { useSession, signOut } from 'next-auth/react';
+import { useEffect, useState } from 'react';
+
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { api, ApiError } from '@/lib/api';
 
 const ACTION_VARIANT: Record<string, 'critical' | 'high' | 'medium' | 'low' | 'minimal' | 'default'> = {
   DELETE: 'critical',

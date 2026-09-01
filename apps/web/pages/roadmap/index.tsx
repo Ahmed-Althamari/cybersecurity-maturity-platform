@@ -1,12 +1,13 @@
-import { useEffect, useState } from 'react';
-import { useSession, signOut } from 'next-auth/react';
-import { useRouter } from 'next/router';
 import Head from 'next/head';
 import Link from 'next/link';
-import { api, ApiError, type InitiativeDetail, type InitiativeTimeline } from '@/lib/api';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { useRouter } from 'next/router';
+import { useSession, signOut } from 'next-auth/react';
+import { useEffect, useState } from 'react';
+
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { api, ApiError, type InitiativeDetail, type InitiativeTimeline } from '@/lib/api';
 
 const PRIORITY_VARIANT: Record<number, 'critical' | 'high' | 'medium' | 'low' | 'minimal'> = {
   1: 'critical',

@@ -1,6 +1,7 @@
 import type { GapAnalysis } from '@cmmp/shared';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+
 import { RiskLevelBadge } from '@/components/ui/badge';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 
 export function TopGapsTable({ gaps }: { gaps: GapAnalysis[] }) {
   const sorted = [...gaps].sort((a, b) => b.gap - a.gap).slice(0, 10);

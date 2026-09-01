@@ -1,0 +1,41 @@
+version: 2
+updates:
+  # A single npm-workspaces monorepo -- one root package-lock.json covers
+  # every apps/* and packages/* workspace, so one entry at "/" is correct
+  # (not one per workspace).
+  - package-ecosystem: npm
+    directory: "/"
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 10
+    groups:
+      # Security patches land immediately as their own PRs; everything else
+      # is batched weekly so routine bumps don't create dozens of PRs.
+      production-dependencies:
+        dependency-type: production
+        update-types: [minor, patch]
+      development-dependencies:
+        dependency-type: development
+        update-types: [minor, patch]
+    labels:
+      - dependencies
+
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly
+      day: monday
+    labels:
+      - dependencies
+      - github-actions
+
+  - package-ecosystem: docker
+    directories:
+      - /infrastructure
+    schedule:
+      interval: weekly
+      day: monday
+    labels:
+      - dependencies
+      - docker

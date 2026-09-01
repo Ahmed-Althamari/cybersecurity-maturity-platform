@@ -1,5 +1,3 @@
-import { Injectable } from '@nestjs/common';
-import { MaturityLevel } from '@cmmp/shared';
 import {
   aggregateHierarchy,
   identifyGaps,
@@ -7,6 +5,9 @@ import {
   type OrganisationMaturityScore,
   type ScoredResponse,
 } from '@cmmp/scoring-engine';
+import { MaturityLevel } from '@cmmp/shared';
+import { Injectable } from '@nestjs/common';
+
 import { PrismaService } from '../prisma/prisma.service';
 
 @Injectable()

@@ -1,13 +1,15 @@
-import { Body, Controller, Delete, Get, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
 import { UserRole } from '@cmmp/shared';
-import { AssessmentsService } from './assessments.service';
-import { CreateAssessmentDto } from './dto/create-assessment.dto';
-import { UpdateAssessmentDto } from './dto/update-assessment.dto';
-import { UpdateAssessmentItemDto } from './dto/update-assessment-item.dto';
+import { Body, Controller, Delete, Get, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
+
+import { CurrentUser } from '../auth/decorators/current-user.decorator';
+import { Roles } from '../auth/decorators/roles.decorator';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
-import { Roles } from '../auth/decorators/roles.decorator';
-import { CurrentUser } from '../auth/decorators/current-user.decorator';
+
+import { AssessmentsService } from './assessments.service';
+import { CreateAssessmentDto } from './dto/create-assessment.dto';
+import { UpdateAssessmentItemDto } from './dto/update-assessment-item.dto';
+import { UpdateAssessmentDto } from './dto/update-assessment.dto';
 
 const AUTHORS = [
   UserRole.PLATFORM_ADMIN,

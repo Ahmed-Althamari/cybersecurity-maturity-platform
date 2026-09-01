@@ -1,4 +1,3 @@
-import { Injectable } from '@nestjs/common';
 import { RiskLevel } from '@cmmp/shared';
 import type {
   ExecutiveDashboard,
@@ -10,8 +9,10 @@ import type {
   RiskSummary,
   RoadmapStatus,
 } from '@cmmp/shared';
-import { PrismaService } from '../prisma/prisma.service';
+import { Injectable } from '@nestjs/common';
+
 import { AssessmentsService } from '../assessments/assessments.service';
+import { PrismaService } from '../prisma/prisma.service';
 import { ScoringService } from '../scoring/scoring.service';
 
 const OPEN_INITIATIVE_STATUSES = ['PLANNED', 'IN_PROGRESS'];
