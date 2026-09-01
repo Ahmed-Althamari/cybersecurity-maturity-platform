@@ -1,5 +1,18 @@
 # CMMP System Architecture
 
+> **Note (Phase 17)**: this document was authored in Phase 1, before most
+> of the system existed, and reads as a design sketch rather than an
+> as-built reference — some of it (Redis, Kubernetes/pods, an AWS ALB/WAF,
+> a 1-hour JWT expiry, role names, the entity list) no longer matches, or
+> never matched, what was actually built. For an accurate, code-grounded
+> reference, see: `docs/data-model.md` (the real 28-model schema),
+> `docs/api-reference.md` (every real endpoint + role gate),
+> `docs/security-architecture.md`, `docs/scoring-methodology.md`,
+> `docs/framework-model.md`, `docs/excel-import-guide.md`,
+> `docs/deployment-guide.md`, `docs/devsecops-pipeline.md`,
+> `docs/threat-model.md`, and `docs/adr/`. This file is kept for its
+> original high-level narrative value, not as a source of truth.
+
 ## Overview
 
 The Cybersecurity Maturity Management Platform (CMMP) is designed as a modern, scalable, multi-tenant SaaS application using industry-standard enterprise architecture patterns.

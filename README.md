@@ -304,33 +304,53 @@ GET  /api/v1/risks                 - List security risks
 GET  /api/v1/roadmap               - Get remediation roadmap
 ```
 
-See `/docs/api-design.md` for complete API specification.
+See `docs/api-reference.md` for the complete, real API specification (every
+endpoint, grep-verified against the actual controllers, with its exact
+role requirement).
 
 ## Security
 
-### Security Principles Applied
+### Security principles actually applied today
 
-- **OWASP ASVS** alignment for application security
-- **Zero Trust** architecture with tenant isolation
-- **Secure by Design** principles
-- **Input validation** server-side
-- **Output encoding** to prevent XSS
-- **Parameterized queries** to prevent SQL injection
-- **Rate limiting** on all APIs
-- **CSRF protection** on state-changing operations
-- **Audit logging** of all significant actions
-- **Secrets management** via environment variables
+- **Tenant isolation** enforced in application code (every query scoped by
+  `tenantId`, verified by a dedicated integration test suite)
+- **RBAC** via an 11-role model with per-endpoint `@Roles()` gates
+- **Input validation** server-side (`ValidationPipe` with
+  `forbidNonWhitelisted`) and Zod schemas for framework definitions
+- **Output encoding** via React/Next.js's default JSX escaping
+- **Parameterized queries** throughout (Prisma), preventing SQL injection
+- **CSV/Excel formula-injection sanitization** on spreadsheet import
+- **Audit logging** of all authenticated mutating actions plus login/logout
 
-### Security Scanning
+### Honest gaps — not yet implemented, despite what older docs/`.env.example` imply
+
+- **No rate limiting anywhere** — `.env.example` defines
+  `ENABLE_RATE_LIMITING`/`RATE_LIMIT_WINDOW_MS`/`RATE_LIMIT_MAX_REQUESTS`,
+  but nothing in the codebase reads them; `/auth/login` has no brute-force
+  protection today. This is the single highest-priority fix identified in
+  `docs/threat-model.md`.
+- **No CSRF-specific protection** — not currently needed given the
+  stateless bearer-token API design, but also not something explicitly
+  implemented or tested for.
+- **No token revocation/rotation.**
+
+See `docs/security-architecture.md` for the full picture, including every
+other known gap, and `docs/threat-model.md` for the STRIDE analysis these
+feed into.
+
+### Security scanning
 
 CI/CD pipelines include:
-- **SAST** via GitHub CodeQL
-- **Dependency scanning** via npm audit & Dependabot
-- **Secret scanning** via Gitleaks
-- **Container scanning** via Trivy
-- **DAST** via OWASP ZAP
+- **SAST** via GitHub CodeQL (`.github/workflows/codeql.yml`)
+- **Dependency scanning** via Dependabot (`.github/dependabot.yml`)
+- **Secret scanning** via Gitleaks (`.github/workflows/gitleaks.yml`)
+- **Container scanning + SBOM** via Trivy
+  (`.github/workflows/container-scan.yml`)
+- **DAST** via OWASP ZAP baseline (`.github/workflows/dast.yml`)
 
-See `/docs/devsecops.md` for security pipeline details.
+Trivy and ZAP currently run in report-only mode pending a first triage
+pass — see `docs/devsecops-pipeline.md` for exactly what that means and
+how to flip it to enforcing.
 
 ## Testing
 
@@ -356,25 +376,37 @@ cd apps/web && npm run test:e2e
 
 Comprehensive documentation available in `/docs`:
 
-- `architecture.md` - System architecture & design
-- `security-architecture.md` - Security design & threat model
-- `data-model.md` - Database schema & relationships
-- `api-design.md` - REST API specification
-- `scoring-model.md` - Maturity scoring methodology
-- `framework-model.md` - Framework configuration format
-- `excel-import-format.md` - Spreadsheet upload format
-- `deployment.md` - Production deployment guide
+- `architecture.md` - System architecture & design (Phase 1 design sketch —
+  see the note at its top for where it's since drifted from what's real)
+- `security-architecture.md` - Security design, RBAC, and honest gaps
+- `data-model.md` - The real 28-model Prisma schema & relationships
+- `api-reference.md` - Every real REST endpoint & its exact role gate
+- `scoring-methodology.md` - Maturity scoring & gap-analysis methodology
+- `framework-model.md` - Framework-agnostic engine & NIST CSF 2.0 authoring
+- `excel-import-guide.md` - Spreadsheet upload format, mapping & validation
+- `deployment-guide.md` - Docker/Compose & GHCR publish guide
+- `devsecops-pipeline.md` - What every CI/security workflow actually does
+- `threat-model.md` - STRIDE analysis with a ranked priority list
+- `adr/` - Architecture Decision Records (0001-0010)
+- `IMPLEMENTATION_STATUS.md` - Phase-by-phase build log & progress tracker
 
 ## CI/CD Pipeline
 
-GitHub Actions workflows:
+GitHub Actions workflows (see `docs/devsecops-pipeline.md` for full detail):
 
-- `.github/workflows/ci.yml` - Build, lint, test on PR
-- `.github/workflows/security.yml` - Security scanning (SAST, DAST)
-- `.github/workflows/container.yml` - Container image scanning
-- `.github/workflows/deploy.yml` - Deployment workflows
+- `.github/workflows/ci.yml` - Lint, type-check, unit/integration/E2E tests,
+  build, gated by a single `security-gate` aggregator job
+- `.github/workflows/codeql.yml` - SAST (CodeQL)
+- `.github/workflows/gitleaks.yml` - Secret scanning
+- `.github/workflows/dast.yml` - OWASP ZAP baseline DAST
+- `.github/workflows/container-scan.yml` - Trivy container scanning + SBOM
+- `.github/workflows/deploy.yml` - Build, publish to GHCR, gated deploy
+- `.github/dependabot.yml` - Dependency updates (npm, github-actions, docker)
 
-All workflows must pass before merging to main branch.
+`ci.yml`'s `security-gate` job is the one check branch protection should
+require; a repo admin still needs to mark it (plus Gitleaks and CodeQL) as
+a required status check in Settings → Branches — no workflow file can do
+that on its own.
 
 ## License
 

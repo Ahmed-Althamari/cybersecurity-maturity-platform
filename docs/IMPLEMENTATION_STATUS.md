@@ -4,8 +4,13 @@ Last Updated: 2026-09-01
 
 ## Overall Progress
 
-**Phase**: 16 / 17 (plus a frontend gap-closure pass ahead of Phase 17 -- see "Frontend Gap Closure" below)
-**Completion**: ~96%
+**Phase**: 17 / 17 (all originally-scoped phases complete, plus a frontend
+gap-closure pass done ahead of Phase 17 -- see "Frontend Gap Closure" below)
+**Completion**: ~98% (the remaining ~2% is the honestly-documented gaps
+called out throughout Phase 17's docs -- see `docs/security-architecture.md`'s
+"Known gaps" and `docs/threat-model.md`'s summary in particular -- plus the
+real Docker/GitHub Actions runs neither Phase 15, 16, nor this phase could
+perform in this sandbox)
 
 ## First End-to-End Verification Against a Live Database
 
@@ -1099,6 +1104,111 @@ undocumented gaps in *behavior* matter more than gaps in *docs*.
   just not surfaced in this pass's UI); no column-mapping "remember my
   last mapping" convenience for repeat imports against the same framework.
 
+### Phase 17: Documentation
+- [x] Security architecture document -- `docs/security-architecture.md`:
+      authentication (JWT issuance/verification, the real
+      `JwtModule.registerAsync()` bug and fix), authorization (the 11-role
+      RBAC matrix, both real bugs Phase 14 found and fixed in `RolesGuard`/
+      `AuditController`), tenant isolation mechanics, input validation and
+      injection prevention, audit-log immutability guarantees, HTTP-level
+      hardening, secrets handling, and an explicit "Known gaps" section
+      (no rate limiting despite `.env.example` implying otherwise, no
+      token revocation, no CSP/HSTS, `EXECUTIVE_VIEWER` not actually
+      distinct from `READ_ONLY_VIEWER`) written honestly rather than
+      glossed over.
+- [x] Data model documentation -- `docs/data-model.md`: every one of the
+      28 Prisma models grouped by concern, a Mermaid ERD, and -- important
+      for anyone reading the schema cold -- an explicit list of models
+      that exist but are **not wired to any service** today
+      (`Role`, `Evidence`, `Recommendation`, `MaturityModel`/
+      `MaturityModelLevel`, `SecurityCapability`/`Technology`,
+      `Benchmark`, `DashboardConfiguration`), so nobody mistakes schema
+      scaffolding for a working feature.
+- [x] API design document -- `docs/api-reference.md`: every real endpoint
+      across all 11 controllers, grep-verified against the actual
+      `@Get`/`@Post`/`@Patch`/`@Delete`/`@Roles` decorators rather than
+      transcribed from memory, including the exact role-group constants
+      (`AUTHORS`/`APPROVERS`/`ARCHIVERS`/`DELETERS`/`AUDIT_READERS`) each
+      controller defines.
+- [x] Scoring methodology -- `docs/scoring-methodology.md`: the 1-5
+      maturity scale and why `NOT_APPLICABLE` is excluded rather than
+      zeroed, the weighted subcategory-to-organisation rollup with a
+      worked numeric example, the gap-magnitude risk-classification
+      thresholds, how this differs from the Risk Register's
+      likelihood-x-impact model, the honest state of ADR-007's weighting
+      (mechanically ready, no producer yet), and exactly how roadmap
+      generation derives priority/timeline/complexity from a gap.
+- [x] Framework model documentation -- `docs/framework-model.md`: the
+      Definition-vs-Tree two-shape design, the validation pipeline (Zod
+      shape + sibling-uniqueness structural checks), the shared
+      `persistFrameworkDefinition()` helper, the dynamic component
+      descriptor, NIST CSF 2.0's specific authored structure and its data
+      provenance caveat, and exactly what adding a second framework
+      requires (a data-authoring exercise, not a code change) plus the one
+      place multi-framework support isn't fully wired end-to-end yet
+      (`Assessment` has no direct framework slug/id).
+- [x] Excel import format guide -- `docs/excel-import-guide.md`: supported
+      formats and their real cell-type quirks (formula cells resolve to
+      last-calculated-result, rich text flattens, hyperlinks use display
+      text), the preview-then-import two-step flow, the full column-mapping
+      contract, every field's exact validation rule, the formula-injection
+      sanitization mechanism (CWE-1236) with the real attack payload this
+      project tested against, the three row outcomes
+      (`VALID`/`WARNING`/`ERROR`), and the single-transaction apply
+      behavior.
+- [x] Deployment guide -- `docs/deployment-guide.md`: every real
+      environment variable and what actually reads it, the Compose
+      topology and startup ordering, exactly what was verified about the
+      Docker images without a real `docker build` (this sandbox's Docker
+      Hub CDN block, carried over from Phase 15), the `deploy.yml` GHCR
+      publish flow, and an explicit "what's not yet real" section (no live
+      hosting target, no orchestration, no secrets manager -- correcting
+      `docs/architecture.md`'s aspirational Kubernetes/AWS ALB/Redis
+      references).
+- [x] DevSecOps pipeline documentation -- `docs/devsecops-pipeline.md`:
+      what each of the six workflows plus Dependabot actually does today
+      (grep-verified against the real YAML, not summarized from memory),
+      the deliberate Trivy/ZAP report-only posture and exactly what flips
+      it to enforcing, what branch-protection setup no committed workflow
+      file can do on its own, and what has and hasn't actually been run
+      for real (no GitHub Actions runner or Docker Hub access in this
+      sandbox, same constraint as Phases 15-16).
+- [x] ADRs (Architecture Decision Records) -- `docs/adr/` (README index +
+      ADR-0001 through ADR-0010, one file each), expanding the one-line
+      entries this document already carried into full Context/Decision/
+      Alternatives/Consequences records grounded in the real
+      implementation -- including, where relevant, an honest "Current
+      state" section for a decision only partially realized (ADR-0007's
+      configurable scoring: the weighting math works, nothing sets a
+      non-default weight yet; the `MaturityModel` tables are modeled but
+      unused).
+- [x] Threat model & STRIDE analysis -- `docs/threat-model.md`: assets and
+      trust boundaries specific to this system, then a STRIDE table per
+      category with concrete threats against this codebase's actual flows,
+      the real mitigation in place (or the honest absence of one) for
+      each, and a ranked "highest-priority items" summary closing with the
+      single highest-value fix identified across this whole documentation
+      pass: `POST /auth/login` has zero rate-limiting today despite
+      `.env.example` defining variables that imply otherwise.
+- [x] Added a pointer note atop `docs/architecture.md` (the Phase-1
+      design sketch) directing readers to the new, code-grounded documents
+      above wherever the two disagree, rather than silently leaving two
+      contradictory sources of truth in the repo.
+- [x] Grounded every document above in the actual source rather than
+      memory or the earlier phase write-ups: read the full
+      `packages/database/prisma/schema.prisma`, grep'd every controller's
+      route/role decorators, read `@cmmp/scoring-engine`'s and
+      `@cmmp/import-engine`'s actual implementation files, and read all
+      six real workflow YAML files plus `docker-compose.yml`/both
+      Dockerfiles/`.env.example` before writing a line -- this surfaced
+      several previously-undocumented facts along the way (confirmed by
+      grep, not assumption): no rate-limiting code exists despite
+      `.env.example` implying it does; `EXECUTIVE_VIEWER` is never
+      referenced by any guard and today behaves identically to
+      `READ_ONLY_VIEWER`; and `Role`/`Evidence`/`Recommendation`/
+      `SecurityCapability`/`Benchmark`/`DashboardConfiguration` are modeled
+      but entirely unused by any service.
+
 ## Known Issues 🐛
 
 - ~~Root `.eslintrc.json` references missing ESLint plugins~~ — fixed in
@@ -1120,23 +1230,22 @@ undocumented gaps in *behavior* matter more than gaps in *docs*.
 
 ## Not Started ⭕
 
-### Phase 17: Documentation
-- [ ] Security architecture document
-- [ ] Data model documentation
-- [ ] API design document
-- [ ] Scoring methodology
-- [ ] Framework model documentation
-- [ ] Excel import format guide
-- [ ] Deployment guide
-- [ ] DevSecOps pipeline documentation
-- [ ] ADRs (Architecture Decision Records)
-- [ ] Threat model & STRIDE analysis
+None -- every phase originally scoped in this document (1 through 17) is
+now complete. What remains is the set of honestly-documented gaps and
+follow-ups captured throughout (see "Known Issues" above, each phase's own
+"Not built/verified this pass" notes, and "Next Steps" below) -- this is a
+living project, not a claim that nothing further is needed.
 
 ## Blockers 🚫
 
 None currently
 
 ## Architecture Decisions
+
+> The one-line summaries below are kept for quick scanning. Phase 17
+> expanded each into a full ADR with real Context/Alternatives/
+> Consequences (including, where relevant, how much of the decision is
+> actually realized vs. still aspirational) — see `docs/adr/`.
 
 ### ADR-001: Monorepo Architecture ✅
 - **Status**: Accepted
@@ -1269,10 +1378,15 @@ None recorded yet
    column-mapping import UI, an initiative picker on the risk detail
    page, and a security maturity heatmap + maturity distribution view,
    all live-verified against the real stack.
-7. **Begin Phase 17**: Documentation — a security architecture document, a
-   threat model, an API reference, a user guide, a deployment guide (which
-   can finally point at real, tested Dockerfiles/compose from Phase 15),
-   and a contributing guide
+7. ~~Begin Phase 17: Documentation~~ — done this session (see Phase 17
+   above): a security architecture document, a threat model/STRIDE
+   analysis, a full API reference, data-model/scoring/framework-model/
+   Excel-import/deployment/DevSecOps-pipeline documents, and 10 expanded
+   ADRs, all grounded directly in the real schema/code/workflow files
+   rather than summarized from memory — plus a pointer note atop the
+   Phase-1 `docs/architecture.md` flagging where it's since drifted from
+   reality (Redis, Kubernetes, an AWS ALB/WAF, a 1-hour JWT expiry that's
+   actually 24h, and an entity list that doesn't match the real schema).
 8. Spot-check the seeded NIST CSF 2.0 outcome text against the official
    NIST CSWP 29 publication (see the Phase 5 data-provenance note above) —
    this sandbox couldn't reach nist.gov directly to verify byte-for-byte
@@ -1290,6 +1404,17 @@ None recorded yet
     grouping instead of a flat filterable list (see this pass's "Not
     built" note) and let a heatmap category cell drill into its own
     subcategories inline.
+12. **New, from Phase 17's threat-model pass** — the single highest-value
+    fix identified across this entire project: add rate limiting (e.g.
+    `@nestjs/throttler`) to `POST /auth/login`. `.env.example` already
+    defines `ENABLE_RATE_LIMITING`/`RATE_LIMIT_WINDOW_MS`/
+    `RATE_LIMIT_MAX_REQUESTS`, but grepping the codebase confirms none of
+    the three is read anywhere — the login endpoint has zero brute-force
+    protection today. See `docs/threat-model.md`'s "Summary of the
+    highest-priority items" for this and four more ranked findings
+    (token revocation, missing CSP/HSTS headers, unpaginated list
+    endpoints, and `EXECUTIVE_VIEWER` never actually being distinguished
+    from `READ_ONLY_VIEWER` by any guard).
 
 ## Contact & Questions
 
