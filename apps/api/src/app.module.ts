@@ -5,6 +5,7 @@ import { AuthModule } from './auth/auth.module';
 import { UsersModule } from './users/users.module';
 import { FrameworkModule } from './framework/framework.module';
 import { AssessmentsModule } from './assessments/assessments.module';
+import { ImportModule } from './import/import.module';
 
 @Module({
   imports: [
@@ -17,6 +18,7 @@ import { AssessmentsModule } from './assessments/assessments.module';
     UsersModule,
     FrameworkModule,
     AssessmentsModule,
+    ImportModule,
   ],
   controllers: [],
   providers: [],

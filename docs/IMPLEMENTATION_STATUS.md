@@ -4,8 +4,8 @@ Last Updated: 2026-09-01
 
 ## Overall Progress
 
-**Phase**: 7 / 17
-**Completion**: ~41%
+**Phase**: 8 / 17
+**Completion**: ~47%
 
 ## Completed ✅
 
@@ -224,6 +224,50 @@ Last Updated: 2026-09-01
       persistence and tenant-scoped score retrieval) — 84 tests total across
       the branch
 
+### Phase 8: Excel Import Engine
+- [x] Excel/CSV parser (`packages/import-engine/src/parse.ts`) — `exceljs`
+      for `.xlsx` (first worksheet; formula cells resolve to their last
+      calculated result, not the formula text; rich text flattens to plain
+      text), `papaparse` for `.csv`; both report a 1-based row number
+      matching what a user would see with the file open, and parse
+      failures surface as `SpreadsheetParseError` rather than an opaque
+      library exception
+- [ ] Column mapping UI — no frontend exists yet (Phase 10). The backend
+      accepts an explicit `ColumnMapping` (target field → source column
+      header) per import request; there's no auto-detection/suggestion of
+      a mapping from a sheet's headers
+- [x] Data validation (`map-and-validate.ts`) — per-row, per-field: enum
+      values for maturity/risk/control-status (case- and separator-
+      insensitive, e.g. "In Progress" matches `IN_PROGRESS`),
+      `businessCriticality` as an integer 1-5, email format, date parsing;
+      a row with any validation failure is `ERROR` (nothing applied), a
+      row needing only formula sanitization is `WARNING` (still applied)
+- [x] Formula injection prevention (`sanitize.ts`) — CWE-1236 / OWASP CSV
+      injection: any free-text field (rationale, evidence, comments, owner
+      name) starting with `=`, `+`, `-`, `@`, tab, or CR is neutralized by
+      prefixing a `'` (the same "force text" convention Excel itself uses)
+      rather than silently stripped, so the sanitized value stays visible
+      and reversible; flagged as a row `WARNING`, not silent
+- [x] Error reporting — every row (VALID, WARNING, and ERROR alike) becomes
+      an `ImportRecord` (rowNumber, status, message, rawData, parsedData)
+      for the audit trail; `ImportJob.errorReport` carries a JSON summary
+      of just the error rows
+- [x] Bulk import with transaction support — `POST /assessments/:id/import`
+      (multipart upload, 5MB cap) resolves each row's subcategory code
+      against *that assessment's own* pre-seeded `AssessmentItem`s (Phase
+      6: import updates existing items, it never creates new ones), then
+      applies every `AssessmentItem` update and every `ImportRecord` in one
+      `$transaction` alongside the `ImportJob`; a code with no matching
+      item in the assessment's framework becomes a row-level `ERROR`
+      rather than failing the whole batch. `AssessmentsService.
+      recalculateProgress` (made public for this) runs once afterward
+      rather than once per row.
+- [x] Tests: 24 new tests in `packages/import-engine` (sanitize, parse,
+      map-and-validate) + 8 new tests in `apps/api` (`ImportService` —
+      including a transaction-scoped partial-failure case and the
+      formula-injection-still-applies-as-WARNING case) — 116 tests total
+      across the branch
+
 ## Known Issues 🐛
 
 - Root `.eslintrc.json` references `eslint-plugin-security`,
@@ -240,14 +284,6 @@ Last Updated: 2026-09-01
   binary; `packages/database`'s own `build` script only runs `tsc`.
 
 ## Not Started ⭕
-
-### Phase 8: Excel Import Engine
-- [ ] Excel/CSV parser
-- [ ] Column mapping UI
-- [ ] Data validation
-- [ ] Formula injection prevention
-- [ ] Error reporting
-- [ ] Bulk import with transaction support
 
 ### Phase 9: Dashboard APIs
 - [ ] Executive dashboard endpoint
@@ -427,17 +463,18 @@ None recorded yet
 1. **Generate the first Prisma migration** once a Postgres instance is
    reachable (`docker compose up postgres`, then
    `npm run db:generate && cd packages/database && npx prisma migrate dev`)
-2. **Begin Phase 8**: Excel Import Engine — parse Excel/CSV assessment data,
-   map columns onto `AssessmentItem` fields, validate (including formula-
-   injection prevention on untrusted spreadsheet input), and bulk-import
-   under a transaction, reusing `@cmmp/framework-engine`'s
-   `validateFrameworkDefinition`/`persistFrameworkDefinition` where a sheet
-   is defining a framework rather than assessment responses
+2. **Begin Phase 9**: Dashboard APIs — executive dashboard, maturity
+   overview, function maturity, gap analysis, risk summary, and roadmap
+   status endpoints, largely composing what already exists
+   (`ScoringService.computeGapAnalysis`, `AssessmentsService`) into
+   dashboard-shaped responses rather than new calculation logic
 3. Wire the Next.js frontend to the new `/api/v1/auth/login`,
-   `/api/v1/users`, `/api/v1/frameworks*`, and `/api/v1/assessments*`
-   endpoints (login page, session/token storage, framework selection UI,
-   an assessment-taking flow, and a maturity/gap view backed by
-   `GET /assessments/:id/scores`)
+   `/api/v1/users`, `/api/v1/frameworks*`, `/api/v1/assessments*`, and
+   `/api/v1/assessments/:id/import` endpoints (login page, session/token
+   storage, framework selection UI, an assessment-taking flow, a
+   maturity/gap view backed by `GET /assessments/:id/scores`, and a
+   column-mapping step for spreadsheet import — the backend takes an
+   explicit mapping today with no auto-suggestion)
 4. Spot-check the seeded NIST CSF 2.0 outcome text against the official
    NIST CSWP 29 publication (see the Phase 5 data-provenance note above) —
    this sandbox couldn't reach nist.gov directly to verify byte-for-byte

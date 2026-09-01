@@ -263,7 +263,8 @@ export class AssessmentsService {
     return this.findOne(tenantId, assessmentId);
   }
 
-  private async requireEditable(tenantId: string, assessmentId: string) {
+  /** Public: also used by ImportService to guard a bulk import against a non-editable assessment. */
+  async requireEditable(tenantId: string, assessmentId: string) {
     const assessment = await this.findOne(tenantId, assessmentId);
     if (assessment.status === 'SUBMITTED' || assessment.status === 'APPROVED' || assessment.status === 'ARCHIVED') {
       throw new BadRequestException(
@@ -278,8 +279,10 @@ export class AssessmentsService {
   // from the maturity score itself, which @cmmp/scoring-engine computes
   // from currentMaturity/targetMaturity via a weighted Function/Category/
   // Subcategory rollup (Phase 7). Recomputed together on every item edit
-  // so a single Assessment row update keeps both in sync.
-  private async recalculateProgress(assessmentId: string, userId: string) {
+  // so a single Assessment row update keeps both in sync. Public: also
+  // called once by ImportService after a bulk import applies many item
+  // updates at once, rather than recomputing per row.
+  async recalculateProgress(assessmentId: string, userId: string) {
     const [total, answered, orgScore] = await Promise.all([
       this.prisma.assessmentItem.count({ where: { assessmentId } }),
       this.prisma.assessmentItem.count({
