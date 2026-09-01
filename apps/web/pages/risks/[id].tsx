@@ -7,7 +7,7 @@ import { useEffect, useState, type FormEvent } from 'react';
 import { RiskLevelBadge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { api, ApiError, type RiskDetail } from '@/lib/api';
+import { api, ApiError, type InitiativeDetail, type RiskDetail } from '@/lib/api';
 
 const inputClass =
   'w-full rounded-md border border-slate-600 bg-slate-900 px-3 py-2 text-sm text-white focus:border-blue-500 focus:outline-none';
@@ -24,6 +24,7 @@ export default function RiskDetailPage() {
   const [error, setError] = useState<string | null>(null);
   const [owner, setOwner] = useState('');
   const [riskStatus, setRiskStatus] = useState('OPEN');
+  const [availableInitiatives, setAvailableInitiatives] = useState<InitiativeDetail[] | null>(null);
   const [initiativeId, setInitiativeId] = useState('');
   const [saving, setSaving] = useState(false);
 
@@ -49,6 +50,11 @@ export default function RiskDetailPage() {
 
   useEffect(load, [sessionStatus, session, riskId]);
 
+  useEffect(() => {
+    if (sessionStatus !== 'authenticated') return;
+    api.listInitiatives(session.accessToken).then(setAvailableInitiatives).catch(() => setAvailableInitiatives([]));
+  }, [sessionStatus, session]);
+
   if (sessionStatus === 'loading' || (sessionStatus === 'authenticated' && !risk && !error)) {
     return <CenteredMessage>Loading…</CenteredMessage>;
   }
@@ -61,6 +67,9 @@ export default function RiskDetailPage() {
   if (!risk) {
     return null;
   }
+
+  const linkedIds = new Set(risk.initiatives.map((i) => i.id));
+  const unlinkedInitiatives = (availableInitiatives ?? []).filter((i) => !linkedIds.has(i.id));
 
   async function handleSave(event: FormEvent) {
     event.preventDefault();
@@ -205,16 +214,29 @@ export default function RiskDetailPage() {
                 ))}
               </ul>
               <form onSubmit={handleLinkInitiative} className="flex gap-2">
-                <input
-                  placeholder="Remediation initiative ID"
+                <select
                   value={initiativeId}
                   onChange={(e) => setInitiativeId(e.target.value)}
                   className={inputClass}
-                />
-                <Button type="submit" variant="outline">
+                >
+                  <option value="">
+                    {availableInitiatives === null ? 'Loading initiatives…' : 'Select an initiative to link…'}
+                  </option>
+                  {unlinkedInitiatives.map((initiative) => (
+                    <option key={initiative.id} value={initiative.id}>
+                      {initiative.title} ({initiative.status})
+                    </option>
+                  ))}
+                </select>
+                <Button type="submit" variant="outline" disabled={!initiativeId}>
                   Link
                 </Button>
               </form>
+              {availableInitiatives !== null && unlinkedInitiatives.length === 0 && (
+                <p className="text-xs text-slate-500">
+                  Every existing remediation initiative is already linked to this risk.
+                </p>
+              )}
             </CardContent>
           </Card>
         </div>

@@ -1,5 +1,6 @@
 import type { AuditEventSummary } from '@cmmp/shared';
 import type { ExecutiveDashboard } from '@cmmp/shared';
+import type { MaturityHeatmap } from '@cmmp/shared';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
 
@@ -31,6 +32,26 @@ async function apiFetch<T>(accessToken: string, path: string, init?: RequestInit
   return response.json() as Promise<T>;
 }
 
+/**
+ * Like apiFetch, but for a multipart/form-data upload -- the browser must
+ * set its own Content-Type (with the multipart boundary) from the
+ * FormData body, so this deliberately sends no Content-Type of its own.
+ */
+async function apiUpload<T>(accessToken: string, path: string, formData: FormData): Promise<T> {
+  const response = await fetch(`${API_URL}/api/v1${path}`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${accessToken}` },
+    body: formData,
+  });
+
+  if (!response.ok) {
+    const body = await response.json().catch(() => ({ message: response.statusText }));
+    throw new ApiError(response.status, body.message ?? response.statusText);
+  }
+
+  return response.json() as Promise<T>;
+}
+
 export interface AssessmentSummary {
   id: string;
   organisationId: string;
@@ -48,6 +69,66 @@ export interface LinkedInitiative {
   title: string;
   status: string;
   targetCompletionDate: string | null;
+}
+
+export interface FrameworkSummary {
+  id: string;
+  name: string;
+  slug: string;
+  version: string;
+  frameWorkType: string;
+  description: string | null;
+  isActive: boolean;
+  createdAt: string;
+}
+
+export interface CreateAssessmentInput {
+  organisationId: string;
+  frameworkSlug: string;
+  frameworkVersion?: string;
+  name: string;
+  description?: string;
+  assessmentDate: string;
+}
+
+export interface AssessmentItemDetail {
+  id: string;
+  questionId: string;
+  currentMaturity: string;
+  targetMaturity: string;
+  weight: number;
+  riskLevel: string;
+  businessCriticality: number;
+  controlStatus: string;
+  rationale: string | null;
+  evidence: string | null;
+  assessorComments: string | null;
+  ownerName: string | null;
+  ownerEmail: string | null;
+  remediationDueDate: string | null;
+  question: {
+    id: string;
+    question: string;
+    guidance: string | null;
+    subcategoryId: string;
+  };
+}
+
+export interface AssessmentDetail extends AssessmentSummary {
+  items: AssessmentItemDetail[];
+}
+
+export interface UpdateAssessmentItemInput {
+  currentMaturity?: string;
+  targetMaturity?: string;
+  controlStatus?: string;
+  riskLevel?: string;
+  businessCriticality?: number;
+  rationale?: string;
+  evidence?: string;
+  assessorComments?: string;
+  ownerName?: string;
+  ownerEmail?: string;
 }
 
 export interface RiskDetail {
@@ -129,15 +210,89 @@ export interface InitiativeTimeline {
   beyondOrUnscheduled: InitiativeDetail[];
 }
 
+export interface ImportPreview {
+  headers: string[];
+  rowCount: number;
+  sampleRows: Record<string, unknown>[];
+  requiredField: 'subcategoryCode';
+  optionalFields: string[];
+}
+
+export interface ImportRowResult {
+  rowNumber: number;
+  status: 'VALID' | 'WARNING' | 'ERROR';
+  messages: string[];
+}
+
+export interface ImportResult {
+  importJobId: string;
+  recordCount: number;
+  successCount: number;
+  warningCount: number;
+  errorCount: number;
+  results: ImportRowResult[];
+}
+
+export type ColumnMapping = Record<string, string>;
+
 export const api = {
   listAssessments: (token: string) => apiFetch<AssessmentSummary[]>(token, '/assessments'),
+
+  listFrameworks: (token: string) => apiFetch<FrameworkSummary[]>(token, '/frameworks'),
+
+  createAssessment: (token: string, input: CreateAssessmentInput) =>
+    apiFetch<AssessmentDetail>(token, '/assessments', { method: 'POST', body: JSON.stringify(input) }),
+
+  getAssessment: (token: string, assessmentId: string) =>
+    apiFetch<AssessmentDetail>(token, `/assessments/${assessmentId}`),
+
+  previewImport: (token: string, assessmentId: string, file: File, format: 'csv' | 'xlsx') => {
+    const formData = new FormData();
+    formData.append('file', file);
+    formData.append('format', format);
+    return apiUpload<ImportPreview>(token, `/assessments/${assessmentId}/import/preview`, formData);
+  },
+
+  importResponses: (
+    token: string,
+    assessmentId: string,
+    file: File,
+    format: 'csv' | 'xlsx',
+    mapping: ColumnMapping,
+  ) => {
+    const formData = new FormData();
+    formData.append('file', file);
+    formData.append('format', format);
+    formData.append('mapping', JSON.stringify(mapping));
+    return apiUpload<ImportResult>(token, `/assessments/${assessmentId}/import`, formData);
+  },
+
+  updateAssessmentItem: (token: string, assessmentId: string, itemId: string, input: UpdateAssessmentItemInput) =>
+    apiFetch<AssessmentDetail>(token, `/assessments/${assessmentId}/items/${itemId}`, {
+      method: 'PATCH',
+      body: JSON.stringify(input),
+    }),
+
+  submitAssessment: (token: string, assessmentId: string) =>
+    apiFetch<AssessmentDetail>(token, `/assessments/${assessmentId}/submit`, { method: 'POST' }),
+
+  approveAssessment: (token: string, assessmentId: string) =>
+    apiFetch<AssessmentDetail>(token, `/assessments/${assessmentId}/approve`, { method: 'POST' }),
+
+  reopenAssessment: (token: string, assessmentId: string) =>
+    apiFetch<AssessmentDetail>(token, `/assessments/${assessmentId}/reopen`, { method: 'POST' }),
 
   getExecutiveDashboard: (token: string, assessmentId: string) =>
     apiFetch<ExecutiveDashboard>(token, `/assessments/${assessmentId}/dashboard`),
 
+  getMaturityHeatmap: (token: string, assessmentId: string) =>
+    apiFetch<MaturityHeatmap>(token, `/assessments/${assessmentId}/dashboard/heatmap`),
+
   listRisks: (token: string) => apiFetch<RiskDetail[]>(token, '/risks?sortBy=score'),
 
   getRoadmapTimeline: (token: string) => apiFetch<InitiativeTimeline>(token, '/initiatives/timeline'),
+
+  listInitiatives: (token: string) => apiFetch<InitiativeDetail[]>(token, '/initiatives?sortBy=priority'),
 
   generateRoadmap: (token: string, assessmentId: string) =>
     apiFetch<InitiativeDetail[]>(token, `/assessments/${assessmentId}/roadmap/generate`, {

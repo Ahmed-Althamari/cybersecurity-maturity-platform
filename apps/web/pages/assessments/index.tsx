@@ -50,6 +50,9 @@ export default function AssessmentsPage() {
               <p className="text-slate-400">{session.user.name} &middot; {session.user.role}</p>
             </div>
             <div className="flex gap-2">
+              <Link href="/assessments/new">
+                <Button>New Assessment</Button>
+              </Link>
               <Link href="/roadmap">
                 <Button variant="outline">Roadmap</Button>
               </Link>

@@ -4,8 +4,8 @@ Last Updated: 2026-09-01
 
 ## Overall Progress
 
-**Phase**: 16 / 17
-**Completion**: ~94%
+**Phase**: 16 / 17 (plus a frontend gap-closure pass ahead of Phase 17 -- see "Frontend Gap Closure" below)
+**Completion**: ~96%
 
 ## First End-to-End Verification Against a Live Database
 
@@ -1001,6 +1001,104 @@ Chromium against the running Next.js + NestJS + Postgres stack), not just
   ignores CODEOWNERS entries for teams/users it can't resolve, so this
   isn't actively broken, just inert until real reviewers are assigned.
 
+### Frontend Gap Closure (before Phase 17)
+Before starting Phase 17 (Documentation), closed out the specific frontend
+gaps this document had been carrying since Phase 9-12's "Not built this
+pass" notes -- at the user's request, prioritized over documentation since
+undocumented gaps in *behavior* matter more than gaps in *docs*.
+
+- [x] **Assessment-taking flow** -- the biggest of the five: until now,
+      `POST /assessments` (Phase 6) had no UI at all, so an assessment
+      could only ever be created via `curl`/Prisma Studio, and its 106
+      items had no way to be answered short of the spreadsheet importer.
+      New `pages/assessments/new.tsx` (name/description/date + a
+      framework picker sourced from `GET /frameworks`) and
+      `pages/assessments/[id]/take.tsx` (every item as its own card --
+      current/target maturity, control status, rationale, evidence --
+      each independently PATCH-able via `PATCH /assessments/:id/items/:itemId`,
+      a keyword filter across all 106 questions in place of a framework-
+      hierarchy grouping this pass didn't build, a live progress bar, and
+      a Submit-for-Approval button gated on 100% completion). The
+      dashboard page gained status-aware workflow buttons (Start/Continue/
+      View Responses, plus Approve/Reopen for a submitted assessment) by
+      fetching the assessment's own status alongside the executive
+      dashboard summary.
+- [x] **Framework selection UI** -- folded into the create-assessment
+      form above rather than built as a separate page, since selecting a
+      framework only ever matters at assessment-creation time; the
+      picker shows every active framework's name, version, and
+      description from `GET /frameworks`.
+- [x] **Column-mapping import UI** -- `POST /assessments/:id/import` (Phase
+      8) always required a caller to already know the mapping, with
+      nothing in the UI to derive one from an actual file. Added a new
+      `POST /assessments/:id/import/preview` endpoint (reuses
+      `parseSpreadsheet` from `@cmmp/import-engine` -- read-only, nothing
+      persisted) returning the source headers, a few sample rows, and the
+      exact target-field list `importAssessmentResponses` accepts (so the
+      mapping UI can never drift from what the real import endpoint takes).
+      New `pages/assessments/[id]/import.tsx`: pick a file -> preview
+      columns -> a mapping form (auto-matches same-named headers, human
+      adjusts the rest) -> import, then shows applied/warning/error counts
+      with per-row error messages.
+- [x] **Initiative picker on the risk detail page** -- previously a raw
+      text input for pasting a remediation initiative's UUID by hand (the
+      backend `GET /initiatives`/`POST /risks/:id/initiatives/:initiativeId`
+      already existed, just never wired to a picker). Replaced with a
+      `<select>` populated from `GET /initiatives`, filtered to exclude
+      initiatives already linked to this risk.
+- [x] **Security maturity heatmap + maturity distribution** -- the
+      `levels` query param this document had flagged as "the engine
+      already supports it, just not exposed here" for two sessions
+      running. Rather than extend the existing `/dashboard/gaps` endpoint
+      (hardcoded to function-level for the current top-gaps table, and
+      risky to change given other callers), added a new
+      `GET /assessments/:id/dashboard/heatmap` endpoint and
+      `getMaturityHeatmap()` service method: reuses `identifyGaps` (via
+      `computeGapAnalysis({ levels: ['function','category','subcategory'] })`)
+      for per-node risk classification rather than re-deriving thresholds,
+      and a new `loadHierarchyMetadata` query resolves code/name for every
+      function/category/subcategory this assessment touches in one round
+      trip. New `MaturityHeatmap`/`MaturityHeatmapFunction`/
+      `MaturityHeatmapCategory`/`MaturityHeatmapSubcategory` types added to
+      `@cmmp/shared` (matching how `ExecutiveDashboard`/`GapAnalysis` are
+      already shared between both apps). Frontend: a new
+      `MaturityHeatmap` component (function rows of category cells,
+      colored by risk level, `title` tooltip with the full current/target/gap)
+      and `MaturityDistributionChart` (a bar chart of subcategory count per
+      maturity level, always showing all six levels even at zero so the
+      chart never looks like buckets are missing), both added to the
+      assessment dashboard page.
+- [x] Tests: 3 new backend tests for `getMaturityHeatmap` (nesting +
+      per-node risk-level lookup, falling back to the raw id when
+      metadata is missing, and the distribution count -- 115 tests total
+      in `apps/api`, up from 109) and 3 new backend tests for the import
+      preview endpoint (headers/sample-rows/target-fields shape, that it
+      touches nothing but the assessment lookup, and that a parse failure
+      surfaces as 400).
+- [x] Live-verified all five, end-to-end, against the real local stack (not
+      just type-checked): created a real assessment through the new UI,
+      confirmed all 106 items were seeded and the picked framework was
+      NIST CSF 2.0; answered one item and confirmed the DRAFT -> IN_PROGRESS
+      transition and completion-percentage recalculation happened live;
+      imported a 3-row CSV (2 valid, 1 deliberately referencing a
+      nonexistent subcategory code) through the mapping UI and confirmed
+      auto-mapping pre-selected the same-named columns and the result
+      panel showed 2 applied / 0 warnings / 1 error with the correct
+      per-row message; loaded the seeded demo assessment's dashboard and
+      confirmed the heatmap and distribution chart rendered real,
+      correctly-colored data alongside the existing charts.
+
+  **Not built this pass**: the take-assessment page uses a flat,
+  filterable list rather than reconstructing the function/category/
+  subcategory hierarchy for grouping (the assessment API doesn't return a
+  framework slug/id on the assessment itself, only per-item
+  `subcategoryId`, so hierarchy-aware grouping there would need either a
+  second framework-tree fetch and ID cross-referencing, or a new backend
+  field -- left as a follow-up); the heatmap's category cells don't drill
+  into their own subcategories inline (available from the same endpoint,
+  just not surfaced in this pass's UI); no column-mapping "remember my
+  last mapping" convenience for repeat imports against the same framework.
+
 ## Known Issues 🐛
 
 - ~~Root `.eslintrc.json` references missing ESLint plugins~~ — fixed in
@@ -1166,19 +1264,15 @@ None recorded yet
    repo-wide for the first time ever -- both were silently broken since
    Phase 1/3 and would have made this phase's own CI workflow red from
    its very first run
-6. **Begin Phase 17**: Documentation — a security architecture document, a
+6. ~~Round out earlier frontend gaps~~ — done this session (see "Frontend
+   Gap Closure" above): an assessment-taking flow, framework selection,
+   column-mapping import UI, an initiative picker on the risk detail
+   page, and a security maturity heatmap + maturity distribution view,
+   all live-verified against the real stack.
+7. **Begin Phase 17**: Documentation — a security architecture document, a
    threat model, an API reference, a user guide, a deployment guide (which
    can finally point at real, tested Dockerfiles/compose from Phase 15),
    and a contributing guide
-7. Round out earlier frontend gaps: an assessment-taking flow (create an
-   assessment, walk its 106 items, `PATCH` responses — today only the
-   read-side dashboard has UI), a framework selection UI, a
-   column-mapping step for spreadsheet import, an initiative *picker* for
-   the risk detail page (`GET /initiatives` exists now, just not wired
-   into that page), and a category/subcategory-level `levels` query
-   param on `GET .../dashboard/gaps` (the engine already supports it) for
-   the still-missing security maturity heatmap and maturity distribution
-   views.
 8. Spot-check the seeded NIST CSF 2.0 outcome text against the official
    NIST CSWP 29 publication (see the Phase 5 data-provenance note above) —
    this sandbox couldn't reach nist.gov directly to verify byte-for-byte
@@ -1192,6 +1286,10 @@ None recorded yet
     `fail_action: true`), and have a repo admin mark `Security Gate`,
     `Gitleaks`, and CodeQL's analyze job as required status checks in
     Settings -> Branches -- no committed workflow file can do that part
+11. Give the take-assessment page real function/category/subcategory
+    grouping instead of a flat filterable list (see this pass's "Not
+    built" note) and let a heatmap category cell drill into its own
+    subcategories inline.
 
 ## Contact & Questions
 

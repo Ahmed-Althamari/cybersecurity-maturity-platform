@@ -82,6 +82,27 @@ function functionMetadataRows() {
   ];
 }
 
+function hierarchyMetadataRows() {
+  return [
+    {
+      question: {
+        subcategoryId: 'sub-rm-01',
+        subcategory: {
+          code: 'GV.RM-01',
+          name: 'Risk management objectives',
+          categoryId: 'cat-rm',
+          category: {
+            code: 'GV.RM',
+            name: 'Risk Management',
+            functionId: 'fn-gv',
+            function: { code: 'GV', name: 'Govern' },
+          },
+        },
+      },
+    },
+  ];
+}
+
 function completionRows() {
   return [
     { controlStatus: 'COMPLETED', question: { subcategory: { category: { functionId: 'fn-gv' } } } },
@@ -219,6 +240,90 @@ describe('DashboardService', () => {
       expect(status.totalInitiatives).toBe(3);
       expect(status.upcoming.map((i) => i.id)).toEqual(['sooner', 'later']);
       expect(status.byStatus).toEqual({ PLANNED: 1, IN_PROGRESS: 1, COMPLETED: 1 });
+    });
+  });
+
+  describe('getMaturityHeatmap', () => {
+    it('nests function -> category -> subcategory with code/name and per-node risk levels', async () => {
+      scoringService.computeGapAnalysis.mockResolvedValueOnce({
+        score: scoreTree(),
+        gaps: [
+          { level: 'function', id: 'fn-gv', currentScore: 2, targetScore: 4, gap: 2, riskLevel: 'HIGH' },
+          { level: 'category', id: 'cat-rm', currentScore: 2, targetScore: 4, gap: 2, riskLevel: 'HIGH' },
+          {
+            level: 'subcategory',
+            id: 'sub-rm-01',
+            currentScore: 2,
+            targetScore: 4,
+            gap: 2,
+            riskLevel: 'CRITICAL',
+          },
+        ],
+      });
+      prisma.assessmentItem.findMany.mockResolvedValueOnce(hierarchyMetadataRows());
+
+      const heatmap = await service.getMaturityHeatmap('tenant-a', 'assessment-1');
+
+      const gv = heatmap.functions.find((f) => f.id === 'fn-gv')!;
+      expect(gv.code).toBe('GV');
+      expect(gv.name).toBe('Govern');
+      expect(gv.riskLevel).toBe('HIGH');
+
+      const rm = gv.categories.find((c) => c.id === 'cat-rm')!;
+      expect(rm.code).toBe('GV.RM');
+      expect(rm.name).toBe('Risk Management');
+
+      const sub = rm.subcategories.find((s) => s.id === 'sub-rm-01')!;
+      expect(sub.code).toBe('GV.RM-01');
+      expect(sub.name).toBe('Risk management objectives');
+      // The subcategory has its own CRITICAL classification distinct from
+      // its parent category/function's HIGH -- confirms riskLevel is
+      // looked up per-node, not inherited from a shared default.
+      expect(sub.riskLevel).toBe('CRITICAL');
+    });
+
+    it('falls back to the raw id when no metadata was found for a node (e.g. an empty framework)', async () => {
+      prisma.assessmentItem.findMany.mockResolvedValueOnce([]);
+
+      const heatmap = await service.getMaturityHeatmap('tenant-a', 'assessment-1');
+
+      const gv = heatmap.functions.find((f) => f.id === 'fn-gv')!;
+      expect(gv.code).toBe('fn-gv');
+      expect(gv.name).toBe('fn-gv');
+    });
+
+    it('counts the maturity distribution across subcategories only, keyed by currentLevel', async () => {
+      scoringService.computeGapAnalysis.mockResolvedValueOnce({
+        score: {
+          ...scoreTree(),
+          functions: [
+            {
+              ...scoreTree().functions[0],
+              categories: [
+                {
+                  ...scoreTree().functions[0].categories[0],
+                  subcategories: [
+                    { ...scoreTree().functions[0].categories[0].subcategories[0], currentLevel: 'DEFINED' },
+                  ],
+                },
+              ],
+            },
+            scoreTree().functions[1],
+          ],
+        },
+        gaps: [],
+      });
+      prisma.assessmentItem.findMany.mockResolvedValueOnce(hierarchyMetadataRows());
+
+      const heatmap = await service.getMaturityHeatmap('tenant-a', 'assessment-1');
+
+      expect(heatmap.distribution.DEFINED).toBe(1);
+      expect(heatmap.distribution.MANAGED).toBe(0);
+      // Every MaturityLevel is present even when its count is zero, so a
+      // distribution chart never has to guess which buckets exist.
+      expect(Object.keys(heatmap.distribution).sort()).toEqual(
+        ['NOT_APPLICABLE', 'INITIAL', 'DEVELOPING', 'DEFINED', 'MANAGED', 'OPTIMISED'].sort(),
+      );
     });
   });
 

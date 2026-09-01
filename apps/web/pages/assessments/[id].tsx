@@ -1,4 +1,4 @@
-import type { ExecutiveDashboard } from '@cmmp/shared';
+import type { ExecutiveDashboard, MaturityHeatmap as MaturityHeatmapData } from '@cmmp/shared';
 import Head from 'next/head';
 import Link from 'next/link';
 import { useRouter } from 'next/router';
@@ -8,6 +8,8 @@ import { useEffect, useState } from 'react';
 import { FunctionCards } from '@/components/dashboard/function-cards';
 import { GapBarChart } from '@/components/dashboard/gap-bar-chart';
 import { KpiCard } from '@/components/dashboard/kpi-card';
+import { MaturityDistributionChart } from '@/components/dashboard/maturity-distribution-chart';
+import { MaturityHeatmap } from '@/components/dashboard/maturity-heatmap';
 import { MaturityRadarChart } from '@/components/dashboard/maturity-radar-chart';
 import { RiskSummaryPanel, RoadmapPanel } from '@/components/dashboard/risk-roadmap-panels';
 import { TopGapsTable } from '@/components/dashboard/top-gaps-table';
@@ -20,9 +22,31 @@ export default function AssessmentDashboardPage() {
   const assessmentId = typeof router.query.id === 'string' ? router.query.id : undefined;
 
   const [dashboard, setDashboard] = useState<ExecutiveDashboard | null>(null);
+  const [heatmap, setHeatmap] = useState<MaturityHeatmapData | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [generating, setGenerating] = useState(false);
   const [generateMessage, setGenerateMessage] = useState<string | null>(null);
+  const [assessmentStatus, setAssessmentStatus] = useState<string | null>(null);
+  const [workflowBusy, setWorkflowBusy] = useState(false);
+  const [workflowMessage, setWorkflowMessage] = useState<string | null>(null);
+
+  async function handleWorkflowAction(action: 'approve' | 'reopen') {
+    if (!assessmentId) return;
+    setWorkflowBusy(true);
+    setWorkflowMessage(null);
+    try {
+      const updated =
+        action === 'approve'
+          ? await api.approveAssessment(session!.accessToken, assessmentId)
+          : await api.reopenAssessment(session!.accessToken, assessmentId);
+      setAssessmentStatus(updated.status);
+      setWorkflowMessage(action === 'approve' ? 'Assessment approved.' : 'Assessment reopened for edits.');
+    } catch (err) {
+      setWorkflowMessage(err instanceof ApiError ? err.message : `Failed to ${action} assessment`);
+    } finally {
+      setWorkflowBusy(false);
+    }
+  }
 
   async function handleGenerateRoadmap() {
     if (!assessmentId) return;
@@ -56,6 +80,14 @@ export default function AssessmentDashboardPage() {
       .getExecutiveDashboard(session.accessToken, assessmentId)
       .then(setDashboard)
       .catch((err) => setError(err instanceof ApiError ? err.message : 'Failed to load dashboard'));
+    api
+      .getAssessment(session.accessToken, assessmentId)
+      .then((a) => setAssessmentStatus(a.status))
+      .catch(() => undefined);
+    api
+      .getMaturityHeatmap(session.accessToken, assessmentId)
+      .then(setHeatmap)
+      .catch(() => undefined);
   }, [status, session, assessmentId]);
 
   if (status === 'loading' || (status === 'authenticated' && !dashboard && !error)) {
@@ -87,7 +119,34 @@ export default function AssessmentDashboardPage() {
               </Link>
               <h1 className="mt-1 text-3xl font-bold text-white">Executive Dashboard</h1>
             </div>
-            <div className="flex gap-2">
+            <div className="flex flex-wrap items-center gap-2">
+              {assessmentId && (assessmentStatus === 'DRAFT' || assessmentStatus === 'IN_PROGRESS') && (
+                <Link href={`/assessments/${assessmentId}/take`}>
+                  <Button>{assessmentStatus === 'DRAFT' ? 'Start Assessment' : 'Continue Assessment'}</Button>
+                </Link>
+              )}
+              {assessmentId && assessmentStatus === 'SUBMITTED' && (
+                <>
+                  <Link href={`/assessments/${assessmentId}/take`}>
+                    <Button variant="outline">View Responses</Button>
+                  </Link>
+                  <Button onClick={() => handleWorkflowAction('approve')} disabled={workflowBusy}>
+                    {workflowBusy ? 'Working…' : 'Approve'}
+                  </Button>
+                  <Button
+                    variant="outline"
+                    onClick={() => handleWorkflowAction('reopen')}
+                    disabled={workflowBusy}
+                  >
+                    Reopen
+                  </Button>
+                </>
+              )}
+              {assessmentId && assessmentStatus === 'APPROVED' && (
+                <Link href={`/assessments/${assessmentId}/take`}>
+                  <Button variant="outline">View Responses</Button>
+                </Link>
+              )}
               <Link href="/roadmap">
                 <Button variant="outline">Roadmap</Button>
               </Link>
@@ -99,6 +158,7 @@ export default function AssessmentDashboardPage() {
               </Button>
             </div>
           </div>
+          {workflowMessage && <p className="mb-4 text-sm text-slate-400">{workflowMessage}</p>}
 
           <div className="mb-8 grid grid-cols-2 gap-4 md:grid-cols-4 lg:grid-cols-7">
             <KpiCard label="Overall Maturity" value={maturityOverview.overallMaturity.toFixed(1)} />
@@ -131,6 +191,15 @@ export default function AssessmentDashboardPage() {
             <h2 className="mb-4 text-xl font-semibold text-white">Function Breakdown</h2>
             <FunctionCards functions={functionMaturity} />
           </div>
+
+          {heatmap && (
+            <div className="mb-8 grid grid-cols-1 gap-6 lg:grid-cols-3">
+              <div className="lg:col-span-2">
+                <MaturityHeatmap heatmap={heatmap} />
+              </div>
+              <MaturityDistributionChart distribution={heatmap.distribution} />
+            </div>
+          )}
 
           <div className="mb-8">
             <TopGapsTable gaps={topGaps} />

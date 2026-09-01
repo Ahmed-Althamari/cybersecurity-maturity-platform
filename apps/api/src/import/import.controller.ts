@@ -26,6 +26,31 @@ const MAX_IMPORT_FILE_BYTES = 5 * 1024 * 1024; // 5MB
 export class ImportController {
   constructor(private importService: ImportService) {}
 
+  @Post('preview')
+  @UseGuards(RolesGuard)
+  @Roles(
+    UserRole.PLATFORM_ADMIN,
+    UserRole.ORGANISATION_ADMIN,
+    UserRole.CISO,
+    UserRole.GRC_MANAGER,
+    UserRole.ASSESSOR,
+  )
+  @UseInterceptors(FileInterceptor('file', { limits: { fileSize: MAX_IMPORT_FILE_BYTES } }))
+  async previewImport(
+    @Param('id') assessmentId: string,
+    @UploadedFile() file: Express.Multer.File | undefined,
+    @Body('format') format: string | undefined,
+    @CurrentUser() user: any,
+  ) {
+    if (!file) {
+      throw new BadRequestException("No file uploaded (expected multipart field 'file')");
+    }
+    if (format !== 'csv' && format !== 'xlsx') {
+      throw new BadRequestException("'format' must be 'csv' or 'xlsx'");
+    }
+    return this.importService.previewSpreadsheet(user.tenantId, assessmentId, file, format as SpreadsheetFormat);
+  }
+
   @Post()
   @UseGuards(RolesGuard)
   @Roles(

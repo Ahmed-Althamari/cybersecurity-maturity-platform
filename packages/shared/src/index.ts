@@ -209,6 +209,49 @@ export interface GapAnalysis {
 }
 
 // ============================================================================
+// MATURITY HEATMAP TYPES (Phase 17 UI enhancements)
+// ============================================================================
+
+export interface MaturityHeatmapSubcategory {
+  id: string;
+  code: string;
+  name: string;
+  currentScore: number | null;
+  targetScore: number | null;
+  gap: number | null;
+  riskLevel: RiskLevel;
+  currentLevel: MaturityLevel | null;
+}
+
+export interface MaturityHeatmapCategory {
+  id: string;
+  code: string;
+  name: string;
+  currentScore: number | null;
+  targetScore: number | null;
+  gap: number | null;
+  riskLevel: RiskLevel;
+  subcategories: MaturityHeatmapSubcategory[];
+}
+
+export interface MaturityHeatmapFunction {
+  id: string;
+  code: string;
+  name: string;
+  currentScore: number | null;
+  targetScore: number | null;
+  gap: number | null;
+  riskLevel: RiskLevel;
+  categories: MaturityHeatmapCategory[];
+}
+
+export interface MaturityHeatmap {
+  functions: MaturityHeatmapFunction[];
+  /** Count of subcategories currently assessed at each maturity level -- the maturity distribution view. */
+  distribution: Record<MaturityLevel, number>;
+}
+
+// ============================================================================
 // RISK TYPES
 // ============================================================================
 

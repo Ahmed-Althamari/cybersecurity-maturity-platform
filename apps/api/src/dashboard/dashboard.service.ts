@@ -1,8 +1,10 @@
-import { RiskLevel } from '@cmmp/shared';
+import { MaturityLevel, RiskLevel } from '@cmmp/shared';
 import type {
   ExecutiveDashboard,
   FunctionMaturity,
   GapAnalysis,
+  MaturityHeatmap,
+  MaturityHeatmapFunction,
   MaturityOverview,
   RemediationInitiative,
   Risk,
@@ -140,6 +142,73 @@ export class DashboardService {
     });
   }
 
+  /**
+   * Category/subcategory-level maturity data for a heatmap view, plus a
+   * subcategory-level maturity distribution -- the piece
+   * `getGapAnalysis` above deliberately doesn't cover (it's hardcoded to
+   * `levels: ['function']` for the existing top-gaps table). Reuses
+   * `identifyGaps` (via computeGapAnalysis) for risk-level classification
+   * rather than re-deriving it, and walks `score.functions` directly for
+   * natural function -> category -> subcategory nesting instead of
+   * reconstructing a tree from parent ids.
+   */
+  async getMaturityHeatmap(tenantId: string, assessmentId: string): Promise<MaturityHeatmap> {
+    await this.assessmentsService.findOne(tenantId, assessmentId);
+    const [{ score, gaps }, metadata] = await Promise.all([
+      this.scoringService.computeGapAnalysis(assessmentId, {
+        levels: ['function', 'category', 'subcategory'],
+      }),
+      this.loadHierarchyMetadata(assessmentId),
+    ]);
+
+    const riskLevelById = new Map(gaps.map((gap) => [gap.id, gap.riskLevel]));
+
+    const functions: MaturityHeatmapFunction[] = score.functions.map((fn) => ({
+      id: fn.functionId,
+      code: metadata.functions.get(fn.functionId)?.code ?? fn.functionId,
+      name: metadata.functions.get(fn.functionId)?.name ?? fn.functionId,
+      currentScore: fn.currentScore,
+      targetScore: fn.targetScore,
+      gap: fn.gap,
+      riskLevel: riskLevelById.get(fn.functionId) ?? RiskLevel.MINIMAL,
+      categories: fn.categories.map((category) => ({
+        id: category.categoryId,
+        code: metadata.categories.get(category.categoryId)?.code ?? category.categoryId,
+        name: metadata.categories.get(category.categoryId)?.name ?? category.categoryId,
+        currentScore: category.currentScore,
+        targetScore: category.targetScore,
+        gap: category.gap,
+        riskLevel: riskLevelById.get(category.categoryId) ?? RiskLevel.MINIMAL,
+        subcategories: category.subcategories.map((subcategory) => ({
+          id: subcategory.subcategoryId,
+          code: metadata.subcategories.get(subcategory.subcategoryId)?.code ?? subcategory.subcategoryId,
+          name: metadata.subcategories.get(subcategory.subcategoryId)?.name ?? subcategory.subcategoryId,
+          currentScore: subcategory.currentScore,
+          targetScore: subcategory.targetScore,
+          gap: subcategory.gap,
+          riskLevel: riskLevelById.get(subcategory.subcategoryId) ?? RiskLevel.MINIMAL,
+          currentLevel: subcategory.currentLevel,
+        })),
+      })),
+    }));
+
+    const distribution: Record<string, number> = {};
+    for (const level of Object.values(MaturityLevel)) {
+      distribution[level] = 0;
+    }
+    for (const fn of score.functions) {
+      for (const category of fn.categories) {
+        for (const subcategory of category.subcategories) {
+          if (subcategory.currentLevel) {
+            distribution[subcategory.currentLevel] = (distribution[subcategory.currentLevel] ?? 0) + 1;
+          }
+        }
+      }
+    }
+
+    return { functions, distribution: distribution as Record<MaturityLevel, number> };
+  }
+
   async getRiskSummary(tenantId: string, assessmentId: string): Promise<RiskSummary> {
     await this.assessmentsService.findOne(tenantId, assessmentId);
     const risks = await this.loadAssessmentRisks(tenantId, assessmentId);
@@ -214,6 +283,58 @@ export class DashboardService {
       }
     }
     return meta;
+  }
+
+  /** Code/name for every function, category, and subcategory this assessment touches, in one query. */
+  private async loadHierarchyMetadata(assessmentId: string): Promise<{
+    functions: Map<string, { code: string; name: string }>;
+    categories: Map<string, { code: string; name: string }>;
+    subcategories: Map<string, { code: string; name: string }>;
+  }> {
+    const items = await this.prisma.assessmentItem.findMany({
+      where: { assessmentId },
+      select: {
+        question: {
+          select: {
+            subcategoryId: true,
+            subcategory: {
+              select: {
+                code: true,
+                name: true,
+                categoryId: true,
+                category: {
+                  select: {
+                    code: true,
+                    name: true,
+                    functionId: true,
+                    function: { select: { code: true, name: true } },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    });
+
+    const functions = new Map<string, { code: string; name: string }>();
+    const categories = new Map<string, { code: string; name: string }>();
+    const subcategories = new Map<string, { code: string; name: string }>();
+    for (const item of items) {
+      const subcategory = item.question.subcategory;
+      const category = subcategory.category;
+      const fn = category.function;
+      if (!functions.has(category.functionId)) {
+        functions.set(category.functionId, { code: fn.code, name: fn.name });
+      }
+      if (!categories.has(subcategory.categoryId)) {
+        categories.set(subcategory.categoryId, { code: category.code, name: category.name });
+      }
+      if (!subcategories.has(item.question.subcategoryId)) {
+        subcategories.set(item.question.subcategoryId, { code: subcategory.code, name: subcategory.name });
+      }
+    }
+    return { functions, categories, subcategories };
   }
 
   private async loadCompletionByFunction(

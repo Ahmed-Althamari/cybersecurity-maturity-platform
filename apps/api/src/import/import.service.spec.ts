@@ -23,7 +23,7 @@ describe('ImportService', () => {
     importRecord: { create: jest.Mock };
     $transaction: jest.Mock;
   };
-  let assessmentsService: { requireEditable: jest.Mock; recalculateProgress: jest.Mock };
+  let assessmentsService: { requireEditable: jest.Mock; recalculateProgress: jest.Mock; findOne: jest.Mock };
 
   beforeEach(() => {
     prisma = {
@@ -44,6 +44,7 @@ describe('ImportService', () => {
     assessmentsService = {
       requireEditable: jest.fn().mockResolvedValue({ id: 'assessment-1', organisationId: 'org-1' }),
       recalculateProgress: jest.fn(),
+      findOne: jest.fn().mockResolvedValue({ id: 'assessment-1', organisationId: 'org-1' }),
     };
 
     service = new ImportService(
@@ -184,5 +185,41 @@ describe('ImportService', () => {
     );
 
     expect(assessmentsService.recalculateProgress).not.toHaveBeenCalled();
+  });
+
+  describe('previewSpreadsheet', () => {
+    it('returns the source headers, a few sample rows, and the mappable target fields', async () => {
+      const preview = await service.previewSpreadsheet(
+        'tenant-a',
+        'assessment-1',
+        csvFile('Code,Current,Notes\nGV.RM-01,DEFINED,looks good\nGV.RM-02,MANAGED,fine\n'),
+        'csv',
+      );
+
+      expect(preview.headers).toEqual(['Code', 'Current', 'Notes']);
+      expect(preview.rowCount).toBe(2);
+      expect(preview.sampleRows).toHaveLength(2);
+      expect(preview.requiredField).toBe('subcategoryCode');
+      expect(preview.optionalFields).toContain('currentMaturity');
+    });
+
+    it('does not touch the database beyond confirming the assessment exists', async () => {
+      await service.previewSpreadsheet(
+        'tenant-a',
+        'assessment-1',
+        csvFile('Code,Current\nGV.RM-01,DEFINED\n'),
+        'csv',
+      );
+
+      expect(assessmentsService.findOne).toHaveBeenCalledWith('tenant-a', 'assessment-1');
+      expect(prisma.importJob.create).not.toHaveBeenCalled();
+      expect(prisma.assessmentItem.update).not.toHaveBeenCalled();
+    });
+
+    it('surfaces a parse error as a 400 rather than a raw exception', async () => {
+      await expect(
+        service.previewSpreadsheet('tenant-a', 'assessment-1', csvFile(''), 'xlsx'),
+      ).rejects.toThrow(BadRequestException);
+    });
   });
 });

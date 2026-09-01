@@ -38,6 +38,11 @@ export class DashboardController {
     );
   }
 
+  @Get('heatmap')
+  async getMaturityHeatmap(@Param('id') id: string, @CurrentUser() user: any) {
+    return this.dashboardService.getMaturityHeatmap(user.tenantId, id);
+  }
+
   @Get('risks')
   async getRiskSummary(@Param('id') id: string, @CurrentUser() user: any) {
     return this.dashboardService.getRiskSummary(user.tenantId, id);

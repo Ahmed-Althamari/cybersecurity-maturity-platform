@@ -43,6 +43,40 @@ export class ImportService {
   ) {}
 
   /**
+   * Parses just enough of an uploaded file to drive a column-mapping UI:
+   * the source column headers, plus a few sample rows so a human can tell
+   * which header is which before committing to a mapping. Read-only --
+   * nothing is persisted, and the assessment doesn't even need to be
+   * editable (previewing a file doesn't change anything).
+   */
+  async previewSpreadsheet(tenantId: string, assessmentId: string, file: UploadedFile, format: SpreadsheetFormat) {
+    await this.assessmentsService.findOne(tenantId, assessmentId);
+
+    let rows;
+    try {
+      rows = await parseSpreadsheet(file.buffer, format);
+    } catch (error) {
+      if (error instanceof SpreadsheetParseError) {
+        throw new BadRequestException(error.message);
+      }
+      throw error;
+    }
+
+    const headers = rows.length > 0 ? Object.keys(rows[0].cells) : [];
+    return {
+      headers,
+      rowCount: rows.length,
+      sampleRows: rows.slice(0, 3).map((row) => row.cells),
+      // The exact set of ColumnMapping keys a caller can map to -- kept
+      // here (rather than duplicated in the frontend) so the mapping UI
+      // can never drift from what importAssessmentResponses() below
+      // actually accepts.
+      requiredField: 'subcategoryCode' as const,
+      optionalFields: MAPPABLE_ITEM_FIELDS,
+    };
+  }
+
+  /**
    * Bulk-updates an assessment's existing AssessmentItems (one row per
    * NIST subcategory code) from an uploaded CSV/XLSX file, all within a
    * single transaction alongside the ImportJob/ImportRecord audit trail
