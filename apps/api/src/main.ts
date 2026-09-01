@@ -6,8 +6,9 @@ import { AppModule } from './app.module';
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
 
-  // Global prefix
-  app.setGlobalPrefix('api/v1');
+  // Global prefix -- /health is excluded so container orchestrators and
+  // load balancers can probe it without an /api/v1 path or a token.
+  app.setGlobalPrefix('api/v1', { exclude: ['health'] });
 
   // Validation pipe
   app.useGlobalPipes(

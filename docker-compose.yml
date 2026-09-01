@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   postgres:
     image: postgres:15-alpine
@@ -12,22 +10,8 @@ services:
       - "5432:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
-      - ./infrastructure/init-db.sql:/docker-entrypoint-initdb.d/init.sql
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U cmmp_user -d cmmp_db"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-    networks:
-      - cmmp-network
-
-  redis:
-    image: redis:7-alpine
-    container_name: cmmp-redis
-    ports:
-      - "6379:6379"
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -42,20 +26,21 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
-      redis:
-        condition: service_healthy
     environment:
-      NODE_ENV: development
+      NODE_ENV: production
       DATABASE_URL: postgresql://cmmp_user:cmmp_password@postgres:5432/cmmp_db?schema=public
-      REDIS_URL: redis://redis:6379
-      NEXTAUTH_SECRET: dev-secret-not-for-production
-      NEXTAUTH_URL: http://localhost:3000
+      DIRECT_DATABASE_URL: postgresql://cmmp_user:cmmp_password@postgres:5432/cmmp_db?schema=public
+      # Docker Compose auto-loads a root .env (see .env.example) and
+      # substitutes it here; the fallback after ':-' only applies if that
+      # file/variable is absent -- never commit a real secret to this file.
+      JWT_SECRET: ${JWT_SECRET:-dev-jwt-secret-change-in-production-min-32-chars}
+      CORS_ORIGIN: http://localhost:3000
     ports:
       - "3001:3001"
-    volumes:
-      - .:/app
-      - /app/node_modules
-    command: npm run dev
+    # Applies pending Prisma migrations before every start -- safe to run on
+    # every boot (a no-op once the schema is current) and keeps a fresh
+    # `docker compose up` on an empty postgres volume self-sufficient.
+    command: sh -c "npx prisma migrate deploy --schema packages/database/prisma/schema.prisma && node apps/api/dist/main.js"
     networks:
       - cmmp-network
 
@@ -65,19 +50,22 @@ services:
       dockerfile: ./infrastructure/Dockerfile.web
     container_name: cmmp-web
     depends_on:
-      - api
+      api:
+        condition: service_healthy
     environment:
-      NODE_ENV: development
+      NODE_ENV: production
+      # Browser-facing: the user's browser reaches the api container through
+      # its published host port, not the internal Docker network.
       NEXT_PUBLIC_API_URL: http://localhost:3001
+      # Server-side only (see pages/api/auth/[...nextauth].ts): NextAuth's
+      # credentials callback runs inside this container, so it must use the
+      # compose service DNS name, not the host-facing URL above.
+      INTERNAL_API_URL: http://api:3001
       NEXTAUTH_URL: http://localhost:3000
-      NEXTAUTH_SECRET: dev-secret-not-for-production
+      # Same substitution mechanism as JWT_SECRET above.
+      NEXTAUTH_SECRET: ${NEXTAUTH_SECRET:-dev-nextauth-secret-change-in-production-min-32-chars}
     ports:
       - "3000:3000"
-    volumes:
-      - .:/app
-      - /app/node_modules
-      - /app/.next
-    command: npm run dev
     networks:
       - cmmp-network
 

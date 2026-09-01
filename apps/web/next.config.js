@@ -2,6 +2,10 @@
 const nextConfig = {
   reactStrictMode: true,
   swcMinify: true,
+  // Traces only the node_modules each page actually needs into
+  // .next/standalone, so the production Docker image doesn't need the
+  // whole monorepo's node_modules copied into it.
+  output: "standalone",
   compiler: {
     removeConsole: process.env.NODE_ENV === "production",
   },

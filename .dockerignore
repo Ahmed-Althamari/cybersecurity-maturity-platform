@@ -1,0 +1,36 @@
+# Dependencies (reinstalled inside the build via npm ci)
+node_modules/
+**/node_modules/
+
+# Build output (rebuilt inside the image)
+dist/
+**/dist/
+.next/
+**/.next/
+build/
+**/build/
+coverage/
+**/coverage/
+test-results/
+**/test-results/
+playwright-report/
+**/playwright-report/
+
+# VCS / editor
+.git/
+.github/
+.vscode/
+.idea/
+
+# Secrets -- never bake real env values into an image layer
+.env
+.env.local
+.env.*.local
+.env.production
+
+# Misc
+*.log
+.turbo
+.eslintcache
+tmp/
+temp/

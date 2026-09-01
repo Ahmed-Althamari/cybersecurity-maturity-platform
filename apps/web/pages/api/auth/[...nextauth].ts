@@ -1,7 +1,14 @@
 import NextAuth, { NextAuthOptions } from 'next-auth';
 import CredentialsProvider from 'next-auth/providers/credentials';
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
+// This runs server-side only, so it must reach the API over whatever
+// network the *server* sits on -- in Docker Compose that's the internal
+// service hostname (INTERNAL_API_URL=http://api:3001), not the
+// browser-facing NEXT_PUBLIC_API_URL the client-side lib/api.ts calls use.
+// Outside Docker (this repo's native dev workflow, and any single-host
+// deployment) both are the same address, so falling back to
+// NEXT_PUBLIC_API_URL keeps that path working unchanged.
+const API_URL = process.env.INTERNAL_API_URL || process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
 
 interface LoginResponse {
   access_token: string;

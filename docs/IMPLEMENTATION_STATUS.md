@@ -4,8 +4,8 @@ Last Updated: 2026-09-01
 
 ## Overall Progress
 
-**Phase**: 14 / 17
-**Completion**: ~82%
+**Phase**: 15 / 17
+**Completion**: ~88%
 
 ## First End-to-End Verification Against a Live Database
 
@@ -685,6 +685,166 @@ Chromium against the running Next.js + NestJS + Postgres stack), not just
   full regression pass over every earlier-phase page; a CI workflow to
   actually run any of this (that's Phase 16).
 
+### Phase 15: Docker
+- [x] Docker image builds — rewrote both `infrastructure/Dockerfile.api`
+      and `infrastructure/Dockerfile.web` from scratch: the versions
+      already in the repo (scaffolded in Phase 1, never touched since)
+      used `pnpm`, but this is an npm-workspaces monorepo (`package-lock.json`,
+      no `pnpm-lock.yaml`) — every `pnpm install` in them would have failed
+      immediately. Both are now multi-stage, npm-based, and build from the
+      **repository root** as context (required for a monorepo, since a
+      workspace's `dist/` depends on its sibling packages' `dist/`):
+      - `Dockerfile.api`: `npm ci` → `npm run db:generate` (the generated
+        Prisma Client is a hard prerequisite for `@cmmp/database`'s own
+        `tsc` build, which just re-exports `@prisma/client` — a workspace
+        build with no live database needed) → `npm run build` (root
+        `turbo run build`, which resolves the whole dependency graph via
+        `turbo.json`'s `"dependsOn": ["^build"]"`) → a runtime stage that
+        copies the hoisted root `node_modules` (workspace packages are
+        symlinks into their own `dist/`, so each depended-on package's
+        `dist/` + `package.json` has to be copied individually) plus
+        `apps/api/dist`, running as a non-root user.
+      - `Dockerfile.web`: same build steps, but the runtime stage copies
+        Next.js's `standalone` output instead (added `output: "standalone"`
+        to `next.config.js`), which traces only the `node_modules` each
+        page actually needs — no monorepo `node_modules` copying required
+        for this image.
+      - Added a root `.dockerignore` (none existed) excluding
+        `node_modules`, build output, and `.env*` — without it `COPY . .`
+        would have baked real `.env` secrets into an image layer.
+- [x] Docker Compose orchestration — `docker-compose.yml` now runs the
+      **built images** (previously it bind-mounted the whole repo over
+      `command: npm run dev`, which never actually exercised the
+      Dockerfiles it built); `api`'s command chains
+      `prisma migrate deploy && node apps/api/dist/main.js` so a fresh
+      `docker compose up` against an empty Postgres volume is
+      self-sufficient.
+- [x] Health checks — added a real, unauthenticated `GET /health` endpoint
+      (`apps/api/src/health/`, excluded from the global `api/v1` prefix in
+      `main.ts` via `setGlobalPrefix('api/v1', { exclude: ['health'] })`)
+      that checks actual database connectivity (`SELECT 1` via Prisma) and
+      returns 503 if it fails, rather than a static 200 -- both
+      Dockerfiles' `HEALTHCHECK` directives target it (api) or an
+      unauthenticated page (web's `/auth/signin`); `docker-compose.yml`'s
+      `web` service now waits on `api`'s health via
+      `depends_on: condition: service_healthy` instead of just `api`
+      having started.
+- [x] Volume management — `pgdata` named volume for Postgres persistence
+      (already present, unchanged).
+- [x] Network configuration — a single bridge network shared by all three
+      services (already present, unchanged).
+- [x] Container security scanning — addressed the part of this that's
+      actually this phase's job: both runtime images run as a dedicated
+      non-root user (`addgroup -S cmmp && adduser -S cmmp -G cmmp` +
+      `USER cmmp`), use a pinned minimal base image
+      (`node:20-alpine`, matching `postgres:15-alpine`), and never bake a
+      secret into a layer (`.dockerignore` excludes `.env*`; every secret
+      is supplied at `docker compose up` time via env vars). Automated
+      scanning (Trivy) against the built images is explicitly Phase 16's
+      own checklist item and is deferred there, not skipped.
+- [x] **Found and fixed four real bugs specific to this phase**, again
+      caught by actually reasoning through the deployment topology rather
+      than just writing Dockerfiles that "look right":
+      1. **`infrastructure/init-db.sql`** (Phase-1 scaffolding, referenced
+         by the old `docker-compose.yml` as a Postgres init script) manually
+         created Postgres enum types (`maturity_level`, `risk_level`,
+         `control_status`, `audit_action`) that are *exactly* the same
+         types Prisma's own checked-in migration (`20260901072626_init`)
+         creates via `CREATE TYPE`. On a fresh Postgres volume, Postgres
+         runs `init-db.sql` automatically on first boot, then
+         `prisma migrate deploy` would fail with `type "..." already
+         exists`, permanently crash-looping the `api` container. Since
+         nothing in the schema actually uses the extensions it also
+         enabled (`uuid-ossp`/`pgcrypto`/`citext` -- confirmed via a
+         schema-wide search for `dbgenerated`/`@db.`/`citext`, all absent;
+         Prisma generates UUIDs client-side), the file was pure conflicting
+         legacy cruft. Removed it and its `docker-compose.yml` volume
+         mount entirely -- Prisma's migrations are the single source of
+         truth for schema now.
+      2. **NextAuth's credentials callback would never reach the API
+         inside Docker Compose.** `pages/api/auth/[...nextauth].ts` runs
+         its `authorize()` callback *server-side*, inside the `web`
+         container, and it was using `NEXT_PUBLIC_API_URL` --
+         `http://localhost:3001`. That address is correct for the
+         *browser* (which reaches `api` through its published host port),
+         but from inside the `web` container `localhost:3001` is the `web`
+         container itself, which has no API on that port -- every login
+         would have failed in a real Compose deployment despite working
+         fine in this project's native (non-Docker) dev workflow, where
+         both processes share one host. Fixed by introducing a
+         server-side-only `INTERNAL_API_URL` (falls back to
+         `NEXT_PUBLIC_API_URL` when unset, so nothing changes outside
+         Docker) and setting it to the Compose service DNS name
+         (`http://api:3001`) for the `web` service.
+      3. **`package-lock.json` had never been committed, in any phase.**
+         Root `.gitignore` had it listed right alongside `yarn.lock` and
+         `pnpm-lock.yaml` since Phase 1 (`git ls-files` confirms zero
+         commits have ever included it). `npm ci` -- what every Dockerfile
+         above uses, and what any real CI would use -- refuses to run
+         without an existing lockfile; every one of this phase's `RUN npm
+         ci` steps would fail on a fresh clone with real registry access,
+         regardless of anything else being correct. Fixed by removing it
+         from `.gitignore` and committing the real, already-in-sync
+         lockfile (`npm ci --dry-run` confirms it resolves cleanly against
+         the current `package.json` files). This also means every prior
+         phase's install was never actually reproducible from a fresh
+         clone -- worth knowing regardless of Docker.
+      4. (Smaller, caught the same way) `apps/web/public/` didn't exist at
+         all, so `Dockerfile.web`'s `COPY --from=builder .../public ...`
+         would have failed outright; added the directory with a real
+         `robots.txt` (disallowing all crawling, appropriate for an
+         internal security-assessment tool) rather than a placeholder
+         file. Also fixed `package.json`'s `docker:build`/`docker:up`/
+         `docker:down` scripts and the two matching README commands,
+         which invoked the standalone `docker-compose` binary -- not
+         installed in this environment (or any current Docker install;
+         it's been replaced by the `docker compose` plugin, confirmed via
+         `which docker-compose` failing here). One more found the same
+         way: `.gitignore` also excluded `.dockerignore` itself -- the
+         very file meant to keep `.env` secrets out of image layers would
+         never have been committed either; fixed in the same pass as the
+         lockfile above.
+- [x] Live-verified everything that doesn't require an actual image build:
+      - The new `/health` endpoint, against a real running instance
+        (`{"status":"ok","database":"connected",...}`, and confirmed 404
+        under the `/api/v1` prefix as intended).
+      - **Both Dockerfiles' exact runtime file layout**, without Docker:
+        manually replicated each `COPY --from=builder` line's source set
+        into a scratch directory (e.g. for the API: the real
+        `node_modules` plus only `apps/api/dist` +
+        `packages/{database,framework-engine,import-engine,scoring-engine,shared}/dist`
+        + their `package.json`s -- nothing else), then ran
+        `node apps/api/dist/main.js` / `node apps/web/server.js` directly
+        from that reduced layout. Both booted cleanly against the real
+        local Postgres and served real traffic (the API logged every
+        route mapping and connected to the database; `/health` returned
+        200; the web server returned 200s for `/`, `/auth/signin`, and
+        `/robots.txt`) -- strong evidence the workspace-symlink resolution
+        and Next.js standalone-copy logic in both Dockerfiles is correct,
+        short of an actual `docker build`.
+      - `docker compose config` (structural/interpolation validation --
+        confirms the YAML is well-formed and every `${VAR}` substitution,
+        `depends_on`, and volume/network reference resolves) after every
+        edit.
+
+  **Not built/verified this pass**: an actual `docker build` or
+  `docker compose up`. This sandbox's Docker daemon was not running by
+  default, and *starting* it (`dockerd`) worked -- contrary to what an
+  earlier phase's summary assumed -- but every image pull attempt
+  (`docker pull node:20-alpine`, `docker build --check`) fails at the very
+  first `FROM` line: the manifest resolves, but the actual layer blob comes
+  from `production.cloudfront.docker.com`, which this session's egress
+  policy returns `403 Forbidden` for (confirmed via
+  `/root/.ccr/__agentproxy/status`'s `recentRelayFailures` -- a policy
+  denial, not a transient failure, so per this environment's guidance it
+  was not retried or routed around). `npm prune --omit=dev` in
+  `Dockerfile.api`'s runtime stage was deliberately left out rather than
+  risk it stripping the generated Prisma Client's undeclared
+  `node_modules/.prisma` path -- verifying that tradeoff safely needs a
+  real build this sandbox can't do. Whoever next has real Docker Hub
+  access should run `docker compose build && docker compose up` end-to-end
+  before relying on this phase's work in production.
+
 ## Known Issues 🐛
 
 - Root `.eslintrc.json` references `eslint-plugin-security`,
@@ -701,14 +861,6 @@ Chromium against the running Next.js + NestJS + Postgres stack), not just
   binary; `packages/database`'s own `build` script only runs `tsc`.
 
 ## Not Started ⭕
-
-### Phase 15: Docker
-- [ ] Docker image builds
-- [ ] Docker Compose orchestration
-- [ ] Health checks
-- [ ] Volume management
-- [ ] Network configuration
-- [ ] Container security scanning
 
 ### Phase 16: CI/CD Security Pipeline
 - [ ] GitHub Actions CI workflow (.github/workflows/ci.yml)
@@ -847,14 +999,24 @@ None recorded yet
    dedicated authorization tests -- which caught and fixed a real RBAC
    bypass in the audit endpoints and a multi-role authorization gap in
    `RolesGuard`
-4. **Begin Phase 15**: Docker — Dockerfiles for `apps/api` and
-   `apps/web`, a `docker-compose.yml` wiring them to Postgres (this
-   session's local, non-Docker Postgres install was a sandbox-specific
-   substitute; a real Docker Compose setup is still needed for anyone
-   without this sandbox's environment), and documenting the compose-based
-   dev workflow to replace the ad hoc `service postgresql start` +
-   `npm run dev` steps used throughout this session
-5. Round out earlier frontend gaps: an assessment-taking flow (create an
+4. ~~Begin Phase 15: Docker~~ — done this session (see Phase 15 above);
+   rewrote both Dockerfiles for this repo's actual npm-workspaces monorepo
+   (the checked-in versions used `pnpm` and would never have built), fixed
+   `docker-compose.yml` to run the built images instead of bind-mounting
+   over them, added a real `/health` endpoint, and found/fixed a schema
+   migration conflict plus a Docker-network URL bug that would have broken
+   the very first real deployment. **Still needed**: an actual
+   `docker compose build && up` run against real Docker Hub access --
+   this sandbox's egress policy blocks the registry's blob CDN, so
+   everything here was verified as thoroughly as possible short of that
+   (see Phase 15's "Not built/verified this pass" note)
+5. **Begin Phase 16**: CI/CD Security Pipeline — a GitHub Actions workflow
+   running lint/type-check/unit tests/the new integration+E2E suites on
+   every PR, CodeQL (SAST), Dependabot (dependency scanning), Gitleaks
+   (secret scanning), OWASP ZAP (DAST), Trivy (container scanning -- the
+   piece deliberately deferred from Phase 15), SBOM generation, and
+   security gates blocking merge on failure
+6. Round out earlier frontend gaps: an assessment-taking flow (create an
    assessment, walk its 106 items, `PATCH` responses — today only the
    read-side dashboard has UI), a framework selection UI, a
    column-mapping step for spreadsheet import, an initiative *picker* for
@@ -863,10 +1025,14 @@ None recorded yet
    param on `GET .../dashboard/gaps` (the engine already supports it) for
    the still-missing security maturity heatmap and maturity distribution
    views.
-6. Spot-check the seeded NIST CSF 2.0 outcome text against the official
+7. Spot-check the seeded NIST CSF 2.0 outcome text against the official
    NIST CSWP 29 publication (see the Phase 5 data-provenance note above) —
    this sandbox couldn't reach nist.gov directly to verify byte-for-byte
-7. Fix the repo-wide ESLint plugin gap (see Known Issues)
+8. Fix the repo-wide ESLint plugin gap (see Known Issues)
+9. Actually run `docker compose build && docker compose up` end-to-end
+   once real Docker Hub access is available (see Phase 15's notes) --
+   everything about this phase was verified as thoroughly as this sandbox
+   allowed, but never against a real image build
 
 ## Contact & Questions
 

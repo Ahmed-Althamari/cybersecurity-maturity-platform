@@ -10,6 +10,7 @@ import { DashboardModule } from './dashboard/dashboard.module';
 import { RisksModule } from './risks/risks.module';
 import { InitiativesModule } from './initiatives/initiatives.module';
 import { AuditModule } from './audit/audit.module';
+import { HealthModule } from './health/health.module';
 
 @Module({
   imports: [
@@ -18,6 +19,7 @@ import { AuditModule } from './audit/audit.module';
       envFilePath: '.env',
     }),
     PrismaModule,
+    HealthModule,
     AuditModule,
     AuthModule,
     UsersModule,

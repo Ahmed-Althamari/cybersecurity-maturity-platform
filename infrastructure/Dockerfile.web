@@ -1,36 +1,41 @@
-FROM node:18-alpine AS builder
+# Builds apps/web (Next.js) from the npm-workspaces monorepo root.
+# Build context MUST be the repository root, e.g.:
+#   docker build -f infrastructure/Dockerfile.web -t cmmp-web .
 
+FROM node:20-alpine AS builder
 WORKDIR /app
-
-# Install dependencies
-COPY package*.json ./
-COPY pnpm-lock.yaml* ./
-RUN npm install -g pnpm && pnpm install
-
-# Build Next.js
 COPY . .
-RUN pnpm run build
+RUN npm ci
+# @cmmp/database re-exports the generated Prisma Client, so every workspace
+# build (including apps/api, built as part of `npm run build` below) fails
+# to type-check without it existing first.
+RUN npm run db:generate
+# `turbo run build` (the root "build" script) resolves the whole workspace
+# dependency graph and builds @cmmp/shared before apps/web, per turbo.json's
+# "dependsOn": ["^build"]. It also builds apps/api and the other packages,
+# which this image doesn't need -- turbo's per-task caching keeps that cheap
+# on rebuilds, and it's the same command CI/local dev already use, so there
+# is exactly one way this monorepo gets built.
+RUN npm run build
 
-# Production stage
-FROM node:18-alpine
-
+# Next's standalone output (output: "standalone" in apps/web/next.config.js)
+# traces only the node_modules each page actually needs, so the runtime
+# image below never needs the monorepo's full node_modules copied in.
+FROM node:20-alpine AS runner
 WORKDIR /app
-
 ENV NODE_ENV=production
+RUN addgroup -S cmmp && adduser -S cmmp -G cmmp
 
-# Install only production dependencies
-COPY package*.json ./
-COPY pnpm-lock.yaml* ./
-RUN npm install -g pnpm && pnpm install --prod
-
-# Copy built application
-COPY --from=builder /app/apps/web/.next ./apps/web/.next
+COPY --from=builder /app/apps/web/.next/standalone ./
+COPY --from=builder /app/apps/web/.next/static ./apps/web/.next/static
 COPY --from=builder /app/apps/web/public ./apps/web/public
-COPY --from=builder /app/apps/web/node_modules ./apps/web/node_modules
 
+USER cmmp
 EXPOSE 3000
+ENV PORT=3000
+ENV HOSTNAME=0.0.0.0
 
-HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-  CMD wget --quiet --tries=1 --spider http://localhost:3000 || exit 1
+HEALTHCHECK --interval=30s --timeout=10s --start-period=10s --retries=3 \
+  CMD wget --quiet --tries=1 --spider http://localhost:3000/auth/signin || exit 1
 
-CMD ["npm", "run", "start", "--prefix", "apps/web"]
+CMD ["node", "apps/web/server.js"]

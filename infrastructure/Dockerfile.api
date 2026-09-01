@@ -1,36 +1,61 @@
-FROM node:18-alpine AS builder
+# Builds apps/api (NestJS) from the npm-workspaces monorepo root.
+# Build context MUST be the repository root, e.g.:
+#   docker build -f infrastructure/Dockerfile.api -t cmmp-api .
 
+FROM node:20-alpine AS builder
 WORKDIR /app
-
-# Install dependencies
-COPY package*.json ./
-COPY pnpm-lock.yaml* ./
-RUN npm install -g pnpm && pnpm install
-
-# Build
 COPY . .
-RUN pnpm run build
+RUN npm ci
+# @cmmp/database re-exports the generated Prisma Client, so every workspace
+# build that depends on it (apps/api included) fails to type-check without
+# this running first. Generating the client needs no live database.
+RUN npm run db:generate
+# `turbo run build` (the root "build" script) resolves the whole workspace
+# dependency graph, building @cmmp/shared/@cmmp/database/@cmmp/framework-engine/
+# @cmmp/scoring-engine/@cmmp/import-engine before apps/api per turbo.json's
+# "dependsOn": ["^build"]. It also builds apps/web, which this image doesn't
+# need -- turbo's per-task caching keeps that cheap on rebuilds, and it's the
+# same command CI/local dev already use, so there is exactly one way this
+# monorepo gets built.
+RUN npm run build
+# Note: deliberately not `npm prune --omit=dev` here -- the generated Prisma
+# Client lives under node_modules/.prisma, which isn't a declared dependency
+# in package-lock.json, and pruning has a known failure mode of treating
+# generated/undeclared paths like that as extraneous and deleting them. The
+# runtime image below is larger than it needs to be as a result; slimming it
+# safely needs verifying against a real `npm prune` run, which this sandbox
+# can't do (Docker builds here can't reach Docker Hub -- see
+# docs/IMPLEMENTATION_STATUS.md's Phase 15 notes).
 
-# Production stage
-FROM node:18-alpine
-
+FROM node:20-alpine AS runner
 WORKDIR /app
-
 ENV NODE_ENV=production
+RUN addgroup -S cmmp && adduser -S cmmp -G cmmp
 
-# Install only production dependencies
-COPY package*.json ./
-COPY pnpm-lock.yaml* ./
-RUN npm install -g pnpm && pnpm install --prod
-
-# Copy built application
-COPY --from=builder /app/dist ./dist
+# A monorepo's built app can't be copied in isolation the way a standalone
+# Node app can: apps/api/dist requires the hoisted root node_modules (all
+# @cmmp/* workspace packages are symlinks into their own dist/ there) plus
+# each workspace's own package.json for Node's module resolution.
+COPY --from=builder /app/node_modules ./node_modules
+COPY --from=builder /app/package.json ./package.json
 COPY --from=builder /app/apps/api/dist ./apps/api/dist
-COPY --from=builder /app/apps/api/node_modules ./apps/api/node_modules
+COPY --from=builder /app/apps/api/package.json ./apps/api/package.json
+COPY --from=builder /app/packages/database/dist ./packages/database/dist
+COPY --from=builder /app/packages/database/package.json ./packages/database/package.json
+COPY --from=builder /app/packages/database/prisma ./packages/database/prisma
+COPY --from=builder /app/packages/framework-engine/dist ./packages/framework-engine/dist
+COPY --from=builder /app/packages/framework-engine/package.json ./packages/framework-engine/package.json
+COPY --from=builder /app/packages/import-engine/dist ./packages/import-engine/dist
+COPY --from=builder /app/packages/import-engine/package.json ./packages/import-engine/package.json
+COPY --from=builder /app/packages/scoring-engine/dist ./packages/scoring-engine/dist
+COPY --from=builder /app/packages/scoring-engine/package.json ./packages/scoring-engine/package.json
+COPY --from=builder /app/packages/shared/dist ./packages/shared/dist
+COPY --from=builder /app/packages/shared/package.json ./packages/shared/package.json
 
+USER cmmp
 EXPOSE 3001
 
-HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-  CMD node -e "require('http').get('http://localhost:3001/health', (r) => {if (r.statusCode !== 200) throw new Error(r.statusCode)})"
+HEALTHCHECK --interval=30s --timeout=10s --start-period=10s --retries=3 \
+  CMD node -e "require('http').get('http://localhost:3001/health', (r) => process.exit(r.statusCode === 200 ? 0 : 1)).on('error', () => process.exit(1))"
 
 CMD ["node", "apps/api/dist/main.js"]

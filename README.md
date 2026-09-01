@@ -39,7 +39,7 @@ CMMP is a comprehensive platform that enables organizations to:
 **Infrastructure:**
 - Docker & Docker Compose
 - GitHub Actions
-- Redis (caching)
+- Redis (caching -- planned, not yet wired into any service; see docs/architecture.md)
 
 ### Repository Structure
 
@@ -107,11 +107,11 @@ NEXT_PUBLIC_API_URL="http://localhost:3001"
 ### Option 1: Docker Compose (Recommended)
 
 ```bash
-# Start all services (PostgreSQL, Redis, API, Web)
+# Start all services (PostgreSQL, API, Web)
 npm run docker:up
 
 # View logs
-docker-compose logs -f
+docker compose logs -f
 
 # Stop services
 npm run docker:down
