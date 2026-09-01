@@ -3,11 +3,13 @@ import { JwtService } from '@nestjs/jwt';
 import * as bcrypt from 'bcryptjs';
 import { AuthService } from './auth.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { AuditService } from '../audit/audit.service';
 
 describe('AuthService', () => {
   let authService: AuthService;
   let prisma: { user: any; userRoleAssignment: any };
   let jwtService: JwtService;
+  let auditService: { log: jest.Mock };
 
   const activeUser = {
     id: 'user-1',
@@ -32,7 +34,12 @@ describe('AuthService', () => {
     };
 
     jwtService = new JwtService({ secret: 'test-secret' });
-    authService = new AuthService(jwtService, prisma as unknown as PrismaService);
+    auditService = { log: jest.fn() };
+    authService = new AuthService(
+      jwtService,
+      prisma as unknown as PrismaService,
+      auditService as unknown as AuditService,
+    );
   });
 
   it('issues a token for valid credentials', async () => {
@@ -46,6 +53,9 @@ describe('AuthService', () => {
     expect(result.user.tenantId).toBe('tenant-1');
     expect(prisma.user.update).toHaveBeenCalledWith(
       expect.objectContaining({ where: { id: 'user-1' } }),
+    );
+    expect(auditService.log).toHaveBeenCalledWith(
+      expect.objectContaining({ action: 'LOGIN', tenantId: 'tenant-1', userId: 'user-1' }),
     );
   });
 
@@ -81,5 +91,21 @@ describe('AuthService', () => {
     const payload = await authService.validateToken(refreshed.access_token);
     expect(payload.sub).toBe('user-1');
     expect(payload.tenantId).toBe('tenant-1');
+  });
+
+  it('logs a LOGOUT audit event for the calling user', async () => {
+    await authService.logout({
+      sub: 'user-1',
+      email: 'ciso@example.local',
+      name: 'CISO',
+      tenantId: 'tenant-1',
+      organisationId: 'org-1',
+      role: 'CISO',
+      roles: ['CISO'],
+    });
+
+    expect(auditService.log).toHaveBeenCalledWith(
+      expect.objectContaining({ action: 'LOGOUT', tenantId: 'tenant-1', userId: 'user-1' }),
+    );
   });
 });

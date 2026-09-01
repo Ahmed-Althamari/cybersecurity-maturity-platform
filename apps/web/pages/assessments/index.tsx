@@ -55,6 +55,9 @@ export default function AssessmentsPage() {
               <Link href="/risks">
                 <Button variant="outline">Risk Register</Button>
               </Link>
+              <Link href="/audit">
+                <Button variant="outline">Audit Log</Button>
+              </Link>
               <Button variant="outline" onClick={() => signOut({ callbackUrl: '/auth/signin' })}>
                 Sign Out
               </Button>

@@ -4,8 +4,8 @@ Last Updated: 2026-09-01
 
 ## Overall Progress
 
-**Phase**: 12 / 17
-**Completion**: ~71%
+**Phase**: 13 / 17
+**Completion**: ~77%
 
 ## First End-to-End Verification Against a Live Database
 
@@ -522,6 +522,80 @@ Chromium against the running Next.js + NestJS + Postgres stack), not just
   `securityCapability` is just the function's display name, not a link to
   the separate `SecurityCapability` model).
 
+### Phase 13: Audit Logging
+- [x] Audit event model — used as-is from the existing schema
+      (`AuditEvent` + `AuditAction` enum were already defined but unused);
+      added the corresponding `AuditAction`/`AuditEvent`/`AuditEventSummary`
+      types to `@cmmp/shared`
+- [x] Logging middleware — a global `AuditInterceptor`
+      (`apps/api/src/audit/audit.interceptor.ts`), wired once via
+      `APP_INTERCEPTOR` in `AuditModule` rather than sprinkled through every
+      service. It only fires for authenticated HTTP requests, maps
+      `POST`/`PUT`/`PATCH`/`DELETE` to `CREATE`/`UPDATE`/`UPDATE`/`DELETE`,
+      skips read-only `GET`s and the `AuthController` (which logs its own
+      LOGIN/LOGOUT with more specific context), and prefers the route's
+      `:id` param over the response body's `id` for `resourceId`. Auth's
+      `login()`/`logout()` in `AuthService` call `AuditService.log()`
+      directly (not via the interceptor) so they can carry an accurate
+      `description` and IP/user-agent even though `AuthController`
+      responses are excluded from the generic interceptor path.
+- [x] Immutable audit trail — enforced at the application-code level:
+      `AuditService` only exposes `log()` (create) and read methods
+      (`findAll()`, `getSummary()`); there is no update or delete path
+      anywhere in the code, and nothing else in the API imports
+      `prisma.auditEvent` directly. `log()` truncates oversized
+      `newValue` payloads (5,000-char cap, ending in `…(truncated)`) and,
+      critically, never throws — a failed audit write is logged via
+      `Logger.error` and swallowed so it can never break the request it's
+      auditing.
+- [x] Audit log API — `GET /audit-events` (filterable by `userId`,
+      `action`, `resource`, `resourceId`, `correlationId`, a `from`/`to`
+      date range, and paginated with `page`/`pageSize`, capped at 200 per
+      page) and `GET /audit-events/summary` (`sinceDays`, default 30;
+      returns `totalEvents`, a zero-filled `byAction` count for every
+      `AuditAction`, `byResource` counts, and the 20 most recent events).
+      Both endpoints are tenant-scoped and restricted to
+      `PLATFORM_ADMIN`/`ORGANISATION_ADMIN`/`AUDITOR`/`CISO` via the
+      existing `JwtAuthGuard`/`RolesGuard`/`@Roles` combination.
+- [x] Audit dashboard — `pages/audit/index.tsx`: KPI-style cards for total
+      events plus a card per non-zero action count, and a Recent Events
+      table (when/action/resource/resource ID/description) with a color
+      badge per action reusing the existing risk-level `Badge` variants;
+      a friendly message on a 403 instead of a raw error; a nav link added
+      from the assessments header.
+- [x] Fixed a bootstrap-ordering break: adding `AuditService` as a new
+      required constructor dependency of `AuthService` broke
+      `auth.service.spec.ts` (a hand-constructed instance, not a Nest
+      testing module) — `tsc --noEmit` didn't catch it because
+      `apps/api/tsconfig.json` excludes `*.spec.ts`; only running the full
+      Jest suite surfaced it. Fixed by adding a mocked `AuditService` to
+      the spec and asserting the new LOGIN/LOGOUT audit calls.
+- [x] Tests: 13 new tests in `apps/api` (7 for `AuditService` — field
+      writing, oversized-value truncation, never-throws-on-write-failure,
+      tenant-scoped pagination with the 200-item cap, zero-filled summary;
+      6 for `AuditInterceptor`, exercised via hand-built fake
+      `ExecutionContext`/`CallHandler` objects rather than a full Nest
+      testing module — CREATE-on-POST, route-param-id precedence over
+      body id, GET is not logged, unauthenticated requests are not logged,
+      the `AuthController` is excluded, DELETE mapping) plus 2 updated
+      `AuthService` tests (LOGIN on login, LOGOUT on logout) — 99 tests
+      total in `apps/api`
+- [x] Live-verified in a real browser: logged in as the seeded CISO user
+      (produced a real `LOGIN` audit event with the correct email in its
+      description), then submitted the "New Risk" form (produced a `CREATE`
+      audit event against `Risks` with the created risk's real ID as
+      `resourceId`); the audit dashboard's KPI counts and Recent Events
+      table updated correctly for both. Also ran a clean production
+      `next build` including the new `/audit` route.
+
+  **Not built this pass**: an UPDATE-action live-verification pass (the
+  interceptor's PATCH→UPDATE mapping is covered by a unit test, but wasn't
+  separately confirmed live in this session's browser pass — only CREATE
+  and LOGIN were); a UI for the `GET /audit-events` filtered/paginated list
+  endpoint (today the dashboard only surfaces the last 20 events via
+  `getSummary()`); correlating audit events across services for a given
+  `correlationId` in the UI.
+
 ## Known Issues 🐛
 
 - Root `.eslintrc.json` references `eslint-plugin-security`,
@@ -538,13 +612,6 @@ Chromium against the running Next.js + NestJS + Postgres stack), not just
   binary; `packages/database`'s own `build` script only runs `tsc`.
 
 ## Not Started ⭕
-
-### Phase 13: Audit Logging
-- [ ] Audit event model
-- [ ] Logging middleware
-- [ ] Immutable audit trail
-- [ ] Audit log API
-- [ ] Audit dashboard
 
 ### Phase 14: Tests
 - [ ] Unit tests (Jest)
@@ -692,13 +759,22 @@ None recorded yet
 
 1. ~~Generate the first Prisma migration~~ — done this session (see "First
    End-to-End Verification" above); the migration is checked in
-2. **Begin Phase 13**: Audit Logging — an immutable audit trail
-   (`AuditEvent` already exists in the schema with an `AuditAction` enum,
-   unused so far) covering at minimum: login/logout, every create/update/
-   delete across assessments/risks/initiatives/frameworks, and import
-   jobs; a logging middleware/interceptor rather than sprinkling manual
-   log calls through every service; an audit log API and a dashboard view
-3. Round out earlier frontend gaps: an assessment-taking flow (create an
+2. ~~Begin Phase 13: Audit Logging~~ — done this session (see Phase 13
+   above); a global interceptor now audits every create/update/delete
+   across all resources, plus login/logout, with a dashboard view
+3. **Begin Phase 14**: Tests — the project has unit tests throughout
+   (99 in `apps/api` across scoring/framework/assessments/risks/
+   initiatives/import/dashboard/auth/audit), but is still missing:
+   component tests (React Testing Library) for the `apps/web` pages,
+   dedicated tenant-isolation and authorization test suites (today that
+   coverage is incidental to each feature's own tests rather than a
+   deliberate cross-cutting suite), a Playwright E2E suite committed to
+   the repo (this session's live-verification scripts were ad hoc and
+   run from the sandbox scratch directory, not checked in), and security
+   tests (e.g. CSV-injection, tenant-boundary, RBAC-bypass regression
+   tests as actual committed test files rather than one-off manual
+   verification)
+5. Round out earlier frontend gaps: an assessment-taking flow (create an
    assessment, walk its 106 items, `PATCH` responses — today only the
    read-side dashboard has UI), a framework selection UI, a
    column-mapping step for spreadsheet import, an initiative *picker* for
@@ -707,10 +783,10 @@ None recorded yet
    param on `GET .../dashboard/gaps` (the engine already supports it) for
    the still-missing security maturity heatmap and maturity distribution
    views.
-4. Spot-check the seeded NIST CSF 2.0 outcome text against the official
+6. Spot-check the seeded NIST CSF 2.0 outcome text against the official
    NIST CSWP 29 publication (see the Phase 5 data-provenance note above) —
    this sandbox couldn't reach nist.gov directly to verify byte-for-byte
-5. Fix the repo-wide ESLint plugin gap (see Known Issues)
+7. Fix the repo-wide ESLint plugin gap (see Known Issues)
 
 ## Contact & Questions
 

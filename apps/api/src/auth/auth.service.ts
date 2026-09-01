@@ -1,7 +1,9 @@
 import { Injectable, UnauthorizedException } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import * as bcrypt from 'bcryptjs';
+import { AuditAction } from '@cmmp/shared';
 import { PrismaService } from '../prisma/prisma.service';
+import { AuditService } from '../audit/audit.service';
 import { LoginDto } from './dto/login.dto';
 
 export interface JwtPayload {
@@ -14,14 +16,20 @@ export interface JwtPayload {
   roles: string[];
 }
 
+export interface RequestContext {
+  ipAddress?: string;
+  userAgent?: string;
+}
+
 @Injectable()
 export class AuthService {
   constructor(
     private jwtService: JwtService,
     private prisma: PrismaService,
+    private auditService: AuditService,
   ) {}
 
-  async login(loginDto: LoginDto) {
+  async login(loginDto: LoginDto, context: RequestContext = {}) {
     const user = await this.prisma.user.findFirst({
       where: { email: loginDto.email, isActive: true, deletedAt: null },
       include: { userRoleAssignments: true },
@@ -55,6 +63,17 @@ export class AuthService {
       roles,
     };
 
+    await this.auditService.log({
+      tenantId: user.tenantId,
+      userId: user.id,
+      action: AuditAction.LOGIN,
+      resource: 'Auth',
+      resourceId: user.id,
+      description: `${user.email} logged in`,
+      ipAddress: context.ipAddress,
+      userAgent: context.userAgent,
+    });
+
     return {
       access_token: this.jwtService.sign(payload),
       user: {
@@ -77,9 +96,19 @@ export class AuthService {
     }
   }
 
-  async logout() {
+  async logout(user: JwtPayload, context: RequestContext = {}) {
     // Token-based auth doesn't require server-side logout.
     // A revocation list can be added here if immediate token invalidation is needed.
+    await this.auditService.log({
+      tenantId: user.tenantId,
+      userId: user.sub,
+      action: AuditAction.LOGOUT,
+      resource: 'Auth',
+      resourceId: user.sub,
+      description: `${user.email} logged out`,
+      ipAddress: context.ipAddress,
+      userAgent: context.userAgent,
+    });
     return { message: 'Logged out successfully' };
   }
 

@@ -29,6 +29,18 @@ export enum ControlStatus {
   BLOCKED = "BLOCKED",
 }
 
+export enum AuditAction {
+  LOGIN = "LOGIN",
+  LOGOUT = "LOGOUT",
+  CREATE = "CREATE",
+  UPDATE = "UPDATE",
+  DELETE = "DELETE",
+  UPLOAD = "UPLOAD",
+  DOWNLOAD = "DOWNLOAD",
+  EXPORT = "EXPORT",
+  IMPORT = "IMPORT",
+}
+
 export enum UserRole {
   PLATFORM_ADMIN = "PLATFORM_ADMIN",
   ORGANISATION_ADMIN = "ORGANISATION_ADMIN",
@@ -257,6 +269,31 @@ export interface ExecutiveDashboard {
   topGaps: GapAnalysis[];
   riskSummary: RiskSummary;
   roadmapStatus: RoadmapStatus;
+}
+
+// ============================================================================
+// AUDIT TYPES (Phase 13)
+// ============================================================================
+
+export interface AuditEvent {
+  id: string;
+  userId: string;
+  action: AuditAction;
+  resource: string;
+  resourceId: string | null;
+  description?: string;
+  newValue?: string;
+  ipAddress?: string;
+  userAgent?: string;
+  correlationId?: string;
+  createdAt: Date;
+}
+
+export interface AuditEventSummary {
+  totalEvents: number;
+  byAction: Record<AuditAction, number>;
+  byResource: Record<string, number>;
+  recentEvents: AuditEvent[];
 }
 
 // ============================================================================

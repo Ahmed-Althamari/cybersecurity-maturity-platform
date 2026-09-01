@@ -1,3 +1,4 @@
+import type { AuditEventSummary } from '@cmmp/shared';
 import type { ExecutiveDashboard } from '@cmmp/shared';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
@@ -149,6 +150,8 @@ export const api = {
       method: 'PATCH',
       body: JSON.stringify({ status: statusValue }),
     }),
+
+  getAuditSummary: (token: string) => apiFetch<AuditEventSummary>(token, '/audit-events/summary'),
 
   getRisk: (token: string, riskId: string) => apiFetch<RiskDetail>(token, `/risks/${riskId}`),
 

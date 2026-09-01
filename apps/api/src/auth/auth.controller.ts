@@ -9,14 +9,20 @@ export class AuthController {
   constructor(private authService: AuthService) {}
 
   @Post('login')
-  async login(@Body() loginDto: LoginDto) {
-    return this.authService.login(loginDto);
+  async login(@Body() loginDto: LoginDto, @Req() req: Request) {
+    return this.authService.login(loginDto, {
+      ipAddress: req.ip,
+      userAgent: req.headers['user-agent'],
+    });
   }
 
   @Post('logout')
   @UseGuards(JwtAuthGuard)
-  async logout() {
-    return this.authService.logout();
+  async logout(@Req() req: Request) {
+    return this.authService.logout((req as any).user, {
+      ipAddress: req.ip,
+      userAgent: req.headers['user-agent'],
+    });
   }
 
   @Post('refresh')

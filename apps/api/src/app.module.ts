@@ -9,6 +9,7 @@ import { ImportModule } from './import/import.module';
 import { DashboardModule } from './dashboard/dashboard.module';
 import { RisksModule } from './risks/risks.module';
 import { InitiativesModule } from './initiatives/initiatives.module';
+import { AuditModule } from './audit/audit.module';
 
 @Module({
   imports: [
@@ -17,6 +18,7 @@ import { InitiativesModule } from './initiatives/initiatives.module';
       envFilePath: '.env',
     }),
     PrismaModule,
+    AuditModule,
     AuthModule,
     UsersModule,
     FrameworkModule,
