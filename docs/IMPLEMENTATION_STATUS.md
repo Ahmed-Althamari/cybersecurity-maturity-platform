@@ -4,8 +4,8 @@ Last Updated: 2026-09-01
 
 ## Overall Progress
 
-**Phase**: 13 / 17
-**Completion**: ~77%
+**Phase**: 14 / 17
+**Completion**: ~82%
 
 ## First End-to-End Verification Against a Live Database
 
@@ -596,6 +596,95 @@ Chromium against the running Next.js + NestJS + Postgres stack), not just
   `getSummary()`); correlating audit events across services for a given
   `correlationId` in the UI.
 
+### Phase 14: Tests
+- [x] Unit tests (Jest) — already substantial from every prior phase;
+      107 tests in `apps/api` after this phase's additions (was 99)
+- [x] Component tests (React Testing Library) — new `apps/web` test
+      infrastructure (`jest.config.js` via `next/jest`, `jest.setup.js`,
+      a `types/jest.d.ts` triple-slash reference so `tsc` recognizes
+      `@testing-library/jest-dom`'s matchers): 16 tests covering the
+      `Button`/`Badge`/`RiskLevelBadge` UI primitives and a full
+      `AuditPage` test (mocked `next-auth/react` + `@/lib/api`) covering
+      the unauthenticated redirect, the loaded-summary render, and the
+      403-friendly-message path. **Found and fixed a real build break**
+      while wiring this up: a page-level test file placed under
+      `pages/audit/index.test.tsx` was picked up by Next.js as an actual
+      *route* and broke `next build` (`ReferenceError: jest is not
+      defined` during page-data collection) -- moved page-level tests to
+      a top-level `apps/web/__tests__/` directory instead.
+- [x] API tests — covered by the existing per-feature Jest suites
+      (scoring, framework, assessments, risks, initiatives, import,
+      dashboard, auth, audit) plus this phase's `RolesGuard` and
+      `AuditController` wiring specs.
+- [x] Integration tests — a new `apps/api/test/tenant-security.integration-spec.ts`
+      boots the **real** `AppModule` (every module, guard, and
+      interceptor, nothing mocked) against the live local Postgres
+      database over real HTTP (`app.listen(0)` + the built-in `fetch`),
+      creating and tearing down a second real tenant/org/user/risk to
+      exercise cross-tenant behaviour. Kept out of the default `npm test`
+      via a separate `jest.integration.config.js` and `npm run
+      test:integration` script (`--runInBand --forceExit`) so the fast,
+      DB-free unit suite CI will eventually run stays fast; this one
+      needs a reachable `DATABASE_URL` and the seeded demo tenant.
+- [x] E2E tests (Playwright) — a real, committed `playwright.config.ts`
+      (`webServer` starts both the API and web dev servers if they
+      aren't already running) and `e2e/audit-log.spec.ts`, covering
+      login → LOGIN event, create-risk → CREATE event, and the
+      non-privileged-role friendly-403 path, all against the actual
+      running stack.
+- [x] Tenant isolation tests — already present per-feature since Phase 6
+      (every service's Jest suite asserts tenant-scoped queries); this
+      phase adds a dedicated cross-cutting regression via the new
+      integration suite (a second tenant's risk never appears in tenant
+      A's listing, and a direct-by-id fetch across tenants 404s rather
+      than leaking the record).
+- [x] Authorization tests — new `roles.guard.spec.ts` (6 tests) plus the
+      integration suite's role-based 200/403 assertions.
+- [x] Security tests — the integration suite also asserts: a wrong
+      password is rejected, a request with no bearer token 401s, a
+      *tampered* JWT signature 401s (not just a missing one), an
+      unrecognized DTO field is rejected outright by
+      `forbidNonWhitelisted` (mass-assignment protection), and a
+      cross-tenant `organisationId` on `POST /risks` 404s instead of
+      creating the record.
+- [x] **Found and fixed two real bugs via this phase's test-writing**,
+      continuing this session's pattern of catching defects specifically
+      *because* a test was being written, not by inspection alone:
+      1. **RBAC bypass in `AuditController`** (introduced in Phase 13):
+         `@Roles(...AUDIT_READERS)` was applied at the *class* decorator
+         level, but `RolesGuard.canActivate()` reads metadata off
+         `context.getHandler()` (the method), never `context.getClass()`
+         -- every other controller in the codebase applies `@Roles()`
+         per-method, which is what `RolesGuard` actually reads. The
+         practical effect: `Reflect.getMetadata` returned `undefined` for
+         every audit-events route, so `RolesGuard`'s
+         no-metadata-means-public early return let *any* authenticated
+         user (including `READ_ONLY_VIEWER`) read the full audit log.
+         First surfaced by the Playwright suite (a viewer account saw the
+         real event table instead of a 403), then reproduced and pinned
+         down by the integration suite; fixed by moving
+         `@UseGuards(RolesGuard)`/`@Roles(...)` onto each handler method,
+         with a regression test (`audit.controller.spec.ts`) asserting
+         the metadata is attached directly to `findAll`/`getSummary`.
+      2. **`RolesGuard` only ever checked a user's *first* assigned
+         role**: the schema (`UserRoleAssignment`) has always supported
+         multiple role assignments per user, and `AuthService` computes
+         `role: roles[0]` as a convenience field alongside the full
+         `roles: string[]` array, but `RolesGuard` checked only the
+         singular `user.role` -- so a user holding, say, `CISO` as their
+         *second* role assignment would be incorrectly denied a
+         `@Roles(CISO)` endpoint. Fixed to check the full `roles[]` array
+         (falling back to the singular field if absent), with 6 new
+         regression tests including the exact multi-role scenario.
+- [x] Live-verified: the full Playwright suite and the Jest integration
+      suite both pass cleanly against the real stack after both fixes.
+
+  **Not built this pass**: component tests for the other `apps/web` pages
+  (assessments list, risk register, roadmap) beyond `AuditPage`; the E2E
+  suite covers only the audit-logging flows added most recently, not a
+  full regression pass over every earlier-phase page; a CI workflow to
+  actually run any of this (that's Phase 16).
+
 ## Known Issues 🐛
 
 - Root `.eslintrc.json` references `eslint-plugin-security`,
@@ -612,16 +701,6 @@ Chromium against the running Next.js + NestJS + Postgres stack), not just
   binary; `packages/database`'s own `build` script only runs `tsc`.
 
 ## Not Started ⭕
-
-### Phase 14: Tests
-- [ ] Unit tests (Jest)
-- [ ] Component tests (React Testing Library)
-- [ ] API tests
-- [ ] Integration tests
-- [ ] E2E tests (Playwright)
-- [ ] Tenant isolation tests
-- [ ] Authorization tests
-- [ ] Security tests
 
 ### Phase 15: Docker
 - [ ] Docker image builds
@@ -762,18 +841,19 @@ None recorded yet
 2. ~~Begin Phase 13: Audit Logging~~ — done this session (see Phase 13
    above); a global interceptor now audits every create/update/delete
    across all resources, plus login/logout, with a dashboard view
-3. **Begin Phase 14**: Tests — the project has unit tests throughout
-   (99 in `apps/api` across scoring/framework/assessments/risks/
-   initiatives/import/dashboard/auth/audit), but is still missing:
-   component tests (React Testing Library) for the `apps/web` pages,
-   dedicated tenant-isolation and authorization test suites (today that
-   coverage is incidental to each feature's own tests rather than a
-   deliberate cross-cutting suite), a Playwright E2E suite committed to
-   the repo (this session's live-verification scripts were ad hoc and
-   run from the sandbox scratch directory, not checked in), and security
-   tests (e.g. CSV-injection, tenant-boundary, RBAC-bypass regression
-   tests as actual committed test files rather than one-off manual
-   verification)
+3. ~~Begin Phase 14: Tests~~ — done this session (see Phase 14 above);
+   added React Testing Library component tests, a committed Playwright
+   E2E suite, a live-DB integration/security/tenant-isolation suite, and
+   dedicated authorization tests -- which caught and fixed a real RBAC
+   bypass in the audit endpoints and a multi-role authorization gap in
+   `RolesGuard`
+4. **Begin Phase 15**: Docker — Dockerfiles for `apps/api` and
+   `apps/web`, a `docker-compose.yml` wiring them to Postgres (this
+   session's local, non-Docker Postgres install was a sandbox-specific
+   substitute; a real Docker Compose setup is still needed for anyone
+   without this sandbox's environment), and documenting the compose-based
+   dev workflow to replace the ad hoc `service postgresql start` +
+   `npm run dev` steps used throughout this session
 5. Round out earlier frontend gaps: an assessment-taking flow (create an
    assessment, walk its 106 items, `PATCH` responses — today only the
    read-side dashboard has UI), a framework selection UI, a

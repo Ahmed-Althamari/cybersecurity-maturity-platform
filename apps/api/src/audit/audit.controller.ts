@@ -14,12 +14,13 @@ const AUDIT_READERS = [
 ];
 
 @Controller('audit-events')
-@UseGuards(JwtAuthGuard, RolesGuard)
-@Roles(...AUDIT_READERS)
+@UseGuards(JwtAuthGuard)
 export class AuditController {
   constructor(private auditService: AuditService) {}
 
   @Get()
+  @UseGuards(RolesGuard)
+  @Roles(...AUDIT_READERS)
   async findAll(
     @Query('userId') userId: string | undefined,
     @Query('action') action: AuditAction | undefined,
@@ -46,6 +47,8 @@ export class AuditController {
   }
 
   @Get('summary')
+  @UseGuards(RolesGuard)
+  @Roles(...AUDIT_READERS)
   async getSummary(@Query('sinceDays') sinceDays: string | undefined, @CurrentUser() user: any) {
     return this.auditService.getSummary(user.tenantId, sinceDays ? Number(sinceDays) : undefined);
   }
