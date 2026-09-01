@@ -4,8 +4,8 @@ Last Updated: 2026-09-01
 
 ## Overall Progress
 
-**Phase**: 9 / 17
-**Completion**: ~53%
+**Phase**: 10 / 17
+**Completion**: ~59%
 
 ## First End-to-End Verification Against a Live Database
 
@@ -109,9 +109,10 @@ cd apps/api && cp ../../.env .env && npx nest start
 - [x] Unit tests: login success/failure paths, tenant-isolation on
       `findOne`/`findAll`, password-hash-not-plaintext, duplicate-email
       rejection (`auth.service.spec.ts`, `users.service.spec.ts` — 9 tests)
-- [ ] NextAuth.js configuration on the Next.js frontend (not started — the
-      NestJS API issues its own JWTs for now; frontend session wiring is
-      still open)
+- [x] NextAuth.js configuration on the Next.js frontend — done in Phase 10
+      (see below): `CredentialsProvider` calls the real
+      `POST /api/v1/auth/login`, the NestJS-issued JWT is carried inside
+      the NextAuth session rather than NextAuth minting its own
 - [ ] Token revocation / refresh-token rotation (current `refresh` endpoint
       re-signs a valid token; no blacklist or rotation yet)
 - [x] End-to-end verification against a live database — done this session
@@ -367,6 +368,60 @@ cd apps/api && cp ../../.env .env && npx nest start
       correctness, tenant/assessment scoping, gap-to-function attribution,
       upcoming-initiative sorting) — 123 tests total across the branch
 
+### Phase 10: Dashboard UI
+This is the first real frontend work in the project — before this, `apps/web`
+was the default Next.js scaffold plus a stubbed NextAuth config with a
+hardcoded demo-users array. Verified live in a real browser (Playwright/
+Chromium against the running Next.js + NestJS + Postgres stack), not just
+`tsc`/`next build` — screenshots taken at every step during development.
+- [x] Landing/home dashboard — `pages/index.tsx` now redirects based on auth
+      state (`/assessments` if signed in, `/auth/signin` otherwise); the
+      previous placeholder dashboard content (hardcoded stat cards) is
+      replaced by the real one below
+- [x] **Also completed real Phase 3 frontend work that had been left open**:
+      wired NextAuth's `CredentialsProvider.authorize()` to actually call
+      `POST /api/v1/auth/login` (it was a hardcoded `demoUsers` array with a
+      `// TODO: call actual authentication API` comment), threads the
+      issued JWT + tenantId/organisationId/role through the NextAuth
+      session (`types/next-auth.d.ts` module augmentation), and built a
+      real `/auth/signin` page (the `pages: { signIn: '/auth/signin' }`
+      config pointed at a page that didn't exist)
+- [x] KPI cards (Maturity, Gap, Completion, etc.) — 7 cards: Overall/Target/
+      Gap maturity, Completion%, Critical Gaps, High Risk Findings, Open
+      Remediations, with tone coloring (gap severity, zero-is-good counts)
+- [x] Radar chart (6 functions) — Recharts `RadarChart`, current vs. target
+- [x] Maturity gap bar chart — Recharts `BarChart`, current vs. target per
+      function
+- [x] Function detail cards — one per NIST function with a progress bar,
+      completion%, and a high-risk-gap badge when applicable
+- [x] Top 10 gaps table — sorted by gap descending, with risk-level badges
+- [x] Risk summary and remediation roadmap panels — not on the original
+      Phase 10 checklist by name, but `GET /assessments/:id/dashboard`
+      already returns this data (Phase 9), so it's real, live-verified UI,
+      not placeholder
+- [ ] Security maturity heatmap — not built this pass; `GET .../dashboard/gaps`
+      only returns function-level entries today (the underlying
+      `ScoringService`/gap-analysis engine already supports
+      category/subcategory granularity — see Phase 7/9 — the dashboard
+      endpoint just doesn't expose a `levels` query param yet)
+- [ ] Maturity distribution — not built this pass
+- [x] Minimal `components/ui/*` primitives (Card, Button, Badge) built from
+      the shadcn-style pieces already in `package.json`
+      (`class-variance-authority`, `clsx`, `tailwind-merge`,
+      `@radix-ui/react-slot`) — no actual shadcn/ui components existed yet,
+      only the CSS-variable theme in `globals.css`/`tailwind.config.js`
+- [x] `@cmmp/shared`'s dashboard types (`ExecutiveDashboard`,
+      `FunctionMaturity`, `GapAnalysis`, `RiskSummary`, `RoadmapStatus`)
+      reused directly as the frontend's data contract — no type duplication
+      between backend and frontend
+- [x] Live-verified end-to-end in a real browser: sign in → assessment list
+      (2 assessments, one from seed data with real risks/initiatives, one
+      created live via `POST /assessments` against the full 106-item NIST
+      CSF framework) → dashboard, all sections rendering correct live data;
+      caught and fixed one real cosmetic bug (`globals.css`'s global
+      `a { text-decoration: underline }` base style was bleeding into the
+      assessment-card links)
+
 ## Known Issues 🐛
 
 - Root `.eslintrc.json` references `eslint-plugin-security`,
@@ -383,16 +438,6 @@ cd apps/api && cp ../../.env .env && npx nest start
   binary; `packages/database`'s own `build` script only runs `tsc`.
 
 ## Not Started ⭕
-
-### Phase 10: Dashboard UI
-- [ ] Landing/home dashboard
-- [ ] KPI cards (Maturity, Gap, Completion, etc.)
-- [ ] Radar chart (6 functions)
-- [ ] Maturity gap bar chart
-- [ ] Function detail cards
-- [ ] Security maturity heatmap
-- [ ] Top 10 gaps table
-- [ ] Maturity distribution
 
 ### Phase 11: Risk Register
 - [ ] Risk model
@@ -563,20 +608,18 @@ None recorded yet
 
 1. ~~Generate the first Prisma migration~~ — done this session (see "First
    End-to-End Verification" above); the migration is checked in
-2. **Begin Phase 10**: Dashboard UI — the first actual frontend build in
-   this project (landing dashboard, KPI cards, a 6-function radar chart,
-   maturity gap bar chart, function detail cards, a maturity heatmap, top
-   10 gaps table) consuming the Phase 9 endpoints; there is effectively no
-   Next.js UI yet beyond the default scaffold, so this is a substantial
-   phase
-3. Wire the Next.js frontend to the full API surface once Phase 10 starts:
-   `/api/v1/auth/login`, `/api/v1/users`, `/api/v1/frameworks*`,
-   `/api/v1/assessments*`, `/api/v1/assessments/:id/import`, and
-   `/api/v1/assessments/:id/dashboard*` (login page, session/token
-   storage, framework selection UI, an assessment-taking flow, a
-   column-mapping step for spreadsheet import — the backend takes an
-   explicit mapping today with no auto-suggestion — and the dashboard
-   views themselves)
+2. **Begin Phase 11**: Risk Register — a real Risk CRUD API + UI (today,
+   risks only exist via seed data and the read-only dashboard rollup);
+   risk-control mapping, prioritization, and remediation tracking
+3. Round out the Phase 10 frontend: an assessment-taking flow (create an
+   assessment, walk its 106 items, `PATCH` responses — today only the
+   read-side dashboard has UI), a framework selection UI, and a
+   column-mapping step for spreadsheet import (the backend takes an
+   explicit `ColumnMapping` today with no auto-suggestion). Also: a
+   category/subcategory-level `levels` query param on
+   `GET .../dashboard/gaps` (the engine already supports it) to build the
+   still-missing security maturity heatmap and maturity distribution
+   views.
 4. Spot-check the seeded NIST CSF 2.0 outcome text against the official
    NIST CSWP 29 publication (see the Phase 5 data-provenance note above) —
    this sandbox couldn't reach nist.gov directly to verify byte-for-byte
