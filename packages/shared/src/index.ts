@@ -233,6 +233,33 @@ export interface RemediationInitiative {
 }
 
 // ============================================================================
+// DASHBOARD SUMMARY TYPES (Phase 9)
+// ============================================================================
+
+export interface RiskSummary {
+  totalRisks: number;
+  byRiskLevel: Record<RiskLevel, number>;
+  byStatus: Record<string, number>;
+  /** Highest-severity risks first, capped to a display-friendly count. */
+  topRisks: Risk[];
+}
+
+export interface RoadmapStatus {
+  totalInitiatives: number;
+  byStatus: Record<RemediationInitiative["status"], number>;
+  /** Not-yet-completed initiatives with the nearest targetCompletionDate first. */
+  upcoming: RemediationInitiative[];
+}
+
+export interface ExecutiveDashboard {
+  maturityOverview: MaturityOverview;
+  functionMaturity: FunctionMaturity[];
+  topGaps: GapAnalysis[];
+  riskSummary: RiskSummary;
+  roadmapStatus: RoadmapStatus;
+}
+
+// ============================================================================
 // API REQUEST/RESPONSE TYPES
 // ============================================================================
 

@@ -4,8 +4,8 @@ Last Updated: 2026-09-01
 
 ## Overall Progress
 
-**Phase**: 8 / 17
-**Completion**: ~47%
+**Phase**: 9 / 17
+**Completion**: ~53%
 
 ## Completed ✅
 
@@ -268,6 +268,47 @@ Last Updated: 2026-09-01
       formula-injection-still-applies-as-WARNING case) — 116 tests total
       across the branch
 
+### Phase 9: Dashboard APIs
+- [x] Executive dashboard endpoint — `GET /assessments/:id/dashboard` fans
+      out to every section below in parallel and returns one
+      `ExecutiveDashboard` payload (`packages/shared`), for a landing page
+      that needs several widgets in a single request
+- [x] Maturity overview endpoint — `GET .../dashboard/maturity-overview`
+      (`MaturityOverview`): org-wide current/target/gap from
+      `ScoringService`, `completionPercentage` from the `Assessment` row,
+      `criticalGaps` (subcategory-level CRITICAL gap count), `highRiskFindings`
+      (open CRITICAL/HIGH risks), `openRemediationActions`
+      (PLANNED/IN_PROGRESS initiatives)
+- [x] Function maturity endpoint — `GET .../dashboard/functions`
+      (`FunctionMaturity[]`): one entry per NIST function in framework
+      display order, with its own completion percentage (recomputed the
+      same way Phase 6 defines completion — `controlStatus` off
+      `NOT_STARTED`) and a `highRiskGaps` count attributed from
+      subcategory-level gap analysis
+- [x] Gap analysis endpoint — `GET .../dashboard/gaps` (`GapAnalysis[]`,
+      `?minGap=`): function-level gaps enriched with code/name and an
+      `affectedControls` count (subcategories under that function with a
+      real gap > 0)
+- [x] Risk summary endpoint — `GET .../dashboard/risks` (`RiskSummary`):
+      risks traced through `Risk.assessmentItem → AssessmentItem.assessmentId`
+      (risks not linked to any item on this assessment are out of scope —
+      Risk is organisation-scoped in the schema, this view is
+      assessment-scoped), grouped by level/status, top 10 by severity
+- [x] Roadmap status endpoint — `GET .../dashboard/roadmap`
+      (`RoadmapStatus`): `RemediationInitiative`s traced through the
+      Risk↔Initiative many-to-many (initiatives linked to any risk that is
+      itself linked to this assessment), grouped by status, next 10
+      upcoming by `targetCompletionDate`
+- [x] Added `RiskSummary`, `RoadmapStatus`, `ExecutiveDashboard` to
+      `@cmmp/shared` alongside the `MaturityOverview`/`FunctionMaturity`/
+      `GapAnalysis` types Phase 1 had already stubbed there — this phase
+      is mostly composition of Phase 6/7 (`AssessmentsService`,
+      `ScoringService`) plus new read-only Risk/RemediationInitiative
+      queries, not new calculation logic
+- [x] Tests: 7 new tests in `apps/api` (`DashboardService` — composition
+      correctness, tenant/assessment scoping, gap-to-function attribution,
+      upcoming-initiative sorting) — 123 tests total across the branch
+
 ## Known Issues 🐛
 
 - Root `.eslintrc.json` references `eslint-plugin-security`,
@@ -284,14 +325,6 @@ Last Updated: 2026-09-01
   binary; `packages/database`'s own `build` script only runs `tsc`.
 
 ## Not Started ⭕
-
-### Phase 9: Dashboard APIs
-- [ ] Executive dashboard endpoint
-- [ ] Maturity overview endpoint
-- [ ] Function maturity endpoint
-- [ ] Gap analysis endpoint
-- [ ] Risk summary endpoint
-- [ ] Roadmap status endpoint
 
 ### Phase 10: Dashboard UI
 - [ ] Landing/home dashboard
@@ -463,18 +496,20 @@ None recorded yet
 1. **Generate the first Prisma migration** once a Postgres instance is
    reachable (`docker compose up postgres`, then
    `npm run db:generate && cd packages/database && npx prisma migrate dev`)
-2. **Begin Phase 9**: Dashboard APIs — executive dashboard, maturity
-   overview, function maturity, gap analysis, risk summary, and roadmap
-   status endpoints, largely composing what already exists
-   (`ScoringService.computeGapAnalysis`, `AssessmentsService`) into
-   dashboard-shaped responses rather than new calculation logic
-3. Wire the Next.js frontend to the new `/api/v1/auth/login`,
-   `/api/v1/users`, `/api/v1/frameworks*`, `/api/v1/assessments*`, and
-   `/api/v1/assessments/:id/import` endpoints (login page, session/token
+2. **Begin Phase 10**: Dashboard UI — the first actual frontend build in
+   this project (landing dashboard, KPI cards, a 6-function radar chart,
+   maturity gap bar chart, function detail cards, a maturity heatmap, top
+   10 gaps table) consuming the Phase 9 endpoints; there is effectively no
+   Next.js UI yet beyond the default scaffold, so this is a substantial
+   phase
+3. Wire the Next.js frontend to the full API surface once Phase 10 starts:
+   `/api/v1/auth/login`, `/api/v1/users`, `/api/v1/frameworks*`,
+   `/api/v1/assessments*`, `/api/v1/assessments/:id/import`, and
+   `/api/v1/assessments/:id/dashboard*` (login page, session/token
    storage, framework selection UI, an assessment-taking flow, a
-   maturity/gap view backed by `GET /assessments/:id/scores`, and a
    column-mapping step for spreadsheet import — the backend takes an
-   explicit mapping today with no auto-suggestion)
+   explicit mapping today with no auto-suggestion — and the dashboard
+   views themselves)
 4. Spot-check the seeded NIST CSF 2.0 outcome text against the official
    NIST CSWP 29 publication (see the Phase 5 data-provenance note above) —
    this sandbox couldn't reach nist.gov directly to verify byte-for-byte

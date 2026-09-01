@@ -6,6 +6,7 @@ import { UsersModule } from './users/users.module';
 import { FrameworkModule } from './framework/framework.module';
 import { AssessmentsModule } from './assessments/assessments.module';
 import { ImportModule } from './import/import.module';
+import { DashboardModule } from './dashboard/dashboard.module';
 
 @Module({
   imports: [
@@ -19,6 +20,7 @@ import { ImportModule } from './import/import.module';
     FrameworkModule,
     AssessmentsModule,
     ImportModule,
+    DashboardModule,
   ],
   controllers: [],
   providers: [],
