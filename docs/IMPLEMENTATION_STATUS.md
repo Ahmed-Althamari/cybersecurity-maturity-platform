@@ -7,6 +7,58 @@ Last Updated: 2026-09-01
 **Phase**: 9 / 17
 **Completion**: ~53%
 
+## First End-to-End Verification Against a Live Database
+
+Every phase through Phase 9 had only ever been verified with `tsc`, `nest
+build`, and Jest against a mocked `PrismaService` — no session before this
+one had a reachable Postgres. This session did: a local PostgreSQL 16
+install was available in the sandbox (`service postgresql start`,
+independent of Docker, whose daemon wasn't running here), so for the first
+time the full pipeline ran for real: `prisma migrate dev` generated and
+applied the actual first migration, `npm run seed` loaded the complete
+106-subcategory NIST CSF 2.0 hierarchy, and the live NestJS API was
+exercised end-to-end — login, `GET /frameworks`, `POST /assessments`
+against the real framework (seeded exactly 106 `AssessmentItem`s), a
+`PATCH .../items/:itemId` (correctly auto-transitioned DRAFT→IN_PROGRESS
+and recomputed the score), `GET /assessments/:id/dashboard`, and a real
+multipart CSV upload through `POST /assessments/:id/import` (confirmed the
+formula-injection sanitizer neutralizes a live `=cmd|'/C calc'!A1` payload
+in a free-text field, and that an unknown subcategory code and an invalid
+enum value both come back as row-level errors rather than failing the
+batch).
+
+**This caught a real, previously-undetected bug**: `AuthModule`'s
+`JwtModule.register({ secret: process.env.JWT_SECRET })` read the
+environment variable at module-*decoration* time — while `app.module.ts`'s
+own top-level imports (including `AuthModule` itself) were still being
+resolved, before `ConfigModule.forRoot()` in that same imports array had
+loaded `.env`. `JwtStrategy`, an `@Injectable()`, read the same variable
+later at DI-*instantiation* time, after `.env` was actually loaded. Net
+effect: login-issued tokens were signed with the hardcoded fallback secret
+while protected routes verified against the real `.env` secret — every
+authenticated request 401'd whenever a real `JWT_SECRET` was configured
+(i.e. always, in any deployment following the security guidance to not
+use the default). Fixed by switching `JwtModule.register()` to
+`JwtModule.registerAsync()` with a `ConfigService`-injected factory, and
+`JwtStrategy` to inject `ConfigService` instead of reading `process.env`
+directly — both now resolve the secret at the same (post-`ConfigModule`)
+point in the bootstrap sequence. No test had caught this because every
+existing auth test constructs `AuthService`/`JwtService` directly, bypassing
+Nest's module system entirely (correctly, for a unit test) — this class of
+bug is only visible when the real DI container wires the real modules, i.e.
+only in an end-to-end run. Local setup used, for reproducibility:
+
+```bash
+service postgresql start
+sudo -u postgres psql -c "CREATE USER cmmp_user WITH PASSWORD 'cmmp_password' CREATEDB;"
+sudo -u postgres psql -c "CREATE DATABASE cmmp_db OWNER cmmp_user;"
+# .env: DATABASE_URL/DIRECT_DATABASE_URL host changed from `postgres` (the
+# docker-compose service name) to `localhost` (no Docker daemon here)
+cd packages/database && DATABASE_URL=... npx prisma migrate dev --name init
+npm run seed
+cd apps/api && cp ../../.env .env && npx nest start
+```
+
 ## Completed ✅
 
 ### Phase 1: Architecture & Repository Structure
@@ -37,11 +89,11 @@ Last Updated: 2026-09-01
 - [x] Relationships setup
 - [x] Seed data script (`packages/database/prisma/seed.ts`) — NIST CSF sample
       hierarchy, demo tenant/org/users, sample assessment/risks/initiatives
-- [ ] Migrations structure — schema is migration-ready but no migration has
-      been generated yet; requires a reachable Postgres instance
-      (`npm run db:generate` then `prisma migrate dev` from
-      `packages/database`). Not runnable in this sandbox (no Docker/Postgres
-      available).
+- [x] Migrations structure — the first migration
+      (`packages/database/prisma/migrations/20260901072626_init/`) was
+      generated and applied against a real PostgreSQL 16 instance in this
+      session (see "First End-to-End Verification" above) and is now
+      checked into the repo
 
 ### Phase 3: Authentication & RBAC
 - [x] JWT strategy (`passport-jwt`, `@nestjs/jwt`)
@@ -62,9 +114,14 @@ Last Updated: 2026-09-01
       still open)
 - [ ] Token revocation / refresh-token rotation (current `refresh` endpoint
       re-signs a valid token; no blacklist or rotation yet)
-- [ ] End-to-end verification against a live database — not possible in this
-      sandbox (no Docker/Postgres). Verified instead via: `tsc --noEmit`,
-      `nest build`, and Jest unit tests with a mocked `PrismaService`.
+- [x] End-to-end verification against a live database — done this session
+      (see "First End-to-End Verification" above); also **found and fixed
+      a real bug**: `JwtModule.register()` was reading `JWT_SECRET` before
+      `ConfigModule` had loaded `.env`, so tokens were signed with the
+      hardcoded fallback secret while routes verified against the real
+      one — every authenticated request 401'd whenever a real `JWT_SECRET`
+      was configured. Fixed via `JwtModule.registerAsync()` +
+      `ConfigService`.
 
 ### Phase 4: Framework Engine
 - [x] Framework type definitions (`packages/framework-engine/src/types.ts`) —
@@ -99,9 +156,10 @@ Last Updated: 2026-09-01
       — tenant isolation, not-found mapping, validation-without-persisting,
       unique-constraint → `ConflictException`)
 - [x] Verified via `tsc --noEmit`, `nest build`, and Jest across both packages
-      (all green); end-to-end verification against a live database is still
-      blocked on the same no-Docker/Postgres sandbox limitation noted under
-      Phase 2/3
+      (all green), and end-to-end against a live database this session (see
+      "First End-to-End Verification" above) — `GET /frameworks` and
+      `POST /assessments` against the real seeded NIST CSF 2.0 framework
+      both confirmed correct
 
 ### Phase 5: NIST CSF Framework Data
 - [x] NIST CSF 2.0 complete hierarchy — all 6 Functions, 22 Categories, and
@@ -489,13 +547,22 @@ None recorded yet
 
 ## Security Findings
 
-None recorded yet
+- **[Fixed, this session] JWT signing/verification secret mismatch**
+  (auth availability, not a bypass — the failure mode was every
+  authenticated request 401ing, not unauthorized access): `AuthModule`'s
+  `JwtModule.register({ secret: process.env.JWT_SECRET })` read the env
+  var before `ConfigModule` had loaded `.env`, silently falling back to
+  the hardcoded default secret for signing, while `JwtStrategy` verified
+  against the real `.env` value read later at DI-instantiation time. Only
+  surfaced by running the real app end-to-end (see "First End-to-End
+  Verification" above) — no unit test exercises Nest's actual module
+  bootstrap/DI ordering. Fixed via `JwtModule.registerAsync()` +
+  `ConfigService`, in both `auth.module.ts` and `jwt.strategy.ts`.
 
 ## Next Steps
 
-1. **Generate the first Prisma migration** once a Postgres instance is
-   reachable (`docker compose up postgres`, then
-   `npm run db:generate && cd packages/database && npx prisma migrate dev`)
+1. ~~Generate the first Prisma migration~~ — done this session (see "First
+   End-to-End Verification" above); the migration is checked in
 2. **Begin Phase 10**: Dashboard UI — the first actual frontend build in
    this project (landing dashboard, KPI cards, a 6-function radar chart,
    maturity gap bar chart, function detail cards, a maturity heatmap, top
