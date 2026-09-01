@@ -1,11 +1,11 @@
 # CMMP Implementation Status
 
-Last Updated: 2026-08-31
+Last Updated: 2026-09-01
 
 ## Overall Progress
 
-**Phase**: 5 / 17
-**Completion**: ~29%
+**Phase**: 6 / 17
+**Completion**: ~35%
 
 ## Completed ✅
 
@@ -146,6 +146,43 @@ Last Updated: 2026-08-31
   against the official publication before treating this as an authoritative
   compliance mapping.
 
+### Phase 6: Assessment Engine
+- [x] Assessment model — used as-is from Phase 2's schema (`Assessment`,
+      `AssessmentItem`, `AssessmentHistory`); no schema changes needed
+- [x] Assessment creation (`POST /assessments`) — resolves a Framework by
+      slug/version through `FrameworkService.getTree` (the Phase 4/5 loader),
+      flattens every question across the tree, and bulk-creates one
+      `AssessmentItem` per question, so an assessment's question set always
+      matches what `GET /frameworks/:slug` shows for that framework/version
+- [x] Assessment responses (`PATCH /assessments/:id/items/:itemId`) —
+      per-item updates (maturity, risk, control status, rationale, evidence,
+      owner, remediation due date); blocked once an assessment is
+      SUBMITTED/APPROVED/ARCHIVED ("reopen it first")
+- [x] Draft/submitted states — a small explicit state machine
+      (`DRAFT → IN_PROGRESS → SUBMITTED → APPROVED`, `ARCHIVED` reachable
+      from any non-terminal state, `SUBMITTED`/`APPROVED` reopenable back to
+      `IN_PROGRESS` for rework) enforced in `AssessmentsService`; the first
+      item edit on a DRAFT assessment auto-transitions it to IN_PROGRESS;
+      `submit()` requires 100% completion first
+- [x] Assessment history tracking — every status transition appends an
+      `AssessmentHistory` row (`GET /assessments/:id/history`), versioned
+      and timestamped
+- [x] Role-gated mutations (`AUTHORS` create/edit/submit/reopen,
+      `APPROVERS` approve, `ARCHIVERS` delete/archive) and tenant +
+      organisation isolation (organisation ownership checked against the
+      caller's tenant before an assessment can be created against it)
+- [x] Tests: 16 new tests in `apps/api` (35 total) — tenant isolation,
+      question-seeding from a framework tree, the editing guard, the
+      auto-transition-on-first-edit behaviour, illegal-transition rejection,
+      and the submit-requires-100%-completion rule
+
+  **Scope note**: `completionPercentage` here is a workflow-progress
+  heuristic (share of items whose `controlStatus` has moved off
+  `NOT_STARTED`), not a maturity score — `Assessment.currentMaturity` /
+  `targetMaturity` / `maturityGap` are deliberately left null for Phase 7
+  (Scoring Engine) to own: item scoring, category/function aggregation,
+  org-wide scoring, and gap analysis.
+
 ## Known Issues 🐛
 
 - Root `.eslintrc.json` references `eslint-plugin-security`,
@@ -162,13 +199,6 @@ Last Updated: 2026-08-31
   binary; `packages/database`'s own `build` script only runs `tsc`.
 
 ## Not Started ⭕
-
-### Phase 6: Assessment Engine
-- [ ] Assessment model
-- [ ] Assessment creation
-- [ ] Assessment responses
-- [ ] Assessment history tracking
-- [ ] Draft/submitted states
 
 ### Phase 7: Scoring Engine
 - [ ] Maturity level definitions
@@ -365,13 +395,15 @@ None recorded yet
 1. **Generate the first Prisma migration** once a Postgres instance is
    reachable (`docker compose up postgres`, then
    `npm run db:generate && cd packages/database && npx prisma migrate dev`)
-2. **Begin Phase 6**: Assessment Engine — Assessment/AssessmentItem creation
-   against a loaded `FrameworkTree` (now that NIST CSF 2.0's full 106
-   subcategories/questions exist to assess against), draft/submitted state
-   transitions, and assessment history tracking
+2. **Begin Phase 7**: Scoring Engine — item scoring calculation, category/
+   function aggregation, org-wide scoring, and gap analysis, now that
+   `AssessmentItem.currentMaturity`/`targetMaturity` are real assessor
+   input and `Assessment.currentMaturity`/`targetMaturity`/`maturityGap`
+   are sitting there null waiting for it (see the Phase 6 scope note above)
 3. Wire the Next.js frontend to the new `/api/v1/auth/login`,
-   `/api/v1/users`, and `/api/v1/frameworks*` endpoints (login page,
-   session/token storage, framework selection UI)
+   `/api/v1/users`, `/api/v1/frameworks*`, and `/api/v1/assessments*`
+   endpoints (login page, session/token storage, framework selection UI,
+   an assessment-taking flow)
 4. Spot-check the seeded NIST CSF 2.0 outcome text against the official
    NIST CSWP 29 publication (see the Phase 5 data-provenance note above) —
    this sandbox couldn't reach nist.gov directly to verify byte-for-byte
