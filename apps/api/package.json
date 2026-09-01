@@ -17,6 +17,7 @@
     "clean": "rm -rf dist coverage"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.123.0",
     "@cmmp/database": "*",
     "@cmmp/framework-engine": "*",
     "@cmmp/import-engine": "*",
@@ -49,6 +50,7 @@
     "@typescript-eslint/eslint-plugin": "^6.9.1",
     "@typescript-eslint/parser": "^6.9.1",
     "eslint": "^8.52.0",
+    "exceljs": "^4.4.0",
     "jest": "^29.7.0",
     "prisma": "^5.22.0",
     "ts-jest": "^29.1.1",

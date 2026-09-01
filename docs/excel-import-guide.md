@@ -10,17 +10,50 @@ sanitizes. This describes the real, shipping behavior of
 ## Supported file formats
 
 - **CSV** (`format: "csv"`) — parsed with `papaparse`, `header: true`.
-  Headers are trimmed of surrounding whitespace.
-- **XLSX** (`format: "xlsx"`) — parsed with `exceljs`, **first worksheet
-  only**. A few cell-type behaviors worth knowing:
+  Headers are trimmed of surrounding whitespace. A CSV has no concept of
+  tabs — it's always treated as one implicit sheet named `"Sheet1"`.
+- **XLSX** (`format: "xlsx"`) — parsed with `exceljs`, **every worksheet
+  tab**. A few cell-type behaviors worth knowing:
   - A **formula cell** resolves to its last *calculated* result, not the
     formula text — the importer never re-evaluates a formula itself
     (partly a safety property: a formula string is exactly the kind of
     content the formula-injection sanitizer below exists to neutralize on
     the way *out*, and this importer doesn't execute untrusted formulas on
-    the way in either).
+    the way in either). The formula text itself (e.g. `"=SUM(A1:A3)"`) is
+    also surfaced alongside the resolved value in the preview response
+    (`sampleFormulas`, parallel to `sampleRows`) — the mapping UI shows a
+    banner when a sampled cell used one, so nobody is surprised the
+    imported number came from a calculation rather than a typed value.
   - **Rich text** cells flatten to plain concatenated text.
   - A **hyperlink** cell's display text is used, not the URL.
+
+## Multi-sheet workbooks
+
+`POST /assessments/:id/import/preview` parses **every tab** in one pass
+(the workbook is only ever parsed once, whether it has 1 tab or 20) and
+returns one entry per real Excel sheet name:
+
+```json
+{
+  "sheets": [
+    { "sheetName": "Govern", "headers": [...], "rowCount": 12, "sampleRows": [...], "sampleFormulas": [...] },
+    { "sheetName": "Identify", "headers": [...], "rowCount": 34, "sampleRows": [...], "sampleFormulas": [...] }
+  ],
+  "requiredField": "subcategoryCode",
+  "optionalFields": [...]
+}
+```
+
+The frontend's import page renders a tab picker whenever a workbook has
+more than one sheet — pick a tab, its own auto-mapping is computed, adjust
+it, then import. **Only one tab is imported per `POST
+/assessments/:id/import` call** — pass the tab's real Excel name as
+`sheetName` in that request. To import several tabs from the same
+workbook, repeat the flow once per tab (re-select the tab, confirm its
+mapping, click Import again) — there's no "import all tabs at once" mode,
+since different tabs often have different column layouts and merging them
+blindly would risk silently misapplying one tab's mapping to another's
+data.
 
 Row numbers reported everywhere (preview, import results, `ImportRecord`)
 are **1-based and match what you'd see with the file open** — row 1 is
@@ -143,6 +176,51 @@ count, error count, and the per-row messages for anything that wasn't
 `VALID` — this is what the frontend's import-results panel renders
 directly.
 
+## AI-assisted column-mapping suggestion
+
+The frontend's own auto-mapping only matches a target field to a source
+header of the *exact same name* (case-insensitively) — real customer
+spreadsheets rarely use these names verbatim (`"Current Level"` instead of
+`currentMaturity`, `"Owner (email)"` instead of `ownerEmail`). For any
+field the exact-match pass leaves unmapped, the import page calls
+`POST /assessments/:id/import/suggest-mapping` (`apps/api/src/import/
+ai-mapping.service.ts`): Claude is given the sheet's real headers and a
+few real sample rows and asked which header, if any, plausibly supplies
+each still-unmapped field.
+
+This is an **enhancement, never a dependency**:
+
+- Requires `ANTHROPIC_API_KEY` to be set server-side (see
+  `docs/security-architecture.md`'s pattern for secrets). Unset ->
+  the endpoint returns `{ mapping: {} }` immediately, no API call made.
+- A network error, a malformed response, or any other failure is caught
+  and logged; the endpoint still returns `{ mapping: {} }` rather than an
+  error — the import flow is never blocked by an AI-suggestion failure.
+- **Every suggested header is verified against the sheet's real header
+  list before being trusted** — a suggested column name that doesn't
+  actually exist in the sheet is silently dropped, never allowed to reach
+  `ColumnMapping`. This is the one thing the model's output must never be
+  trusted for outright: a hallucinated header could otherwise pull the
+  wrong (or no) data into a field without the user ever choosing it.
+- The import page visually tags a field with a small "✨ AI suggested"
+  badge when its mapping came from this suggestion (not from an exact
+  header match), so a user knows to double-check it before importing —
+  changing the selection clears the tag.
+
+## Post-import generated chart
+
+After a successful import, the results screen renders a maturity-
+distribution chart (the same `MaturityDistributionChart` component the
+assessment dashboard uses — see `docs/data-model.md`/dashboard docs)
+computed client-side from the rows that were actually applied
+(`result.results[].data.currentMaturity`, skipping `ERROR` rows). This is
+a **generated** chart from the imported data, not a replica of anything
+that may have been in the source workbook — `exceljs` (what this importer
+uses) doesn't parse embedded chart objects at all, so recreating a
+workbook's own charts pixel-for-pixel isn't attempted; generating a fresh,
+correctly-styled chart from the values that were actually imported is far
+less effort for the same practical value.
+
 ## What this importer does not do
 
 - It does not create a new assessment or new framework items — see above.
@@ -151,5 +229,7 @@ directly.
   (manually, or via a corrected re-import).
 - It does not remember a column mapping between imports — every import
   (even a second file against the same framework) starts from a fresh
-  preview and mapping step. Tracked as a documented follow-up in
-  `IMPLEMENTATION_STATUS.md`.
+  preview and mapping step; the AI suggestion (above) helps close this gap
+  for a fresh mapping, but doesn't persist anything between sessions.
+- It does not parse or recreate charts embedded in the source workbook —
+  see "Post-import generated chart" above for what's built instead.

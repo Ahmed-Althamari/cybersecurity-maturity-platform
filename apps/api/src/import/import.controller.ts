@@ -66,6 +66,7 @@ export class ImportController {
     @UploadedFile() file: Express.Multer.File | undefined,
     @Body('format') format: string | undefined,
     @Body('mapping') mappingJson: string | undefined,
+    @Body('sheetName') sheetName: string | undefined,
     @CurrentUser() user: any,
   ) {
     if (!file) {
@@ -92,6 +93,39 @@ export class ImportController {
       file,
       format as SpreadsheetFormat,
       mapping,
+      // Which xlsx tab to import -- undefined for CSV (no tabs) or a
+      // single-sheet workbook, where the importer already falls back to
+      // the first sheet.
+      sheetName || undefined,
     );
+  }
+
+  /**
+   * AI-assisted mapping suggestion for one sheet, given the headers/sample
+   * rows the frontend already has from a prior preview call -- no file
+   * re-upload needed. Same role gate as the two file-handling routes above,
+   * even though this one never touches a file, since it's still part of
+   * the same import workflow and shouldn't be reachable by a role that
+   * can't import.
+   */
+  @Post('suggest-mapping')
+  @UseGuards(RolesGuard)
+  @Roles(
+    UserRole.PLATFORM_ADMIN,
+    UserRole.ORGANISATION_ADMIN,
+    UserRole.CISO,
+    UserRole.GRC_MANAGER,
+    UserRole.ASSESSOR,
+  )
+  async suggestMapping(
+    @Body('headers') headers: string[] | undefined,
+    @Body('sampleRows') sampleRows: Record<string, unknown>[] | undefined,
+  ) {
+    if (!Array.isArray(headers) || headers.length === 0) {
+      throw new BadRequestException("'headers' (a non-empty array) is required");
+    }
+    return {
+      mapping: await this.importService.suggestMapping(headers, Array.isArray(sampleRows) ? sampleRows : []),
+    };
   }
 }

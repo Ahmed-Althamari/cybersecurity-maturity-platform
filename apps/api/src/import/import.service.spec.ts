@@ -1,8 +1,10 @@
 import { BadRequestException } from '@nestjs/common';
+import ExcelJS from 'exceljs';
 
 import { AssessmentsService } from '../assessments/assessments.service';
 import { PrismaService } from '../prisma/prisma.service';
 
+import { AiMappingService } from './ai-mapping.service';
 import { ImportService } from './import.service';
 
 const mapping = {
@@ -15,6 +17,16 @@ function csvFile(content: string) {
   return { buffer: Buffer.from(content, 'utf-8'), originalname: 'import.csv', size: content.length };
 }
 
+async function xlsxFileWithSheets(sheets: Record<string, (string | number)[][]>) {
+  const workbook = new ExcelJS.Workbook();
+  for (const [name, rows] of Object.entries(sheets)) {
+    const sheet = workbook.addWorksheet(name);
+    rows.forEach((row) => sheet.addRow(row));
+  }
+  const buffer = (await workbook.xlsx.writeBuffer()) as unknown as Buffer;
+  return { buffer, originalname: 'import.xlsx', size: buffer.length };
+}
+
 describe('ImportService', () => {
   let service: ImportService;
   let prisma: {
@@ -24,6 +36,7 @@ describe('ImportService', () => {
     $transaction: jest.Mock;
   };
   let assessmentsService: { requireEditable: jest.Mock; recalculateProgress: jest.Mock; findOne: jest.Mock };
+  let aiMappingService: { suggestMapping: jest.Mock };
 
   beforeEach(() => {
     prisma = {
@@ -46,10 +59,12 @@ describe('ImportService', () => {
       recalculateProgress: jest.fn(),
       findOne: jest.fn().mockResolvedValue({ id: 'assessment-1', organisationId: 'org-1' }),
     };
+    aiMappingService = { suggestMapping: jest.fn().mockResolvedValue(null) };
 
     service = new ImportService(
       prisma as unknown as PrismaService,
       assessmentsService as unknown as AssessmentsService,
+      aiMappingService as unknown as AiMappingService,
     );
   });
 
@@ -188,7 +203,7 @@ describe('ImportService', () => {
   });
 
   describe('previewSpreadsheet', () => {
-    it('returns the source headers, a few sample rows, and the mappable target fields', async () => {
+    it('returns one sheet entry with the source headers, a few sample rows, and the mappable target fields', async () => {
       const preview = await service.previewSpreadsheet(
         'tenant-a',
         'assessment-1',
@@ -196,11 +211,34 @@ describe('ImportService', () => {
         'csv',
       );
 
-      expect(preview.headers).toEqual(['Code', 'Current', 'Notes']);
-      expect(preview.rowCount).toBe(2);
-      expect(preview.sampleRows).toHaveLength(2);
+      expect(preview.sheets).toHaveLength(1);
+      expect(preview.sheets[0].sheetName).toBe('Sheet1');
+      expect(preview.sheets[0].headers).toEqual(['Code', 'Current', 'Notes']);
+      expect(preview.sheets[0].rowCount).toBe(2);
+      expect(preview.sheets[0].sampleRows).toHaveLength(2);
+      expect(preview.sheets[0].sampleFormulas).toEqual([{}, {}]);
       expect(preview.requiredField).toBe('subcategoryCode');
       expect(preview.optionalFields).toContain('currentMaturity');
+    });
+
+    it('returns one entry per real worksheet tab for a multi-sheet xlsx workbook', async () => {
+      const file = await xlsxFileWithSheets({
+        Govern: [
+          ['Code', 'Current'],
+          ['GV.RM-01', 'DEFINED'],
+        ],
+        Identify: [
+          ['Code', 'Current'],
+          ['ID.AM-01', 'MANAGED'],
+          ['ID.AM-02', 'INITIAL'],
+        ],
+      });
+
+      const preview = await service.previewSpreadsheet('tenant-a', 'assessment-1', file, 'xlsx');
+
+      expect(preview.sheets.map((s) => s.sheetName)).toEqual(['Govern', 'Identify']);
+      expect(preview.sheets[0].rowCount).toBe(1);
+      expect(preview.sheets[1].rowCount).toBe(2);
     });
 
     it('does not touch the database beyond confirming the assessment exists', async () => {
@@ -220,6 +258,80 @@ describe('ImportService', () => {
       await expect(
         service.previewSpreadsheet('tenant-a', 'assessment-1', csvFile(''), 'xlsx'),
       ).rejects.toThrow(BadRequestException);
+    });
+  });
+
+  describe('importAssessmentResponses with a sheetName', () => {
+    it('imports only the rows from the named sheet, ignoring other tabs', async () => {
+      const file = await xlsxFileWithSheets({
+        Govern: [
+          ['Code', 'Current'],
+          ['GV.RM-01', 'DEFINED'],
+        ],
+        Identify: [
+          ['Code', 'Current'],
+          ['GV.RM-02', 'MANAGED'],
+        ],
+      });
+
+      const result = await service.importAssessmentResponses(
+        'tenant-a',
+        'user-1',
+        'assessment-1',
+        file,
+        'xlsx',
+        { subcategoryCode: 'Code', currentMaturity: 'Current' },
+        'Identify',
+      );
+
+      expect(result.successCount).toBe(1);
+      expect(prisma.assessmentItem.update).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { id: 'item-2' } }),
+      );
+    });
+
+    it("records which sheet was imported in the ImportJob's fileName", async () => {
+      const file = await xlsxFileWithSheets({
+        Govern: [
+          ['Code', 'Current'],
+          ['GV.RM-01', 'DEFINED'],
+        ],
+      });
+
+      await service.importAssessmentResponses(
+        'tenant-a',
+        'user-1',
+        'assessment-1',
+        file,
+        'xlsx',
+        { subcategoryCode: 'Code', currentMaturity: 'Current' },
+        'Govern',
+      );
+
+      expect(prisma.importJob.create).toHaveBeenCalledWith(
+        expect.objectContaining({ data: expect.objectContaining({ fileName: 'import.xlsx [Govern]' }) }),
+      );
+    });
+  });
+
+  describe('suggestMapping', () => {
+    it('delegates to AiMappingService with the full mappable field list', async () => {
+      aiMappingService.suggestMapping.mockResolvedValueOnce({ currentMaturity: 'Current Level' });
+
+      const result = await service.suggestMapping(['Code', 'Current Level'], [{ Code: 'GV.RM-01' }]);
+
+      expect(result).toEqual({ currentMaturity: 'Current Level' });
+      expect(aiMappingService.suggestMapping).toHaveBeenCalledWith(
+        ['Code', 'Current Level'],
+        [{ Code: 'GV.RM-01' }],
+        expect.arrayContaining(['subcategoryCode', 'currentMaturity']),
+      );
+    });
+
+    it('returns an empty mapping (never throws) when AI suggestion is unavailable', async () => {
+      aiMappingService.suggestMapping.mockResolvedValueOnce(null);
+      const result = await service.suggestMapping(['Code'], []);
+      expect(result).toEqual({});
     });
   });
 });

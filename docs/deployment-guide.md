@@ -17,10 +17,10 @@ workflows themselves, see `docs/devsecops-pipeline.md`.
 
 Copy `.env.example` to `.env` and set real values before anything but pure
 local development. The variables that actually matter today (everything
-else in `.env.example` — SMTP, AWS/S3, Sentry, AI features — is aspirational
-scaffolding for future features and is not read by any code path yet; see
-`docs/security-architecture.md` for the rate-limiting variables
-specifically, which are the same kind of gap):
+else in `.env.example` — SMTP, AWS/S3, Sentry, `OPENAI_API_KEY` — is
+aspirational scaffolding for future features and is not read by any code
+path yet; see `docs/security-architecture.md` for the rate-limiting
+variables specifically, which are the same kind of gap):
 
 | Variable | Used by | Notes |
 |---|---|---|
@@ -33,6 +33,7 @@ specifically, which are the same kind of gap):
 | `INTERNAL_API_URL` | Web (server-side only) | The API URL as reachable **from inside the `web` container** — the Compose service DNS name (`http://api:3001`). Falls back to `NEXT_PUBLIC_API_URL` when unset, so a native (non-Docker) dev run needs nothing extra. This split exists because NextAuth's `authorize()` callback runs server-side inside the `web` container, where `localhost` means the container itself, not the host — a real bug this repo shipped and fixed once already (see Phase 15's "found and fixed" notes in `IMPLEMENTATION_STATUS.md`). |
 | `CORS_ORIGIN` | API | Must match the web app's actual origin, or the browser will reject cross-origin API responses. |
 | `PORT` | API | Defaults to `3001` if unset. |
+| `ANTHROPIC_API_KEY` | API (`AiMappingService`) | Optional — powers the AI-assisted import column-mapping suggestion (`docs/excel-import-guide.md`). Unset means that one feature silently no-ops (falls back to exact-header-name auto-mapping); nothing else depends on it. |
 
 ## Running locally with Docker Compose
 

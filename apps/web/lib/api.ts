@@ -210,10 +210,17 @@ export interface InitiativeTimeline {
   beyondOrUnscheduled: InitiativeDetail[];
 }
 
-export interface ImportPreview {
+export interface ImportSheetPreview {
+  sheetName: string;
   headers: string[];
   rowCount: number;
   sampleRows: Record<string, unknown>[];
+  /** Parallel to sampleRows -- {} for a sample row with no formula cells. */
+  sampleFormulas: Record<string, string>[];
+}
+
+export interface ImportPreview {
+  sheets: ImportSheetPreview[];
   requiredField: 'subcategoryCode';
   optionalFields: string[];
 }
@@ -222,6 +229,14 @@ export interface ImportRowResult {
   rowNumber: number;
   status: 'VALID' | 'WARNING' | 'ERROR';
   messages: string[];
+  /** Present for VALID/WARNING rows -- the mapped field values actually applied. Absent for ERROR rows. */
+  data?: {
+    currentMaturity?: string;
+    targetMaturity?: string;
+    controlStatus?: string;
+    riskLevel?: string;
+    [key: string]: unknown;
+  };
 }
 
 export interface ImportResult {
@@ -253,17 +268,30 @@ export const api = {
     return apiUpload<ImportPreview>(token, `/assessments/${assessmentId}/import/preview`, formData);
   },
 
+  suggestMapping: (
+    token: string,
+    assessmentId: string,
+    headers: string[],
+    sampleRows: Record<string, unknown>[],
+  ) =>
+    apiFetch<{ mapping: ColumnMapping }>(token, `/assessments/${assessmentId}/import/suggest-mapping`, {
+      method: 'POST',
+      body: JSON.stringify({ headers, sampleRows }),
+    }),
+
   importResponses: (
     token: string,
     assessmentId: string,
     file: File,
     format: 'csv' | 'xlsx',
     mapping: ColumnMapping,
+    sheetName?: string,
   ) => {
     const formData = new FormData();
     formData.append('file', file);
     formData.append('format', format);
     formData.append('mapping', JSON.stringify(mapping));
+    if (sheetName) formData.append('sheetName', sheetName);
     return apiUpload<ImportResult>(token, `/assessments/${assessmentId}/import`, formData);
   },
 

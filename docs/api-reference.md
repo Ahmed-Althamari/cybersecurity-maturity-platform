@@ -119,13 +119,14 @@ controller.
 
 ## Import (`/assessments/:id/import`)
 
-Roles on both routes: `PLATFORM_ADMIN`, `ORGANISATION_ADMIN`, `CISO`,
+Roles on all three routes: `PLATFORM_ADMIN`, `ORGANISATION_ADMIN`, `CISO`,
 `GRC_MANAGER`, `ASSESSOR`.
 
 | Method | Path | Notes |
 |---|---|---|
-| POST | `/assessments/:id/import/preview` | Multipart `file` + `format` (`csv`\|`xlsx`). Read-only — parses the file and returns `{ headers, rowCount, sampleRows, requiredField: 'subcategoryCode', optionalFields }`; nothing is persisted. Powers the frontend's column-mapping UI. |
-| POST | `/assessments/:id/import` | Multipart `file` + `format` + a JSON `mapping` (`ColumnMapping`). 5MB cap. Parses, validates, sanitizes, then applies every valid/warning row's `AssessmentItem` update plus every row's `ImportRecord` in one `$transaction`, alongside the `ImportJob`. See `docs/excel-import-guide.md` for the full row-status contract. |
+| POST | `/assessments/:id/import/preview` | Multipart `file` + `format` (`csv`\|`xlsx`). Read-only — parses **every worksheet tab** in one pass (a CSV has one implicit tab) and returns `{ sheets: [{ sheetName, headers, rowCount, sampleRows, sampleFormulas }], requiredField: 'subcategoryCode', optionalFields }`. `sampleFormulas` is parallel to `sampleRows` — `{}` for a sample row with no formula cells, else `{header: "=A1+A2"}` alongside the already-resolved value in `sampleRows`. Nothing is persisted. Powers the frontend's sheet-tab picker and column-mapping UI. |
+| POST | `/assessments/:id/import/suggest-mapping` | JSON body `{ headers, sampleRows }` (from a prior preview call — no file re-upload). Asks Claude to suggest a `ColumnMapping` for headers that don't exactly match a target field name (e.g. "Current Level" → `currentMaturity`). Every suggested header is verified against the real `headers` list before being returned — a hallucinated column name is dropped, never trusted. Returns `{ mapping: {} }` (never an error) when `ANTHROPIC_API_KEY` is unset or the call fails; this endpoint is a pure enhancement, never required. |
+| POST | `/assessments/:id/import` | Multipart `file` + `format` + a JSON `mapping` (`ColumnMapping`) + optional `sheetName` (which xlsx tab to import — omit for CSV or a single-sheet workbook, where the importer falls back to the first sheet). 5MB cap. Parses, validates, sanitizes, then applies every valid/warning row's `AssessmentItem` update plus every row's `ImportRecord` in one `$transaction`, alongside the `ImportJob` (whose `fileName` records which sheet was imported, e.g. `"file.xlsx [Identify]"`). See `docs/excel-import-guide.md` for the full row-status contract. |
 
 ## Risks (`/risks`)
 

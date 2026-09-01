@@ -1,5 +1,6 @@
 import {
   mapAndValidateRows,
+  parseAllSheets,
   parseSpreadsheet,
   SpreadsheetParseError,
   type ColumnMapping,
@@ -10,6 +11,8 @@ import { BadRequestException, Injectable } from '@nestjs/common';
 
 import { AssessmentsService } from '../assessments/assessments.service';
 import { PrismaService } from '../prisma/prisma.service';
+
+import { AiMappingService } from './ai-mapping.service';
 
 interface UploadedFile {
   buffer: Buffer;
@@ -40,21 +43,27 @@ export class ImportService {
   constructor(
     private prisma: PrismaService,
     private assessmentsService: AssessmentsService,
+    private aiMappingService: AiMappingService,
   ) {}
 
   /**
    * Parses just enough of an uploaded file to drive a column-mapping UI:
-   * the source column headers, plus a few sample rows so a human can tell
-   * which header is which before committing to a mapping. Read-only --
-   * nothing is persisted, and the assessment doesn't even need to be
-   * editable (previewing a file doesn't change anything).
+   * every worksheet tab's source column headers, plus a few sample rows so
+   * a human can tell which header is which before committing to a mapping.
+   * Read-only -- nothing is persisted, and the assessment doesn't even need
+   * to be editable (previewing a file doesn't change anything).
+   *
+   * The whole workbook is parsed once here (not once per tab) -- a CSV has
+   * exactly one implicit "sheet"; an xlsx workbook returns one entry per
+   * real Excel tab, so the frontend never has to re-upload the file just to
+   * look at a different tab.
    */
   async previewSpreadsheet(tenantId: string, assessmentId: string, file: UploadedFile, format: SpreadsheetFormat) {
     await this.assessmentsService.findOne(tenantId, assessmentId);
 
-    let rows;
+    let sheets;
     try {
-      rows = await parseSpreadsheet(file.buffer, format);
+      sheets = await parseAllSheets(file.buffer, format);
     } catch (error) {
       if (error instanceof SpreadsheetParseError) {
         throw new BadRequestException(error.message);
@@ -62,11 +71,17 @@ export class ImportService {
       throw error;
     }
 
-    const headers = rows.length > 0 ? Object.keys(rows[0].cells) : [];
     return {
-      headers,
-      rowCount: rows.length,
-      sampleRows: rows.slice(0, 3).map((row) => row.cells),
+      sheets: sheets.map((sheet) => ({
+        sheetName: sheet.sheetName,
+        headers: sheet.rows.length > 0 ? Object.keys(sheet.rows[0].cells) : [],
+        rowCount: sheet.rows.length,
+        sampleRows: sheet.rows.slice(0, 3).map((row) => row.cells),
+        // Parallel to sampleRows -- {} for a sample row with no formula
+        // cells, so a mapping UI can show "what was calculated, and how"
+        // without treating the formula text itself as importable data.
+        sampleFormulas: sheet.rows.slice(0, 3).map((row) => row.formulas ?? {}),
+      })),
       // The exact set of ColumnMapping keys a caller can map to -- kept
       // here (rather than duplicated in the frontend) so the mapping UI
       // can never drift from what importAssessmentResponses() below
@@ -74,6 +89,26 @@ export class ImportService {
       requiredField: 'subcategoryCode' as const,
       optionalFields: MAPPABLE_ITEM_FIELDS,
     };
+  }
+
+  /**
+   * Asks Claude to suggest a ColumnMapping for one sheet's headers, given a
+   * couple of sample rows for context -- a fallback/enhancement for source
+   * spreadsheets whose column names don't exactly match our field names
+   * (e.g. "Current Level" instead of currentMaturity), which the frontend's
+   * own case-insensitive exact-match auto-mapping can't cover. Every
+   * suggested header is verified against the real header list before it's
+   * returned (see AiMappingService) -- a hallucinated column name can never
+   * silently become part of the mapping. Returns `{}` (never throws) when
+   * no API key is configured or the call fails for any reason, so this is
+   * always a pure enhancement, never a hard dependency of importing.
+   */
+  async suggestMapping(headers: string[], sampleRows: Record<string, unknown>[]): Promise<ColumnMapping> {
+    const suggestion = await this.aiMappingService.suggestMapping(headers, sampleRows, [
+      'subcategoryCode',
+      ...MAPPABLE_ITEM_FIELDS,
+    ]);
+    return suggestion ?? {};
   }
 
   /**
@@ -92,6 +127,7 @@ export class ImportService {
     file: UploadedFile,
     format: SpreadsheetFormat,
     mapping: ColumnMapping,
+    sheetName?: string,
   ) {
     const assessment = await this.assessmentsService.requireEditable(tenantId, assessmentId);
 
@@ -101,7 +137,7 @@ export class ImportService {
 
     let rows;
     try {
-      rows = await parseSpreadsheet(file.buffer, format);
+      rows = await parseSpreadsheet(file.buffer, format, sheetName);
     } catch (error) {
       if (error instanceof SpreadsheetParseError) {
         throw new BadRequestException(error.message);
@@ -115,7 +151,10 @@ export class ImportService {
     const importJob = await this.prisma.importJob.create({
       data: {
         organisationId: assessment.organisationId,
-        fileName: file.originalname,
+        // Records which tab was actually imported in the audit trail --
+        // ImportJob has no dedicated sheet-name column, and adding one for
+        // a single display string isn't worth a migration.
+        fileName: sheetName ? `${file.originalname} [${sheetName}]` : file.originalname,
         fileSize: file.size,
         recordCount: rows.length,
         status: 'PROCESSING',

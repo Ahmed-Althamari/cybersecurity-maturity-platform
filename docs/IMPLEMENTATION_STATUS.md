@@ -1209,6 +1209,100 @@ undocumented gaps in *behavior* matter more than gaps in *docs*.
       `SecurityCapability`/`Benchmark`/`DashboardConfiguration` are modeled
       but entirely unused by any service.
 
+### Post-Phase-17: Multi-Sheet Import, AI-Assisted Mapping, Formula Visibility
+At the user's request after Phase 17: the importer only ever read an
+xlsx's first worksheet, had no way to help a user map columns that don't
+share our exact field names, and silently resolved formula cells to their
+calculated value with no way to see the formula itself. Also asked for
+"an AI agent for Excel" and for "better calculation and chart types" --
+resolved (with the user's explicit sign-off after presenting the tradeoffs)
+as: smarter column-mapping via Claude rather than a conversational agent;
+generating our own charts from imported data rather than hand-parsing a
+workbook's embedded chart XML (`exceljs` doesn't expose chart objects at
+all -- replicating them would have been a multi-day sink for the same
+practical value a fresh, correctly-styled chart already gets for free).
+
+- [x] **Multi-sheet import** -- `@cmmp/import-engine`'s `parseAllSheets()`
+      parses every worksheet tab in one pass (a CSV is treated as a single
+      implicit sheet, unchanged); `parseSpreadsheet(buffer, format,
+      sheetName?)` picks one back out, falling back to the first sheet
+      when `sheetName` is omitted or doesn't match -- so every pre-existing
+      caller that never passed a sheet name is unaffected.
+      `POST /assessments/:id/import/preview` now returns one entry per
+      real Excel tab (`{ sheetName, headers, rowCount, sampleRows,
+      sampleFormulas }`) from a single upload; `POST
+      /assessments/:id/import` takes an optional `sheetName` to say which
+      tab to actually apply. The import page renders a tab picker
+      whenever a workbook has more than one sheet; each tab still imports
+      independently (no "merge all tabs" mode -- different tabs often
+      have different layouts, and merging them blindly risked silently
+      misapplying one tab's mapping to another's data).
+- [x] **Formula visibility** -- `parse.ts` now also captures each formula
+      cell's literal formula text (`cellFormulaText()`), surfaced
+      alongside the already-resolved value in the preview response
+      (`sampleFormulas`, parallel to `sampleRows`). The import page shows
+      a banner when a sampled cell used a formula, so a user isn't
+      surprised an imported number came from a calculation.
+- [x] **AI-assisted column-mapping suggestion** -- new
+      `AiMappingService` (`apps/api/src/import/ai-mapping.service.ts`)
+      calls Claude (`claude-opus-5`, a forced tool call for a strict JSON
+      mapping shape) with a sheet's real headers and a few real sample
+      rows, for any target field the frontend's exact-header-name
+      auto-mapping left unmapped. New `POST
+      /assessments/:id/import/suggest-mapping` endpoint (JSON body, no
+      file re-upload -- the frontend already has the headers/sample rows
+      from the preview call). Deliberately a pure enhancement, never a
+      dependency: no `ANTHROPIC_API_KEY` configured, a network failure, or
+      a malformed response all just leave the field unmapped for a human
+      to pick, rather than erroring the import flow. **Every suggested
+      header is verified against the sheet's real header list before
+      being trusted** -- a hallucinated column name is silently dropped,
+      never allowed to reach `ColumnMapping`, since that's the one thing
+      the model's output must never be trusted for outright. The import
+      page tags an AI-derived mapping with a small "AI suggested" badge
+      that clears the moment a user changes the selection.
+- [x] **Post-import generated chart** -- the import-results screen now
+      renders the existing `MaturityDistributionChart` dashboard
+      component (no new chart component needed), computed client-side
+      from the rows actually applied by the import that just ran.
+- [x] Tests: 5 new backend tests for multi-sheet parsing in
+      `packages/import-engine` (all-sheets enumeration, named-sheet
+      selection, fallback-to-first-sheet in two situations, formula-text
+      surfacing, CSV-as-single-sheet) -- 31 tests total, up from 25; 7 new
+      backend tests in `apps/api` for `ImportService` (multi-sheet
+      preview, sheetName-scoped import, the ImportJob audit-trail sheet
+      tag, `suggestMapping` delegation and its never-throws fallback) plus
+      a new `ai-mapping.service.spec.ts` (6 tests: no-API-key short
+      circuit, empty-headers short circuit, a valid suggestion, the
+      hallucinated-header guard, the unknown-target-field guard, and the
+      network-failure fallback, via `jest.mock('@anthropic-ai/sdk')`) --
+      127 tests total in `apps/api`, up from 120.
+- [x] Live-verified end-to-end in a real browser against the real stack:
+      built a real two-tab xlsx fixture (a formula cell on one tab, a tab
+      with intentionally mismatched header names on the other), created a
+      fresh assessment, uploaded it through the real import page --
+      confirmed both tabs listed with correct row counts, the formula
+      banner appeared on the tab with a formula cell, exact-match
+      auto-mapping filled in same-named fields, and (with no
+      `ANTHROPIC_API_KEY` configured in this sandbox) the mismatched-name
+      tab gracefully left its fields unmapped with zero "AI suggested"
+      tags and no console errors -- confirming the no-API-key fallback
+      path actually works, since a real Claude API call couldn't be
+      exercised in this sandbox. Ran the actual import (sheetName-scoped)
+      and confirmed both real NIST CSF subcategory rows applied
+      correctly, and that the generated maturity-distribution chart
+      rendered the correct 1/1 split between the two maturity levels
+      imported.
+
+  **Not built this pass**: a real end-to-end run of the AI-mapping
+  suggestion against a live Claude API call (no `ANTHROPIC_API_KEY` is
+  configured in this sandbox -- the graceful-fallback path was verified
+  instead, which is the one path that matters when the feature is
+  disabled); an "import all tabs at once" mode; remembering a column
+  mapping between import sessions; parsing or recreating a workbook's own
+  embedded charts (see the rationale above for why a generated chart was
+  chosen instead).
+
 ## Known Issues 🐛
 
 - ~~Root `.eslintrc.json` references missing ESLint plugins~~ — fixed in
