@@ -1,6 +1,8 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import type { IdentifyGapsOptions } from '@cmmp/scoring-engine';
 import { PrismaService } from '../prisma/prisma.service';
 import { FrameworkService } from '../framework/framework.service';
+import { ScoringService } from '../scoring/scoring.service';
 import { CreateAssessmentDto } from './dto/create-assessment.dto';
 import { UpdateAssessmentDto } from './dto/update-assessment.dto';
 import { UpdateAssessmentItemDto } from './dto/update-assessment-item.dto';
@@ -48,6 +50,7 @@ export class AssessmentsService {
   constructor(
     private prisma: PrismaService,
     private frameworkService: FrameworkService,
+    private scoringService: ScoringService,
   ) {}
 
   async create(tenantId: string, userId: string, dto: CreateAssessmentDto) {
@@ -183,8 +186,14 @@ export class AssessmentsService {
       await this.transition(tenantId, userId, assessmentId, 'IN_PROGRESS');
     }
 
-    await this.recalculateCompletion(assessmentId, userId);
+    await this.recalculateProgress(assessmentId, userId);
     return this.findOne(tenantId, assessmentId);
+  }
+
+  /** Full hierarchical maturity score + gap analysis for an assessment (Phase 7: Scoring Engine). */
+  async getScores(tenantId: string, assessmentId: string, options?: IdentifyGapsOptions) {
+    await this.findOne(tenantId, assessmentId);
+    return this.scoringService.computeGapAnalysis(assessmentId, options);
   }
 
   async submit(tenantId: string, userId: string, assessmentId: string) {
@@ -264,21 +273,30 @@ export class AssessmentsService {
     return assessment;
   }
 
-  // Completion tracking is a workflow-progress heuristic for Phase 6, not a
-  // maturity score — Phase 7 (Scoring Engine) owns currentMaturity/
-  // targetMaturity/maturityGap aggregation. An item counts as "answered"
-  // once its controlStatus has moved off the NOT_STARTED default.
-  private async recalculateCompletion(assessmentId: string, userId: string) {
-    const [total, answered] = await Promise.all([
+  // Completion tracking is a workflow-progress heuristic (share of items
+  // whose controlStatus has moved off the NOT_STARTED default) distinct
+  // from the maturity score itself, which @cmmp/scoring-engine computes
+  // from currentMaturity/targetMaturity via a weighted Function/Category/
+  // Subcategory rollup (Phase 7). Recomputed together on every item edit
+  // so a single Assessment row update keeps both in sync.
+  private async recalculateProgress(assessmentId: string, userId: string) {
+    const [total, answered, orgScore] = await Promise.all([
       this.prisma.assessmentItem.count({ where: { assessmentId } }),
       this.prisma.assessmentItem.count({
         where: { assessmentId, controlStatus: { not: 'NOT_STARTED' } },
       }),
+      this.scoringService.computeAssessmentScore(assessmentId),
     ]);
     const completionPercentage = total === 0 ? 0 : Math.round((answered / total) * 100);
     await this.prisma.assessment.update({
       where: { id: assessmentId },
-      data: { completionPercentage, updatedById: userId },
+      data: {
+        completionPercentage,
+        currentMaturity: orgScore.currentScore,
+        targetMaturity: orgScore.targetScore,
+        maturityGap: orgScore.gap,
+        updatedById: userId,
+      },
     });
   }
 }

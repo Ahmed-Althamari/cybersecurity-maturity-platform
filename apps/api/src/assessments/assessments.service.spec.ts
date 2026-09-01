@@ -2,6 +2,7 @@ import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { AssessmentsService } from './assessments.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { FrameworkService } from '../framework/framework.service';
+import { ScoringService } from '../scoring/scoring.service';
 
 function frameworkTree() {
   return {
@@ -88,6 +89,7 @@ describe('AssessmentsService', () => {
     $transaction: any;
   };
   let frameworkService: { getTree: jest.Mock };
+  let scoringService: { computeAssessmentScore: jest.Mock; computeGapAnalysis: jest.Mock };
 
   beforeEach(() => {
     prisma = {
@@ -112,10 +114,24 @@ describe('AssessmentsService', () => {
       $transaction: jest.fn((ops: unknown[]) => Promise.all(ops)),
     };
     frameworkService = { getTree: jest.fn() };
+    scoringService = {
+      computeAssessmentScore: jest.fn().mockResolvedValue({
+        currentScore: null,
+        targetScore: null,
+        gap: null,
+        currentLevel: null,
+        targetLevel: null,
+        responseCount: 0,
+        applicableCount: 0,
+        functions: [],
+      }),
+      computeGapAnalysis: jest.fn(),
+    };
 
     service = new AssessmentsService(
       prisma as unknown as PrismaService,
       frameworkService as unknown as FrameworkService,
+      scoringService as unknown as ScoringService,
     );
   });
 
@@ -243,6 +259,32 @@ describe('AssessmentsService', () => {
         service.updateItem('tenant-a', 'user-1', 'assessment-1', 'wrong-item', {} as any),
       ).rejects.toThrow(NotFoundException);
     });
+
+    it('persists the recomputed maturity score alongside completion', async () => {
+      prisma.assessment.findFirst.mockResolvedValue(baseAssessment({ status: 'IN_PROGRESS' }));
+      prisma.assessmentItem.findFirst.mockResolvedValueOnce({ id: 'item-1', assessmentId: 'assessment-1' });
+      prisma.assessmentItem.count.mockResolvedValueOnce(2).mockResolvedValueOnce(1);
+      scoringService.computeAssessmentScore.mockResolvedValueOnce({
+        currentScore: 2.5,
+        targetScore: 4,
+        gap: 1.5,
+        currentLevel: null,
+        targetLevel: null,
+        responseCount: 2,
+        applicableCount: 2,
+        functions: [],
+      });
+
+      await service.updateItem('tenant-a', 'user-1', 'assessment-1', 'item-1', {
+        currentMaturity: 'DEVELOPING',
+      } as any);
+
+      expect(prisma.assessment.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({ currentMaturity: 2.5, targetMaturity: 4, maturityGap: 1.5 }),
+        }),
+      );
+    });
   });
 
   describe('workflow transitions', () => {
@@ -300,6 +342,27 @@ describe('AssessmentsService', () => {
         expect.objectContaining({ orderBy: { version: 'asc' } }),
       );
       expect(history).toHaveLength(2);
+    });
+  });
+
+  describe('getScores', () => {
+    it('verifies tenant ownership before delegating to ScoringService', async () => {
+      prisma.assessment.findFirst.mockResolvedValueOnce(baseAssessment());
+      scoringService.computeGapAnalysis.mockResolvedValueOnce({ score: {}, gaps: [] });
+
+      const result = await service.getScores('tenant-a', 'assessment-1', { levels: ['function'] });
+
+      expect(scoringService.computeGapAnalysis).toHaveBeenCalledWith('assessment-1', {
+        levels: ['function'],
+      });
+      expect(result).toEqual({ score: {}, gaps: [] });
+    });
+
+    it('never computes scores for an assessment belonging to another tenant', async () => {
+      prisma.assessment.findFirst.mockResolvedValueOnce(null);
+
+      await expect(service.getScores('tenant-b', 'assessment-1')).rejects.toThrow(NotFoundException);
+      expect(scoringService.computeGapAnalysis).not.toHaveBeenCalled();
     });
   });
 });

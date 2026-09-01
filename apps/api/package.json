@@ -18,6 +18,7 @@
   "dependencies": {
     "@cmmp/database": "*",
     "@cmmp/framework-engine": "*",
+    "@cmmp/scoring-engine": "*",
     "@cmmp/shared": "*",
     "@nestjs/common": "^10.2.8",
     "@nestjs/config": "^3.1.1",

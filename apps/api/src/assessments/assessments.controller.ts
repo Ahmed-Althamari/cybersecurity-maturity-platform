@@ -99,4 +99,17 @@ export class AssessmentsController {
   async getHistory(@Param('id') id: string, @CurrentUser() user: any) {
     return this.assessmentsService.getHistory(user.tenantId, id);
   }
+
+  @Get(':id/scores')
+  async getScores(
+    @Param('id') id: string,
+    @Query('levels') levels: string | undefined,
+    @Query('minGap') minGap: string | undefined,
+    @CurrentUser() user: any,
+  ) {
+    return this.assessmentsService.getScores(user.tenantId, id, {
+      levels: levels?.split(',') as ('function' | 'category' | 'subcategory')[] | undefined,
+      minGap: minGap !== undefined ? Number(minGap) : undefined,
+    });
+  }
 }

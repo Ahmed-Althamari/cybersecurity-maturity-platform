@@ -4,8 +4,8 @@ Last Updated: 2026-09-01
 
 ## Overall Progress
 
-**Phase**: 6 / 17
-**Completion**: ~35%
+**Phase**: 7 / 17
+**Completion**: ~41%
 
 ## Completed ✅
 
@@ -183,6 +183,47 @@ Last Updated: 2026-09-01
   (Scoring Engine) to own: item scoring, category/function aggregation,
   org-wide scoring, and gap analysis.
 
+### Phase 7: Scoring Engine
+- [x] Maturity level definitions (`packages/scoring-engine/src/maturity-scale.ts`)
+      — a 1-5 numeric scale backing the platform's default "CMMP Standard
+      0-5" maturity model (Initial=1 ... Optimised=5); `NOT_APPLICABLE` is
+      excluded from scoring entirely rather than treated as a 0
+- [x] Item scoring calculation (`scoreResponses()`) — weighted average of
+      current/target maturity across a flat set of responses; a not-yet-
+      assessed item (schema defaults: `currentMaturity=NOT_APPLICABLE`,
+      `targetMaturity=DEFINED`) correctly contributes nothing to either
+      average rather than leaking its default target score in
+- [x] Category aggregation, Function aggregation, Organization-wide scoring
+      (`aggregateHierarchy()`) — bottom-up weighted rollup, Subcategory →
+      Category → Function → org-wide, where each level's contribution
+      weight to its parent is its own applicable-response weight (so a
+      thin or fully-N/A subcategory can't distort its category's score)
+- [x] Gap analysis (`identifyGaps()`) — flattens a scored hierarchy into
+      gap entries at any combination of function/category/subcategory
+      level, sorted by gap descending, with a risk level assigned by gap
+      magnitude (0-1 point gaps: not yet enforced, no strong opinion is
+      baked in beyond the plain magnitude bands)
+- [ ] Weighted scoring (future) — `AssessmentItem.weight` is already
+      threaded through the whole engine (defaults to 1.0), but nothing yet
+      sets it to anything other than the default; no UI/API surface to
+      customize per-item weight exists yet
+- [x] Wired into the Assessment Engine: `ScoringModule`/`ScoringService`
+      (`apps/api/src/scoring/`) loads an assessment's items together with
+      the Function/Category/Subcategory each belongs to (via the
+      question's relations) and feeds them through the scoring engine.
+      `AssessmentsService`'s per-item update now recomputes and persists
+      `Assessment.currentMaturity`/`targetMaturity`/`maturityGap` (the
+      fields Phase 6 deliberately left null) alongside `completionPercentage`
+      in the same write. New `GET /assessments/:id/scores` endpoint returns
+      the full hierarchical score plus a gap-analysis list
+      (`?levels=function,category,subcategory&minGap=`)
+- [x] Tests: 19 new tests in `packages/scoring-engine` (maturity-scale,
+      aggregate, gap-analysis — including a regression test pinning the
+      unassessed-item/default-target fix above) + 6 new tests in `apps/api`
+      (`ScoringService`, plus `AssessmentsService` coverage of score
+      persistence and tenant-scoped score retrieval) — 84 tests total across
+      the branch
+
 ## Known Issues 🐛
 
 - Root `.eslintrc.json` references `eslint-plugin-security`,
@@ -199,15 +240,6 @@ Last Updated: 2026-09-01
   binary; `packages/database`'s own `build` script only runs `tsc`.
 
 ## Not Started ⭕
-
-### Phase 7: Scoring Engine
-- [ ] Maturity level definitions
-- [ ] Item scoring calculation
-- [ ] Category aggregation
-- [ ] Function aggregation
-- [ ] Organization-wide scoring
-- [ ] Gap analysis
-- [ ] Weighted scoring (future)
 
 ### Phase 8: Excel Import Engine
 - [ ] Excel/CSV parser
@@ -395,15 +427,17 @@ None recorded yet
 1. **Generate the first Prisma migration** once a Postgres instance is
    reachable (`docker compose up postgres`, then
    `npm run db:generate && cd packages/database && npx prisma migrate dev`)
-2. **Begin Phase 7**: Scoring Engine — item scoring calculation, category/
-   function aggregation, org-wide scoring, and gap analysis, now that
-   `AssessmentItem.currentMaturity`/`targetMaturity` are real assessor
-   input and `Assessment.currentMaturity`/`targetMaturity`/`maturityGap`
-   are sitting there null waiting for it (see the Phase 6 scope note above)
+2. **Begin Phase 8**: Excel Import Engine — parse Excel/CSV assessment data,
+   map columns onto `AssessmentItem` fields, validate (including formula-
+   injection prevention on untrusted spreadsheet input), and bulk-import
+   under a transaction, reusing `@cmmp/framework-engine`'s
+   `validateFrameworkDefinition`/`persistFrameworkDefinition` where a sheet
+   is defining a framework rather than assessment responses
 3. Wire the Next.js frontend to the new `/api/v1/auth/login`,
    `/api/v1/users`, `/api/v1/frameworks*`, and `/api/v1/assessments*`
    endpoints (login page, session/token storage, framework selection UI,
-   an assessment-taking flow)
+   an assessment-taking flow, and a maturity/gap view backed by
+   `GET /assessments/:id/scores`)
 4. Spot-check the seeded NIST CSF 2.0 outcome text against the official
    NIST CSWP 29 publication (see the Phase 5 data-provenance note above) —
    this sandbox couldn't reach nist.gov directly to verify byte-for-byte
