@@ -4,8 +4,8 @@ Last Updated: 2026-09-01
 
 ## Overall Progress
 
-**Phase**: 10 / 17
-**Completion**: ~59%
+**Phase**: 11 / 17
+**Completion**: ~65%
 
 ## First End-to-End Verification Against a Live Database
 
@@ -422,6 +422,52 @@ Chromium against the running Next.js + NestJS + Postgres stack), not just
       `a { text-decoration: underline }` base style was bleeding into the
       assessment-card links)
 
+### Phase 11: Risk Register
+- [x] Risk model — used as-is from Phase 2's schema (`Risk`,
+      `RemediationInitiative`, their implicit many-to-many); no schema
+      changes needed
+- [x] Risk creation API — `POST /risks` (`apps/api/src/risks/`), tenant +
+      organisation scoped. `inherentRiskScore = likelihood x impact` is
+      always computed server-side (not trusted from the client); `riskLevel`
+      is auto-suggested from that score via `suggestRiskLevel()` when the
+      caller doesn't supply one, but an explicit `riskLevel` always wins
+- [x] Risk detail page — `GET /risks/:id` (API) + `pages/risks/[id].tsx`
+      (UI): full detail, inline owner/status editing, linked-initiative
+      management
+- [x] Risk-control mapping — `Risk.assessmentItemId` links a risk to the
+      specific control (`AssessmentItem`) it was identified against,
+      verified to belong to the caller's own tenant before linking; the
+      detail page surfaces the linked control's subcategory code and
+      question text
+- [x] Risk prioritization — `GET /risks?sortBy=score` (default) orders by
+      `inherentRiskScore` descending; also filterable by
+      `organisationId`/`riskLevel`/`status`/`assessmentItemId`
+- [x] Risk remediation tracking — `POST`/`DELETE /risks/:id/initiatives/:initiativeId`
+      connect/disconnect a `RemediationInitiative` via the schema's
+      existing many-to-many; the detail page lists linked initiatives with
+      unlink buttons and a link-by-ID form (no initiative-picker UI yet —
+      noted below)
+- [x] Frontend: `pages/risks/index.tsx` (sortable list with risk-level
+      badges), `pages/risks/new.tsx` (create form with a live risk-score
+      preview), `pages/risks/[id].tsx` (detail/edit/initiative-linking);
+      linked from the assessments list and dashboard headers
+- [x] Tests: 21 new tests in `apps/api` (`RisksService` — score computation,
+      auto-suggested vs. explicit risk level, tenant isolation on every
+      operation including cross-tenant initiative-linking rejection,
+      score-recompute-on-update) — 77 tests total in `apps/api`
+- [x] Live-verified in a real browser: created a risk (likelihood 5 x
+      impact 4 correctly auto-leveled CRITICAL), edited owner/status and
+      confirmed persistence across a page reload, linked and unlinked a
+      real seeded remediation initiative, confirmed prioritized sort order
+      against the 3 seed risks
+
+  **Not built this pass**: an initiative *picker* (today the UI takes a
+  raw initiative ID — there's no initiative list/search endpoint or page
+  yet, since Phase 12 owns the Remediation Roadmap); a dedicated way to
+  create a `Risk` directly from an `AssessmentItem` in the assessment UI
+  (today `assessmentItemId` is only settable via the API, not the risk
+  creation form).
+
 ## Known Issues 🐛
 
 - Root `.eslintrc.json` references `eslint-plugin-security`,
@@ -438,14 +484,6 @@ Chromium against the running Next.js + NestJS + Postgres stack), not just
   binary; `packages/database`'s own `build` script only runs `tsc`.
 
 ## Not Started ⭕
-
-### Phase 11: Risk Register
-- [ ] Risk model
-- [ ] Risk creation API
-- [ ] Risk detail page
-- [ ] Risk-control mapping
-- [ ] Risk prioritization
-- [ ] Risk remediation tracking
 
 ### Phase 12: Remediation Roadmap
 - [ ] Initiative model
@@ -608,16 +646,19 @@ None recorded yet
 
 1. ~~Generate the first Prisma migration~~ — done this session (see "First
    End-to-End Verification" above); the migration is checked in
-2. **Begin Phase 11**: Risk Register — a real Risk CRUD API + UI (today,
-   risks only exist via seed data and the read-only dashboard rollup);
-   risk-control mapping, prioritization, and remediation tracking
-3. Round out the Phase 10 frontend: an assessment-taking flow (create an
-   assessment, walk its 106 items, `PATCH` responses — today only the
-   read-side dashboard has UI), a framework selection UI, and a
-   column-mapping step for spreadsheet import (the backend takes an
-   explicit `ColumnMapping` today with no auto-suggestion). Also: a
+2. **Begin Phase 12**: Remediation Roadmap — auto-generating
+   `RemediationInitiative`s from gaps (`ScoringService.computeGapAnalysis`
+   already identifies them), a prioritization algorithm, 3/6/12-month
+   timeline views, and a roadmap UI; `RisksService.linkInitiative` already
+   gives initiatives a way to attach to risks, but nothing creates or
+   ranks initiatives yet
+3. Round out the Phase 10/11 frontend gaps: an assessment-taking flow
+   (create an assessment, walk its 106 items, `PATCH` responses — today
+   only the read-side dashboard has UI), a framework selection UI, a
+   column-mapping step for spreadsheet import, an initiative *picker* for
+   the risk detail page (today it takes a raw initiative ID), and a
    category/subcategory-level `levels` query param on
-   `GET .../dashboard/gaps` (the engine already supports it) to build the
+   `GET .../dashboard/gaps` (the engine already supports it) for the
    still-missing security maturity heatmap and maturity distribution
    views.
 4. Spot-check the seeded NIST CSF 2.0 outcome text against the official

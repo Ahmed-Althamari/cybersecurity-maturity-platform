@@ -7,6 +7,7 @@ import { FrameworkModule } from './framework/framework.module';
 import { AssessmentsModule } from './assessments/assessments.module';
 import { ImportModule } from './import/import.module';
 import { DashboardModule } from './dashboard/dashboard.module';
+import { RisksModule } from './risks/risks.module';
 
 @Module({
   imports: [
@@ -21,6 +22,7 @@ import { DashboardModule } from './dashboard/dashboard.module';
     AssessmentsModule,
     ImportModule,
     DashboardModule,
+    RisksModule,
   ],
   controllers: [],
   providers: [],

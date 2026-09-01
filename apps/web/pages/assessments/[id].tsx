@@ -66,9 +66,14 @@ export default function AssessmentDashboardPage() {
               </Link>
               <h1 className="mt-1 text-3xl font-bold text-white">Executive Dashboard</h1>
             </div>
-            <Button variant="outline" onClick={() => signOut({ callbackUrl: '/auth/signin' })}>
-              Sign Out
-            </Button>
+            <div className="flex gap-2">
+              <Link href="/risks">
+                <Button variant="outline">Risk Register</Button>
+              </Link>
+              <Button variant="outline" onClick={() => signOut({ callbackUrl: '/auth/signin' })}>
+                Sign Out
+              </Button>
+            </div>
           </div>
 
           <div className="mb-8 grid grid-cols-2 gap-4 md:grid-cols-4 lg:grid-cols-7">

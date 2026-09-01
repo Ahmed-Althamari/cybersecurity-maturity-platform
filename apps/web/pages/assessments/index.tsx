@@ -48,9 +48,14 @@ export default function AssessmentsPage() {
               <h1 className="text-3xl font-bold text-white">Assessments</h1>
               <p className="text-slate-400">{session.user.name} &middot; {session.user.role}</p>
             </div>
-            <Button variant="outline" onClick={() => signOut({ callbackUrl: '/auth/signin' })}>
-              Sign Out
-            </Button>
+            <div className="flex gap-2">
+              <Link href="/risks">
+                <Button variant="outline">Risk Register</Button>
+              </Link>
+              <Button variant="outline" onClick={() => signOut({ callbackUrl: '/auth/signin' })}>
+                Sign Out
+              </Button>
+            </div>
           </div>
 
           {error && <p className="mb-4 text-sm text-red-400">{error}</p>}
