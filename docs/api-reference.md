@@ -42,6 +42,13 @@ types; nothing here is speculative.
   forbidNonWhitelisted: true, transform: true })` (`main.ts`) — any request
   body field not declared on the target DTO is rejected outright (mass-
   assignment protection), not silently dropped.
+- **Rate limiting**: every route in this document — regardless of auth
+  status, role, or whether it's listed below at all — is also subject to
+  a generic, per-IP request budget (`RATE_LIMIT_MAX_REQUESTS` per
+  `RATE_LIMIT_WINDOW_MS`, default 100/15min, `GlobalRateLimitGuard`),
+  returning `429` once exhausted. `POST /auth/login` additionally has its
+  own separate, stricter budget on top of this one (see that route's own
+  row below).
 - **Pagination**: `GET /users`, `/assessments`, `/risks`, and `/initiatives`
   all take `page`/`pageSize` (default page size 20, capped at 100) and
   return the shared `PaginatedResponse<T>` shape

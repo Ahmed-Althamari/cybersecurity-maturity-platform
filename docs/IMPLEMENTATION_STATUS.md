@@ -1930,6 +1930,56 @@ integration was the right scope.
   it); an upload endpoint for the `Evidence` model (doesn't exist yet, so
   there's nothing there to add scanning to).
 
+### Post-Phase-17: Generic API-Wide Rate Limit
+Continuing through the remaining gaps: `ENABLE_RATE_LIMITING`/
+`RATE_LIMIT_WINDOW_MS`/`RATE_LIMIT_MAX_REQUESTS` in `.env.example` had
+never been read by any code path -- they describe a generic, API-wide
+request budget, a materially different and larger-scope feature than the
+login-specific brute-force throttle that already existed.
+
+- [x] **First attempt failed, and stayed failed only until a real test
+      caught it, not a review**: the natural first design was a second
+      `@nestjs/throttler` registration (`ThrottlerModule.forRootAsync()`
+      reading the new env vars, plus its own `ThrottlerGuard` registered
+      globally as `APP_GUARD`) alongside `AuthModule`'s existing one.
+      Running the full integration suite immediately after showed
+      `auth-rate-limit.integration-spec.ts` going red: the 6th rapid
+      login attempt, which should 429, kept getting 401 -- the existing
+      login throttle had silently stopped firing. `@nestjs/throttler`'s
+      options/storage providers aren't module-scoped the way plain Nest
+      DI usually is, so the second registration clobbered the first's
+      configuration application-wide, invisibly, with no error at
+      startup.
+- [x] Reverted that and built `GlobalRateLimitGuard`
+      (`apps/api/src/common/global-rate-limit.guard.ts`) instead: a
+      small, self-contained, in-memory per-IP guard with zero dependency
+      on `@nestjs/throttler`'s shared internals, registered globally via
+      `APP_GUARD`. `ENABLE_RATE_LIMITING=false` disables it in effect (an
+      unreachable limit) rather than needing a second, conditionally-
+      registered guard. Expired buckets are pruned opportunistically on
+      each check (the same self-cleaning pattern already used for
+      `RevokedToken`), so there's no separate cleanup job or unbounded
+      memory growth from long-idle client IPs.
+- [x] Tests: 6 new unit tests (`global-rate-limit.guard.spec.ts` -- under
+      budget, over budget, per-IP isolation, window reset, the disable
+      flag, and the documented defaults) and a new
+      `global-rate-limit.integration-spec.ts` (real HTTP against the real
+      app, hitting `/health` -- a route with no guard of its own, proving
+      this really is global) confirming a small deterministic budget
+      trips `429` on the 6th request. Re-ran the *existing*
+      `auth-rate-limit.integration-spec.ts` alongside it to confirm the
+      fix actually fixed the regression, not just that the new guard
+      works in isolation. 181 unit tests total in `apps/api` (up from
+      175), 22 integration tests (up from 21).
+- [x] Live-verified against the real running API, not just the
+      integration-test harness: sent 105 requests to `/health` in a
+      tight loop against the real compiled `dist/main.js` -- the first
+      100 returned `200`, the 101st onward returned `429`, matching the
+      real `.env`'s default `RATE_LIMIT_MAX_REQUESTS=100` exactly -- and
+      confirmed a real login request in the same session still succeeded
+      normally (`201`), proving the two independent budgets coexist
+      without interference this time.
+
 ## Known Issues 🐛
 
 - ~~Root `.eslintrc.json` references missing ESLint plugins~~ — fixed in

@@ -330,6 +330,9 @@ role requirement).
   the same headers on the web app (`next.config.js`)
 - **Rate limiting on `POST /auth/login`** — per-IP, via `@nestjs/throttler`
   (`AUTH_RATE_LIMIT_MAX_ATTEMPTS`/`AUTH_RATE_LIMIT_WINDOW_MS`)
+- **A generic, API-wide rate limit** — every request, any route, any auth
+  status (`RATE_LIMIT_MAX_REQUESTS`/`RATE_LIMIT_WINDOW_MS`,
+  `GlobalRateLimitGuard`), independent of the login-specific one above
 - **Fail-fast startup check for `JWT_SECRET`/`NEXTAUTH_SECRET`** — both the
   API and web app refuse to start with `NODE_ENV=production` if either
   secret is unset or still equals a known placeholder value, rather than
@@ -341,10 +344,6 @@ role requirement).
 
 ### Honest gaps — not yet implemented, despite what older docs/`.env.example` imply
 
-- **`ENABLE_RATE_LIMITING`/`RATE_LIMIT_WINDOW_MS`/`RATE_LIMIT_MAX_REQUESTS`
-  in `.env.example` are still unread by any code path** — those describe a
-  separate, generic API-wide request budget, not the login-specific
-  throttle above (which uses its own, different env vars).
 - **No CSRF-specific protection** — not currently needed given the
   stateless bearer-token API design, but also not something explicitly
   implemented or tested for.

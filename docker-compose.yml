@@ -44,6 +44,11 @@ services:
       # apply if left unset, matching .env.example.
       AUTH_RATE_LIMIT_WINDOW_MS: ${AUTH_RATE_LIMIT_WINDOW_MS:-}
       AUTH_RATE_LIMIT_MAX_ATTEMPTS: ${AUTH_RATE_LIMIT_MAX_ATTEMPTS:-}
+      # Generic, API-wide per-IP request budget (GlobalRateLimitGuard) --
+      # code defaults (15min / 100 requests) apply if left unset.
+      ENABLE_RATE_LIMITING: ${ENABLE_RATE_LIMITING:-}
+      RATE_LIMIT_WINDOW_MS: ${RATE_LIMIT_WINDOW_MS:-}
+      RATE_LIMIT_MAX_REQUESTS: ${RATE_LIMIT_MAX_REQUESTS:-}
     ports:
       - "3001:3001"
     # Applies pending Prisma migrations before every start -- safe to run on

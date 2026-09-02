@@ -316,15 +316,31 @@ middleware that injects a tenant filter automatically):
   (unauthenticated) rather than `429`, confirming the guard's scope. This
   closes what was, until this fix, the single most concrete, actionable
   gap in this document (see `docs/threat-model.md`).
-- `ENABLE_RATE_LIMITING`/`RATE_LIMIT_WINDOW_MS`/`RATE_LIMIT_MAX_REQUESTS`
-  in `.env.example` **remain unread by any code path** — those describe a
-  separate, larger-scope feature (a generic, API-wide request budget
-  across every endpoint), which is still not built. Deliberately not
-  reused for the login throttle above (see `AUTH_RATE_LIMIT_WINDOW_MS`/
-  `AUTH_RATE_LIMIT_MAX_ATTEMPTS` instead) — conflating "the login
-  brute-force limit" and "the whole API's request budget" under one
-  variable would silently surprise an operator tuning one and not
-  expecting it to affect the other.
+- **`ENABLE_RATE_LIMITING`/`RATE_LIMIT_WINDOW_MS`/`RATE_LIMIT_MAX_REQUESTS`
+  now back a real, generic, API-wide per-IP request budget**
+  (`GlobalRateLimitGuard`, registered globally via `APP_GUARD`) —
+  `RATE_LIMIT_MAX_REQUESTS` requests (default 100) per
+  `RATE_LIMIT_WINDOW_MS` (default 900000ms/15min) per IP, checked on
+  *every* request regardless of route or auth status (global guards run
+  before any per-route guard, including `JwtAuthGuard` — an unauthenticated
+  flood is capped too, not just authenticated traffic).
+  `ENABLE_RATE_LIMITING=false` disables it in effect (an unreachable
+  limit) rather than needing a second, conditionally-registered guard.
+  Deliberately not reused for the login throttle above and not built on a
+  second `@nestjs/throttler` registration: a first attempt doing exactly
+  that (a second `ThrottlerModule.forRootAsync()` plus its own
+  `ThrottlerGuard` as `APP_GUARD`) silently broke the *existing* login
+  throttle — confirmed live by the existing `auth-rate-limit.integration-spec.ts`
+  going red, not assumed — because `@nestjs/throttler`'s options/storage
+  providers aren't module-scoped the way plain Nest DI usually is, so the
+  second registration clobbered the first's config application-wide.
+  `GlobalRateLimitGuard` is a small, self-contained, in-memory guard
+  (`apps/api/src/common/global-rate-limit.guard.ts`) with zero dependency
+  on that library's shared internals, avoiding the collision entirely.
+  Live-verified against the real running API: 100 requests to `/health`
+  returned `200`, the 101st onward returned `429`, and a login request in
+  the same session still succeeded normally (`201`), confirming the two
+  budgets coexist correctly.
 
 ## Secrets management
 
