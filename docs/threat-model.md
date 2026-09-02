@@ -35,7 +35,7 @@ plainly rather than glossed over — this document is meant to be acted on.
 
 | Threat | Mitigation | Residual risk |
 |---|---|---|
-| Attacker forges a JWT to impersonate a user | HMAC-signed JWT (`JwtStrategy` verifies signature against `JWT_SECRET`); no algorithm-confusion risk (`@nestjs/jwt` defaults to `HS256`, and the strategy doesn't accept an alternate algorithm from the token header) | Low, **provided** `JWT_SECRET` is a real, non-default value in production — the hardcoded fallback is a known public string in this repo, so a deployment that forgets to override it is trivially spoofable. See `docs/security-architecture.md`'s "Secrets management." |
+| Attacker forges a JWT to impersonate a user | HMAC-signed JWT (`JwtStrategy` verifies signature against `JWT_SECRET`); no algorithm-confusion risk (`@nestjs/jwt` defaults to `HS256`, and the strategy doesn't accept an alternate algorithm from the token header). **Fixed:** the hardcoded fallback secret is still in code for local-dev convenience, but `validate-env.ts`/`next.config.js`+`check-env.js` now refuse to start with `NODE_ENV=production` if `JWT_SECRET`/`NEXTAUTH_SECRET` are unset or equal to any known placeholder (including `.env.example`'s own text) — see `docs/security-architecture.md`'s "Secrets management." | Low. A production deployment can no longer silently boot on the public fallback string; it fails closed instead. |
 | Credential stuffing / brute force against `/auth/login` | **Fixed.** `@nestjs/throttler` on the login handler only: `AUTH_RATE_LIMIT_MAX_ATTEMPTS` (default 20) per `AUTH_RATE_LIMIT_WINDOW_MS` (default 60s) per IP, every attempt counted regardless of outcome. Live-verified: attempt 21 in a window returns `429`, an unrelated route in the same window is unaffected. | Low-Medium — meaningfully raises the cost of automated guessing, but tracking by IP means a distributed attack (many source IPs) isn't slowed by this alone; that needs a WAF/CDN-level control in front of a real deployment, which is out of this application's own scope. |
 | Stolen/leaked JWT reused after logout or password change | `POST /auth/logout` only logs the event — it does not invalidate the token. A stolen token remains valid for up to 24h regardless. | Medium. Mitigated only by the 24h expiry ceiling; no revocation list exists. Tracked in "Known gaps." |
 | CSRF against a browser-held session | The API is a stateless bearer-token API, not cookie-session-based, so classic CSRF (which relies on the browser auto-attaching cookies) doesn't directly apply to it. NextAuth's own session cookie on the Next.js side is `HttpOnly`/`SameSite`-protected by NextAuth's defaults. | Low. |
@@ -95,17 +95,21 @@ next:
 1. ~~Add rate limiting to `/auth/login`~~ — **done**: `@nestjs/throttler`,
    per-IP, scoped to the login handler only. Was the single highest-value
    fix in this document; see `docs/security-architecture.md`.
-2. **Confirm `JWT_SECRET`/`NEXTAUTH_SECRET` are real values, never the
-   hardcoded fallback, before any non-local deployment** — a process/
-   checklist fix, not a code fix (though a startup check that refuses to
-   boot on the default value would be a stronger, code-level guarantee).
+2. ~~Confirm `JWT_SECRET`/`NEXTAUTH_SECRET` are real values, never the
+   hardcoded fallback, before any non-local deployment~~ — **done, and
+   upgraded from a checklist item to a code-level guarantee**:
+   `apps/api/src/config/validate-env.ts` and `apps/web`'s `next.config.js`
+   + `scripts/check-env.js` now refuse to start with `NODE_ENV=production`
+   if either secret is unset or equals any known placeholder (the two
+   hardcoded fallbacks, `docker-compose.yml`'s defaults, or
+   `.env.example`'s own placeholder text). See `docs/security-architecture.md`.
 3. ~~Add pagination to the remaining list endpoints~~ — **done**: `/users`,
    `/assessments`, `/risks`, `/initiatives` all paginate now (`PaginatedResponse<T>`,
-   default 20/page, capped at 100 — see `docs/api-reference.md`). Now the
-   top unaddressed item is #4 below.
+   default 20/page, capped at 100 — see `docs/api-reference.md`).
 4. **Decide whether `EXECUTIVE_VIEWER` needs real behavior** — either wire
    it to a dashboard-only guard, or fold it into `READ_ONLY_VIEWER` and
-   remove the distinction rather than leave it silently unenforced.
+   remove the distinction rather than leave it silently unenforced. Now
+   the top unaddressed item.
 5. **Token revocation** — at minimum a logout-side blacklist, ideally
    short-lived access tokens plus a refresh-token rotation scheme.
 6. **A WAF/CDN-level rate limit for a real internet-facing deployment** —

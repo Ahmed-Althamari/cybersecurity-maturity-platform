@@ -3,8 +3,14 @@ import { NestFactory } from '@nestjs/core';
 import type { Request, Response, NextFunction } from 'express';
 
 import { AppModule } from './app.module';
+import { validateEnv } from './config/validate-env';
 
 async function bootstrap() {
+  // Fails fast (before the DI container is even built) if NODE_ENV=production
+  // and JWT_SECRET is unset or still the JwtModule/JwtStrategy hardcoded
+  // placeholder -- see validate-env.ts.
+  validateEnv();
+
   const app = await NestFactory.create(AppModule);
 
   // Global prefix -- /health is excluded so container orchestrators and

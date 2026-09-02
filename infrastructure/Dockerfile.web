@@ -29,6 +29,11 @@ RUN addgroup -S cmmp && adduser -S cmmp -G cmmp
 COPY --from=builder /app/apps/web/.next/standalone ./
 COPY --from=builder /app/apps/web/.next/static ./apps/web/.next/static
 COPY --from=builder /app/apps/web/public ./apps/web/public
+# next.config.js's own NEXTAUTH_SECRET check never runs for this server --
+# output: "standalone" resolves that file at build time and never re-requires
+# it, so check-env.js (a separate, tiny script, not traced/bundled by Next)
+# is copied in and run explicitly by CMD below instead.
+COPY --from=builder /app/apps/web/scripts/check-env.js ./apps/web/scripts/check-env.js
 
 USER cmmp
 EXPOSE 3000
@@ -38,4 +43,4 @@ ENV HOSTNAME=0.0.0.0
 HEALTHCHECK --interval=30s --timeout=10s --start-period=10s --retries=3 \
   CMD wget --quiet --tries=1 --spider http://localhost:3000/auth/signin || exit 1
 
-CMD ["node", "apps/web/server.js"]
+CMD ["sh", "-c", "node apps/web/scripts/check-env.js && node apps/web/server.js"]

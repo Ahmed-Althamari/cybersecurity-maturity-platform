@@ -239,6 +239,21 @@ middleware that injects a tenant filter automatically):
   publicly visible in this repository's own source — **never rely on
   them outside of local development**; every real deployment must set
   both explicitly, per `docs/deployment-guide.md`.
+- **Enforced, not just documented.** `apps/api/src/config/validate-env.ts`
+  (called at the very top of `main.ts`'s `bootstrap()`, before the Nest
+  DI container is even built) and `apps/web`'s `next.config.js` +
+  `scripts/check-env.js` refuse to start with `NODE_ENV=production` if
+  `JWT_SECRET`/`NEXTAUTH_SECRET` are unset *or* equal to any known
+  placeholder — the two hardcoded fallbacks above, `docker-compose.yml`'s
+  own defaults, and `.env.example`'s own placeholder text (copying that
+  file to `.env` without editing it is, if anything, a more likely
+  mistake than leaving the variable unset). Two checkpoints exist on the
+  web side because `output: "standalone"` (see `docs/deployment-guide.md`)
+  resolves `next.config.js` at *build* time and the generated `server.js`
+  never re-reads it at runtime — `check-env.js` is a separate script that
+  `infrastructure/Dockerfile.web`'s `CMD` runs immediately before
+  `server.js` starts, so the real Docker deployment path is actually
+  covered, not just the `next.config.js`-driven `next start` path.
 - `.dockerignore` (added during Phase 15, alongside fixing the fact it had
   itself been accidentally `.gitignore`d) excludes `.env*` from every
   Docker build context, so a real `.env` file's contents can't end up

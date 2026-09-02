@@ -323,6 +323,10 @@ role requirement).
 - **Audit logging** of all authenticated mutating actions plus login/logout
 - **Rate limiting on `POST /auth/login`** — per-IP, via `@nestjs/throttler`
   (`AUTH_RATE_LIMIT_MAX_ATTEMPTS`/`AUTH_RATE_LIMIT_WINDOW_MS`)
+- **Fail-fast startup check for `JWT_SECRET`/`NEXTAUTH_SECRET`** — both the
+  API and web app refuse to start with `NODE_ENV=production` if either
+  secret is unset or still equals a known placeholder value, rather than
+  silently booting on a publicly-visible fallback
 
 ### Honest gaps — not yet implemented, despite what older docs/`.env.example` imply
 

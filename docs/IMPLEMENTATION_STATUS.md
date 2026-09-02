@@ -1538,6 +1538,68 @@ problem `docs/threat-model.md` had flagged.
   (deliberately out of scope -- see `docs/api-reference.md`'s
   "Conventions" section for why each was left as-is).
 
+### Post-Phase-17: Fail-Fast Startup Check for `JWT_SECRET`/`NEXTAUTH_SECRET`
+Continuing through the ranked gap list (user's explicit direction): both
+secrets have publicly-visible hardcoded fallback values in code, and
+`docs/threat-model.md` had flagged relying on an operator to override them
+correctly as a real (if lower-probability) spoofing risk. Upgraded from a
+process/checklist item to an enforced, code-level guarantee.
+
+- [x] New `apps/api/src/config/validate-env.ts`, called at the very top of
+      `main.ts`'s `bootstrap()` -- before `NestFactory.create()` even
+      builds the DI container -- throws if `NODE_ENV=production` and
+      `JWT_SECRET` is unset or equals any of three known placeholders:
+      the two hardcoded fallbacks already in `auth.module.ts`/
+      `jwt.strategy.ts` and `docker-compose.yml`, plus (found while
+      testing this live against the sandbox's own `.env`)
+      `.env.example`'s own placeholder text -- copying that file to
+      `.env` without editing it is, if anything, a more likely real-world
+      mistake than leaving the variable unset outright.
+- [x] Web side needed two separate checkpoints, not one, for a subtle
+      reason found only by testing the actual Docker deployment path
+      rather than trusting `next dev`: `output: "standalone"` resolves
+      `next.config.js` at *build* time, and the generated `server.js`
+      never re-requires it at runtime, so a check placed only in
+      `next.config.js` (kept, exported as a phase-aware function so it
+      still fires for a non-Docker `next start`) silently never runs for
+      `infrastructure/Dockerfile.web`'s real CMD. New
+      `apps/web/scripts/check-env.js` -- a small standalone script, not
+      traced/bundled by Next -- is copied into the runner image and run
+      by `CMD ["sh", "-c", "node apps/web/scripts/check-env.js && node
+      apps/web/server.js"]`, immediately before the server starts.
+      `next.config.js`'s own check is also phase-guarded against
+      `PHASE_PRODUCTION_BUILD` specifically, because `next build` forces
+      `NODE_ENV=production` internally regardless of the ambient
+      environment, and the Docker build stage never has `NEXTAUTH_SECRET`
+      available (it's only injected into the container at runtime) --
+      without that guard, every production image build would fail.
+- [x] Tests: 6 new tests in `apps/api/src/config/validate-env.spec.ts`
+      (no-op outside production even with no secret set; throws on unset,
+      each of the three known placeholders, and passes with a real
+      secret). 161 tests total in `apps/api`, up from 155.
+- [x] Live-verified end-to-end, not just unit-tested: built `apps/api`
+      and ran the real compiled `dist/main.js` with `NODE_ENV=production`
+      under all four scenarios (unset, each hardcoded placeholder, a real
+      secret) -- confirmed it fails closed with the intended message in
+      the first three and boots all the way to "Nest application
+      successfully started" + a live DB connection in the fourth. Did
+      the same for `apps/web`: built the standalone output once, then ran
+      `node scripts/check-env.js && node .next/standalone/apps/web/
+      server.js` under the same four scenarios, confirming a real
+      `HTTP 200` from the running server only in the valid case. Also
+      confirmed `npm run build --workspace=apps/web` still succeeds with
+      `NEXTAUTH_SECRET` completely unset, proving the build-phase guard
+      actually prevents the Docker image build itself from breaking.
+
+  **Not built this pass**: an analogous fail-fast check for
+  `SETTINGS_ENCRYPTION_KEY` -- it already throws on first use if unset or
+  malformed (`SettingsService`, see the Runtime-Configurable Encrypted
+  Settings section above), which is a materially different situation from
+  `JWT_SECRET`/`NEXTAUTH_SECRET`: it's optional (only needed once a
+  `PLATFORM_ADMIN` actually tries to save an integration secret through
+  `/admin/settings`), not something every deployment must set, so failing
+  the whole app's startup over it would be wrong.
+
 ## Known Issues 🐛
 
 - ~~Root `.eslintrc.json` references missing ESLint plugins~~ — fixed in
@@ -1741,14 +1803,21 @@ None recorded yet
     "Post-Phase-17: Pagination on Remaining List Endpoints" above):
     `/users`, `/assessments`, `/risks`, `/initiatives` all paginate now,
     `@cmmp/shared`'s `PaginatedResponse<T>` finally wired up, live-verified
-    with a real multi-page browser session. The remaining ranked findings
+    with a real multi-page browser session.
+14. ~~Confirm `JWT_SECRET`/`NEXTAUTH_SECRET` are never left at their
+    hardcoded fallback in a real deployment~~ — **done, and upgraded from
+    a checklist item to an enforced one** (see "Post-Phase-17: Fail-Fast
+    Startup Check for `JWT_SECRET`/`NEXTAUTH_SECRET`" above): both the API
+    and the web app now refuse to start with `NODE_ENV=production` if
+    either secret is unset or equals any known placeholder, live-verified
+    against the real compiled `dist/main.js` and the real standalone
+    Next.js server under all four scenarios. The remaining ranked findings
     from `docs/threat-model.md`'s "Summary of the highest-priority items"
-    are, in order: confirming `JWT_SECRET`/`NEXTAUTH_SECRET` are never left
-    at their hardcoded fallback in a real deployment (now the top
-    unaddressed item), `EXECUTIVE_VIEWER` never actually being
-    distinguished from `READ_ONLY_VIEWER` by any guard, token
-    revocation/rotation, and a WAF/CDN-level rate limit for a distributed
-    (many-IP) attack the new per-IP login throttle can't address alone.
+    are, in order: `EXECUTIVE_VIEWER` never actually being distinguished
+    from `READ_ONLY_VIEWER` by any guard (now the top unaddressed item),
+    token revocation/rotation, and a WAF/CDN-level rate limit for a
+    distributed (many-IP) attack the new per-IP login throttle can't
+    address alone.
 
 ## Contact & Questions
 
