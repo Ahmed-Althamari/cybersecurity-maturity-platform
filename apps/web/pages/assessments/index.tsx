@@ -1,12 +1,13 @@
 import Head from 'next/head';
 import Link from 'next/link';
 import { useRouter } from 'next/router';
-import { useSession, signOut } from 'next-auth/react';
+import { useSession } from 'next-auth/react';
 import { useEffect, useState } from 'react';
 
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { api, ApiError, type AssessmentSummary } from '@/lib/api';
+import { signOutAndRevoke } from '@/lib/auth';
 
 export default function AssessmentsPage() {
   const { data: session, status } = useSession();
@@ -84,7 +85,10 @@ export default function AssessmentsPage() {
                   <Button variant="outline">Settings</Button>
                 </Link>
               )}
-              <Button variant="outline" onClick={() => signOut({ callbackUrl: '/auth/signin' })}>
+              <Button
+                variant="outline"
+                onClick={() => signOutAndRevoke(session.accessToken, '/auth/signin')}
+              >
                 Sign Out
               </Button>
             </div>

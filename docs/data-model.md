@@ -78,6 +78,13 @@ User (1) ──── (N) UserRoleAssignment
   in the schema but **is not read or written by any service** — it predates
   the simpler enum-based `UserRoleAssignment` approach that was actually
   built, and is unused scaffolding today.
+- `RevokedToken` (`jti` primary key, `tenantId`, `userId`, `expiresAt`,
+  `revokedAt`) is the token-revocation blacklist — not tied to `User` by a
+  foreign key (a revoked token's user may since have been deleted; the
+  row's only job is answering "is this `jti` dead," not describing a
+  user). Written by `POST /auth/logout` and `POST /auth/refresh`
+  (rotation), read by `JwtStrategy.validate()` on every authenticated
+  request. See `docs/security-architecture.md`'s "Token revocation."
 
 ### Frameworks & the assessment hierarchy
 

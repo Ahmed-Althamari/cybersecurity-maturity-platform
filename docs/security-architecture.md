@@ -21,10 +21,12 @@ continuously checks this codebase.
 - **Token issuance**: `POST /auth/login` issues a JWT via `@nestjs/jwt`,
   `expiresIn: '24h'`, carrying `sub`, `email`, `tenantId`,
   `organisationId`, `role` (first assigned role, kept for backward
-  compatibility) and `roles: UserRole[]` (the full set — see "Authorization"
-  below). `POST /auth/refresh` re-signs a still-valid token with a fresh
-  expiry.
+  compatibility), `roles: UserRole[]` (the full set — see "Authorization"
+  below), and `jti` (a random UUID, unique per issued token — see "Token
+  revocation" below). `POST /auth/refresh` re-signs a still-valid token
+  with a fresh expiry **and a fresh `jti`**, revoking the presented one.
 - **Verification**: `JwtStrategy` (`passport-jwt`) validates the signature
+  and expiry, checks the token's `jti` against the revocation list (below),
   and attaches the decoded payload as `request.user` on every guarded
   route.
 - **A real bug found and fixed this session**: `AuthModule` originally
@@ -47,16 +49,64 @@ continuously checks this codebase.
   `JwtStrategy` injecting `ConfigService` instead of reading
   `process.env` directly — both now resolve the secret at the same,
   post-`ConfigModule` point in bootstrap.
-- **No revocation or rotation.** A token is valid for its full 24-hour
-  lifetime no matter what happens to the account afterward (password
-  change, role removal, deactivation) — there is no server-side blacklist
-  or session store. This is a known, documented gap (see "Known gaps"
-  below), not an oversight.
 - **NextAuth on the frontend** (`apps/web`) is a thin pass-through, not a
   second identity provider: its `CredentialsProvider.authorize()` calls
   the real `POST /api/v1/auth/login` and carries the NestJS-issued JWT
   inside the NextAuth session (`types/next-auth.d.ts` module augmentation)
   — the browser never receives a NextAuth-minted token, only the real one.
+
+## Token revocation
+
+Previously a real, documented gap: a token was valid for its full 24-hour
+lifetime no matter what happened afterward — logout only logged the event
+(`docs/threat-model.md`'s STRIDE table, "Spoofing"). Fixed with a
+logout-side blacklist rather than the larger short-lived-access-token-
+plus-separate-refresh-token architecture also floated for this gap —
+materially smaller and lower-risk for the same practical benefit, and the
+existing `/auth/refresh` contract (re-sign the same token type) didn't
+need to change shape, just gain rotation.
+
+- **`RevokedToken`** (`packages/database/prisma/schema.prisma`) is keyed
+  by `jti` — a random UUID `AuthService.login()` now includes in every
+  signed payload, alongside `tenantId`/`userId`/the original token's own
+  `expiresAt` (copied from its `exp` claim, purely so a row past that
+  point is provably dead weight — see the cleanup note below).
+- **Checked on every authenticated request.** `JwtStrategy.validate()`
+  looks up the incoming token's `jti` after passport-jwt's own signature
+  and expiry checks pass; a hit throws `UnauthorizedException` immediately
+  — one extra indexed lookup per request, not a join against "all active
+  tokens" (there is no row for a token that hasn't been revoked).
+- **`POST /auth/logout`** writes a row for the presented token's `jti`
+  (`AuthService.logout()`, using `exp` off the request's own decoded
+  payload) before logging the `LOGOUT` audit event.
+- **`POST /auth/refresh` rotates, not just re-signs.** The presented
+  token's `jti` is revoked at the same moment a new token (with a fresh
+  `jti`) is issued — a refreshed-away token can't be replayed even though
+  it hasn't reached its own expiry, closing the gap
+  `docs/api-reference.md` previously called out ("not a rotation scheme").
+- **Idempotent by construction**: revocation is an `upsert` on `jti`
+  (the table's primary key), not a `create` — a double-logout (retry,
+  double-click) or two concurrent `/auth/refresh` calls racing to revoke
+  the same token can't 500 on a unique-constraint violation.
+- **Self-cleaning, not a separate cleanup job**: each revocation call also
+  opportunistically deletes rows past their own `expiresAt` — those would
+  already be rejected by `JwtStrategy`'s own expiration check regardless,
+  so keeping them serves no purpose. Expected to stay a small table in
+  practice (one row per logout/refresh, pruned continuously).
+- **The web app's "Sign Out" button now actually calls this.** Previously
+  it only called NextAuth's own `signOut()`, which clears the browser's
+  session cookie but has no idea the wrapped CMMP API JWT exists — the
+  backend token stayed valid the full 24h regardless of the user clicking
+  "Sign Out." Every Sign Out button (`apps/web/pages/{assessments,risks,
+  roadmap,audit}/index.tsx`, `assessments/[id].tsx`, `admin/settings.tsx`)
+  now calls a shared `signOutAndRevoke()` (`apps/web/lib/auth.ts`) that
+  calls `POST /auth/logout` first (best-effort — a failed call still lets
+  the user sign out client-side) and then NextAuth's `signOut()`.
+- **Still open**: no password-change-triggered revocation (there is no
+  password-change endpoint yet, so this doesn't currently apply to
+  anything real); a stolen token used *before* logout catches up with it
+  remains valid for that window — inherent to any blacklist-based scheme,
+  not specific to this implementation.
 
 ## Authorization (RBAC)
 
@@ -324,9 +374,8 @@ worth stating explicitly:
 These are real, current gaps — not filled in with aspirational text
 elsewhere in this repo's docs:
 
-1. **No token revocation/rotation** — a compromised or stale JWT remains
-   valid for its full 24h lifetime regardless of any server-side state
-   change.
+1. ~~No token revocation/rotation~~ — **fixed**: see "Token revocation"
+   below.
 2. ~~No rate limiting anywhere~~ — **fixed**: `POST /auth/login` is now
    throttled per IP (`@nestjs/throttler`, see "HTTP-level hardening"
    above). The generic, API-wide request budget the leftover

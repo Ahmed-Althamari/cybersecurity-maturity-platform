@@ -1,3 +1,5 @@
+import { randomUUID } from 'crypto';
+
 import { AuditAction } from '@cmmp/shared';
 import { Injectable, UnauthorizedException } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
@@ -16,7 +18,16 @@ export interface JwtPayload {
   organisationId: string | null;
   role: string;
   roles: string[];
+  // Unique per issued token -- the revocation list (RevokedToken) key.
+  // See JwtStrategy.validate() for where this is actually enforced.
+  jti: string;
 }
+
+// What's actually available on a verified/decoded token (request.user, or
+// jsonwebtoken.verify()'s return value) -- `iat`/`exp` are added by
+// @nestjs/jwt at sign/verify time, not part of the payload we construct
+// ourselves before signing.
+export type VerifiedJwtPayload = JwtPayload & { iat: number; exp: number };
 
 export interface RequestContext {
   ipAddress?: string;
@@ -63,6 +74,7 @@ export class AuthService {
       organisationId: user.organisationId,
       role: roles[0] ?? 'READ_ONLY_VIEWER',
       roles,
+      jti: randomUUID(),
     };
 
     await this.auditService.log({
@@ -98,9 +110,10 @@ export class AuthService {
     }
   }
 
-  async logout(user: JwtPayload, context: RequestContext = {}) {
-    // Token-based auth doesn't require server-side logout.
-    // A revocation list can be added here if immediate token invalidation is needed.
+  async logout(user: JwtPayload & { exp?: number }, context: RequestContext = {}) {
+    if (user.exp) {
+      await this.revokeToken(user.jti, user.tenantId, user.sub, new Date(user.exp * 1000));
+    }
     await this.auditService.log({
       tenantId: user.tenantId,
       userId: user.sub,
@@ -116,8 +129,31 @@ export class AuthService {
 
   async refreshToken(token: string) {
     const payload = await this.validateToken(token);
-    const { iat, exp, ...rest } = payload as JwtPayload & { iat?: number; exp?: number };
-    const newToken = this.jwtService.sign(rest);
+    const { iat, exp, jti, ...rest } = payload as VerifiedJwtPayload;
+
+    // Rotate: the presented token is revoked the moment it's exchanged, so
+    // it can't be replayed even though it hasn't reached its own expiry --
+    // "refresh" was previously just a re-sign that left the old token
+    // valid until its own 24h expiry too (see docs/threat-model.md).
+    await this.revokeToken(jti, rest.tenantId, rest.sub, new Date(exp * 1000));
+
+    const newToken = this.jwtService.sign({ ...rest, jti: randomUUID() });
     return { access_token: newToken };
+  }
+
+  private async revokeToken(jti: string, tenantId: string, userId: string, expiresAt: Date) {
+    // upsert, not create: a double-logout (retry, double-click) or two
+    // concurrent /auth/refresh calls racing to revoke the same jti must be
+    // idempotent, not a 500 from a unique-constraint violation on `jti @id`.
+    await this.prisma.revokedToken.upsert({
+      where: { jti },
+      create: { jti, tenantId, userId, expiresAt },
+      update: {},
+    });
+    // Opportunistic cleanup -- a row past its own token's expiry would
+    // already be rejected by JwtStrategy's own expiration check regardless,
+    // so it's provably dead weight. Avoids needing a separate cleanup job
+    // for what's expected to stay a small table.
+    await this.prisma.revokedToken.deleteMany({ where: { expiresAt: { lt: new Date() } } });
   }
 }

@@ -329,6 +329,10 @@ role requirement).
   API and web app refuse to start with `NODE_ENV=production` if either
   secret is unset or still equals a known placeholder value, rather than
   silently booting on a publicly-visible fallback
+- **Token revocation** — a logout-side blacklist (`RevokedToken`, keyed by
+  a `jti` claim, checked on every authenticated request) plus rotation on
+  `POST /auth/refresh`; a logged-out token stops working on the very next
+  request instead of remaining valid for its full 24h lifetime
 
 ### Honest gaps — not yet implemented, despite what older docs/`.env.example` imply
 
@@ -339,7 +343,6 @@ role requirement).
 - **No CSRF-specific protection** — not currently needed given the
   stateless bearer-token API design, but also not something explicitly
   implemented or tested for.
-- **No token revocation/rotation.**
 
 See `docs/security-architecture.md` for the full picture, including every
 other known gap, and `docs/threat-model.md` for the STRIDE analysis these

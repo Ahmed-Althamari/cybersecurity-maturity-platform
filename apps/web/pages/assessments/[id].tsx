@@ -2,7 +2,7 @@ import type { ExecutiveDashboard, MaturityHeatmap as MaturityHeatmapData } from 
 import Head from 'next/head';
 import Link from 'next/link';
 import { useRouter } from 'next/router';
-import { useSession, signOut } from 'next-auth/react';
+import { useSession } from 'next-auth/react';
 import { useEffect, useState } from 'react';
 
 import { FunctionCards } from '@/components/dashboard/function-cards';
@@ -15,6 +15,7 @@ import { RiskSummaryPanel, RoadmapPanel } from '@/components/dashboard/risk-road
 import { TopGapsTable } from '@/components/dashboard/top-gaps-table';
 import { Button } from '@/components/ui/button';
 import { api, ApiError } from '@/lib/api';
+import { signOutAndRevoke } from '@/lib/auth';
 
 export default function AssessmentDashboardPage() {
   const { data: session, status } = useSession();
@@ -162,7 +163,10 @@ export default function AssessmentDashboardPage() {
                   </Link>
                 </>
               )}
-              <Button variant="outline" onClick={() => signOut({ callbackUrl: '/auth/signin' })}>
+              <Button
+                variant="outline"
+                onClick={() => signOutAndRevoke(session.accessToken, '/auth/signin')}
+              >
                 Sign Out
               </Button>
             </div>

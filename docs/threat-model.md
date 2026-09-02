@@ -37,7 +37,7 @@ plainly rather than glossed over — this document is meant to be acted on.
 |---|---|---|
 | Attacker forges a JWT to impersonate a user | HMAC-signed JWT (`JwtStrategy` verifies signature against `JWT_SECRET`); no algorithm-confusion risk (`@nestjs/jwt` defaults to `HS256`, and the strategy doesn't accept an alternate algorithm from the token header). **Fixed:** the hardcoded fallback secret is still in code for local-dev convenience, but `validate-env.ts`/`next.config.js`+`check-env.js` now refuse to start with `NODE_ENV=production` if `JWT_SECRET`/`NEXTAUTH_SECRET` are unset or equal to any known placeholder (including `.env.example`'s own text) — see `docs/security-architecture.md`'s "Secrets management." | Low. A production deployment can no longer silently boot on the public fallback string; it fails closed instead. |
 | Credential stuffing / brute force against `/auth/login` | **Fixed.** `@nestjs/throttler` on the login handler only: `AUTH_RATE_LIMIT_MAX_ATTEMPTS` (default 20) per `AUTH_RATE_LIMIT_WINDOW_MS` (default 60s) per IP, every attempt counted regardless of outcome. Live-verified: attempt 21 in a window returns `429`, an unrelated route in the same window is unaffected. | Low-Medium — meaningfully raises the cost of automated guessing, but tracking by IP means a distributed attack (many source IPs) isn't slowed by this alone; that needs a WAF/CDN-level control in front of a real deployment, which is out of this application's own scope. |
-| Stolen/leaked JWT reused after logout or password change | `POST /auth/logout` only logs the event — it does not invalidate the token. A stolen token remains valid for up to 24h regardless. | Medium. Mitigated only by the 24h expiry ceiling; no revocation list exists. Tracked in "Known gaps." |
+| Stolen/leaked JWT reused after logout | **Fixed.** Every issued token now carries a random `jti` claim; `POST /auth/logout` writes it to a `RevokedToken` table, and `JwtStrategy.validate()` checks that table on every authenticated request — a logged-out token is rejected on the very next call, not just after its 24h expiry. `POST /auth/refresh` also rotates: the presented token is revoked the moment a new one is issued, so a refreshed-away token can't be replayed either. Live-verified over real HTTP and in a real browser (the actual "Sign Out" button now calls the backend, not just NextAuth's client-side session). | Low. Still no password-change-triggered revocation (there is no password-change endpoint yet), and a stolen token used *before* logout is caught remains valid for that window — but that's now the only remaining gap, not the entire lifetime. |
 | CSRF against a browser-held session | The API is a stateless bearer-token API, not cookie-session-based, so classic CSRF (which relies on the browser auto-attaching cookies) doesn't directly apply to it. NextAuth's own session cookie on the Next.js side is `HttpOnly`/`SameSite`-protected by NextAuth's defaults. | Low. |
 
 ## Tampering (data integrity)
@@ -111,10 +111,19 @@ next:
    matching `docs/architecture.md`'s original "executive dashboard only"
    design intent rather than folding the role away. See
    `docs/security-architecture.md`'s "RBAC" section.
-5. **Token revocation** — at minimum a logout-side blacklist, ideally
-   short-lived access tokens plus a refresh-token rotation scheme. Now the
-   top unaddressed item.
+5. ~~Token revocation~~ — **done**: a logout-side blacklist
+   (`RevokedToken`, keyed by a new `jti` claim on every issued token,
+   checked in `JwtStrategy.validate()` on every request) plus rotation on
+   `POST /auth/refresh` (the pre-refresh token is revoked the moment a new
+   one is issued). Not the full short-lived-access-token-plus-separate-
+   refresh-token architecture the original wording floated — the existing
+   `/auth/refresh` contract (re-sign the same token type) was kept as-is,
+   with rotation layered on top of it, since that's a materially smaller
+   and lower-risk change for the same practical benefit. See
+   `docs/security-architecture.md`.
 6. **A WAF/CDN-level rate limit for a real internet-facing deployment** —
    the new per-IP login throttle helps against a single attacking host,
    but not a distributed one; that class of mitigation belongs in front of
-   the application, not inside it.
+   the application, not inside it. Now the only remaining item on this
+   list — everything else here is either done or explicitly out of this
+   application's own scope.

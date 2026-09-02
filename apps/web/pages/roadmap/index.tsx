@@ -1,13 +1,14 @@
 import Head from 'next/head';
 import Link from 'next/link';
 import { useRouter } from 'next/router';
-import { useSession, signOut } from 'next-auth/react';
+import { useSession } from 'next-auth/react';
 import { useEffect, useState } from 'react';
 
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { api, ApiError, type InitiativeDetail, type InitiativeTimeline } from '@/lib/api';
+import { signOutAndRevoke } from '@/lib/auth';
 
 const PRIORITY_VARIANT: Record<number, 'critical' | 'high' | 'medium' | 'low' | 'minimal'> = {
   1: 'critical',
@@ -78,7 +79,10 @@ export default function RoadmapPage() {
               </Link>
               <h1 className="mt-1 text-3xl font-bold text-white">Remediation Roadmap</h1>
             </div>
-            <Button variant="outline" onClick={() => signOut({ callbackUrl: '/auth/signin' })}>
+            <Button
+              variant="outline"
+              onClick={() => signOutAndRevoke(session.accessToken, '/auth/signin')}
+            >
               Sign Out
             </Button>
           </div>

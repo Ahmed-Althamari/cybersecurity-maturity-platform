@@ -1,13 +1,14 @@
 import Head from 'next/head';
 import Link from 'next/link';
 import { useRouter } from 'next/router';
-import { useSession, signOut } from 'next-auth/react';
+import { useSession } from 'next-auth/react';
 import { useEffect, useState } from 'react';
 
 import { RiskLevelBadge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { api, ApiError, type RiskDetail } from '@/lib/api';
+import { signOutAndRevoke } from '@/lib/auth';
 
 export default function RisksPage() {
   const { data: session, status } = useSession();
@@ -61,7 +62,10 @@ export default function RisksPage() {
               <Link href="/risks/new">
                 <Button>New Risk</Button>
               </Link>
-              <Button variant="outline" onClick={() => signOut({ callbackUrl: '/auth/signin' })}>
+              <Button
+                variant="outline"
+                onClick={() => signOutAndRevoke(session.accessToken, '/auth/signin')}
+              >
                 Sign Out
               </Button>
             </div>

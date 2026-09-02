@@ -2,13 +2,14 @@ import type { IntegrationSettingsStatus } from '@cmmp/shared';
 import Head from 'next/head';
 import Link from 'next/link';
 import { useRouter } from 'next/router';
-import { useSession, signOut } from 'next-auth/react';
+import { useSession } from 'next-auth/react';
 import { useEffect, useState } from 'react';
 
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { api, ApiError } from '@/lib/api';
+import { signOutAndRevoke } from '@/lib/auth';
 
 const inputClass =
   'w-full rounded-md border border-slate-600 bg-slate-900 px-3 py-2 text-sm text-white focus:border-blue-500 focus:outline-none';
@@ -117,7 +118,10 @@ export default function AdminSettingsPage() {
               <h1 className="mt-1 text-3xl font-bold text-white">Settings</h1>
               <p className="text-slate-400">Platform-wide integration configuration</p>
             </div>
-            <Button variant="outline" onClick={() => signOut({ callbackUrl: '/auth/signin' })}>
+            <Button
+              variant="outline"
+              onClick={() => signOutAndRevoke(session.accessToken, '/auth/signin')}
+            >
               Sign Out
             </Button>
           </div>

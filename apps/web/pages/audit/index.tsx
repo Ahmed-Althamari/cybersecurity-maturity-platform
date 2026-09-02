@@ -2,13 +2,14 @@ import type { AuditEventSummary } from '@cmmp/shared';
 import Head from 'next/head';
 import Link from 'next/link';
 import { useRouter } from 'next/router';
-import { useSession, signOut } from 'next-auth/react';
+import { useSession } from 'next-auth/react';
 import { useEffect, useState } from 'react';
 
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { api, ApiError } from '@/lib/api';
+import { signOutAndRevoke } from '@/lib/auth';
 
 const ACTION_VARIANT: Record<string, 'critical' | 'high' | 'medium' | 'low' | 'minimal' | 'default'> = {
   DELETE: 'critical',
@@ -69,7 +70,10 @@ export default function AuditPage() {
               <h1 className="mt-1 text-3xl font-bold text-white">Audit Log</h1>
               <p className="text-slate-400">Last 30 days</p>
             </div>
-            <Button variant="outline" onClick={() => signOut({ callbackUrl: '/auth/signin' })}>
+            <Button
+              variant="outline"
+              onClick={() => signOutAndRevoke(session.accessToken, '/auth/signin')}
+            >
               Sign Out
             </Button>
           </div>

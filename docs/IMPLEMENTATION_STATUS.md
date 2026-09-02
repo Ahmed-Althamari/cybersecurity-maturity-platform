@@ -1680,6 +1680,85 @@ read-only viewer already has today -- only less, once enforced.
   matches how the same button already behaves for `READ_ONLY_VIEWER`
   today; out of this gap's scope.
 
+### Post-Phase-17: Token Revocation (Logout Blacklist + Refresh Rotation)
+Continuing through the ranked gap list (user's explicit direction): item
+#5 -- `POST /auth/logout` only logged the event; a token remained valid
+for its full 24h lifetime regardless. Built a logout-side blacklist plus
+refresh-side rotation rather than the larger short-lived-access-token-
+plus-separate-refresh-token architecture also floated for this gap --
+materially smaller and lower-risk for the same practical benefit, and
+`/auth/refresh`'s existing contract (re-sign the same token type) didn't
+need to change shape.
+
+- [x] New `RevokedToken` Prisma model/migration (`jti` primary key,
+      `tenantId`, `userId`, the original token's own `expiresAt`,
+      `revokedAt`). `AuthService.login()` now includes a random `jti`
+      (`crypto.randomUUID()`) in every signed payload.
+- [x] `JwtStrategy.validate()` looks up the incoming token's `jti` after
+      passport-jwt's own signature/expiry checks pass; a hit throws
+      `UnauthorizedException` immediately -- checked on every
+      authenticated request, one extra indexed lookup, not a join against
+      "all active tokens" (no row exists for a token that hasn't been
+      revoked).
+- [x] `POST /auth/logout` revokes the presented token before logging the
+      `LOGOUT` audit event. `POST /auth/refresh` now **rotates**: the
+      presented token is revoked the moment a new one (fresh `jti`) is
+      issued, closing the "not a rotation scheme" gap `docs/api-reference.md`
+      previously called out explicitly.
+- [x] Revocation is an `upsert` on `jti` (the table's primary key), not a
+      `create` -- a double-logout (retry, double-click) or two concurrent
+      `/auth/refresh` calls racing to revoke the same token can't 500 on a
+      unique-constraint violation. Each revocation call also
+      opportunistically deletes rows past their own `expiresAt` (self-
+      cleaning; those rows would already be rejected by `JwtStrategy`'s
+      own expiration check regardless, so no separate cleanup job is
+      needed).
+- [x] **Found and fixed a real integration gap while live-testing, not
+      just unit-testing**: the web app's "Sign Out" button called only
+      NextAuth's own `signOut()`, which clears the browser's session
+      cookie but has no idea the wrapped CMMP API JWT exists -- the
+      backend token stayed valid the full 24h regardless of a user
+      clicking "Sign Out." Discovered by actually clicking Sign Out in a
+      real browser and then replaying the captured token against the real
+      API afterward -- it still worked. Fixed with a new
+      `apps/web/lib/auth.ts` `signOutAndRevoke()` that calls the new
+      `api.logout()` (`POST /auth/logout`) before NextAuth's `signOut()`,
+      wired into all six Sign Out buttons across the app (best-effort --
+      a failed backend call still lets the user sign out client-side
+      rather than getting stuck).
+- [x] Tests: 4 new unit tests in `auth.service.spec.ts` (jti issued and
+      unique per login; refresh rotates the jti and revokes the old one;
+      logout revokes when `exp` is present; logout skips revocation
+      gracefully when it isn't -- a defensive case for malformed/test
+      payloads), a new `jwt.strategy.spec.ts` (2 tests -- none existed
+      before this pass), and a new `token-revocation.integration-spec.ts`
+      (3 tests, real HTTP against the real running app, following
+      `tenant-security.integration-spec.ts`'s pattern): a token is
+      rejected on the very next request after logout; revocation is
+      per-token, not per-user (a second, still-valid token for the same
+      user keeps working); refresh rotation actually invalidates the
+      pre-refresh token. 175 unit tests total in `apps/api` (up from
+      170), 18 integration tests (up from 15).
+- [x] Live-verified end-to-end, not just via integration test: booted the
+      real API and web app (the real standalone production build), logged
+      in as a real seeded user in a real browser, captured the session's
+      access token via the NextAuth session response, confirmed it worked
+      against the real API (`200` from `/auth/me`), clicked the real
+      "Sign Out" button, and confirmed the same token now gets a real
+      `401` from the real API immediately afterward -- this is what
+      caught the Sign-Out-doesn't-call-the-backend gap above; a
+      unit/integration test alone would have missed it, since those test
+      the API in isolation from the actual product surface that's
+      supposed to trigger it.
+
+  **Not built this pass**: password-change-triggered revocation (there is
+  no password-change endpoint yet, so nothing to trigger it from);
+  revoking every token for a user at once (e.g. on role change or account
+  deactivation) -- today's model revokes one token at a time, by its own
+  `jti`, which is what logout and refresh actually need; a per-user
+  revocation-epoch column would be a natural, small extension if a real
+  "deactivate this account everywhere, right now" requirement emerges.
+
 ## Known Issues 🐛
 
 - ~~Root `.eslintrc.json` references missing ESLint plugins~~ — fixed in
@@ -1901,11 +1980,22 @@ None recorded yet
     real bug in the fix's own first draft: a naive global-guard
     implementation looked correct in every unit test and silently did
     nothing in production, caught only by testing against the real running
-    app. The remaining ranked findings from `docs/threat-model.md`'s
-    "Summary of the highest-priority items" are, in order: token
-    revocation/rotation (now the top unaddressed item) and a WAF/CDN-level
-    rate limit for a distributed (many-IP) attack the new per-IP login
-    throttle can't address alone.
+    app.
+16. ~~Token revocation~~ — **done** (see "Post-Phase-17: Token Revocation
+    (Logout Blacklist + Refresh Rotation)" above): a logout-side
+    blacklist keyed by a new `jti` claim, checked on every authenticated
+    request, plus rotation on `POST /auth/refresh`. Along the way, found
+    and fixed a real product-integration gap: the web app's "Sign Out"
+    button only cleared the NextAuth session client-side and never
+    actually called the backend, so the underlying API token stayed valid
+    the full 24h regardless -- caught by replaying a captured token
+    against the real API after clicking the real Sign Out button in a
+    real browser, not by any unit or integration test in isolation. The
+    only remaining item from `docs/threat-model.md`'s "Summary of the
+    highest-priority items" is a WAF/CDN-level rate limit for a
+    distributed (many-IP) attack the per-IP login throttle can't address
+    alone -- explicitly out of this application's own scope (it belongs
+    in front of the application, e.g. Cloudflare/a WAF, not inside it).
 
 ## Contact & Questions
 

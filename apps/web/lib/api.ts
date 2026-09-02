@@ -253,6 +253,12 @@ export interface ImportResult {
 export type ColumnMapping = Record<string, string>;
 
 export const api = {
+  // Revokes the token server-side (RevokedToken -- see AuthService.logout)
+  // so it stops working immediately rather than remaining valid for its
+  // full 24h lifetime. See lib/auth.ts's signOutAndRevoke() for why every
+  // Sign Out button calls this before clearing the NextAuth session.
+  logout: (token: string) => apiFetch<{ message: string }>(token, '/auth/logout', { method: 'POST' }),
+
   listAssessments: (token: string, page = 1, pageSize = 20) =>
     apiFetch<PaginatedResponse<AssessmentSummary>>(token, `/assessments?page=${page}&pageSize=${pageSize}`),
 

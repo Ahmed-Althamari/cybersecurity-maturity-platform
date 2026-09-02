@@ -9,7 +9,7 @@ import { AuthService } from './auth.service';
 
 describe('AuthService', () => {
   let authService: AuthService;
-  let prisma: { user: any; userRoleAssignment: any };
+  let prisma: { user: any; userRoleAssignment: any; revokedToken: any };
   let jwtService: JwtService;
   let auditService: { log: jest.Mock };
 
@@ -33,6 +33,11 @@ describe('AuthService', () => {
         update: jest.fn().mockResolvedValue(activeUser),
       },
       userRoleAssignment: {},
+      revokedToken: {
+        upsert: jest.fn().mockResolvedValue({}),
+        deleteMany: jest.fn().mockResolvedValue({ count: 0 }),
+        findUnique: jest.fn().mockResolvedValue(null),
+      },
     };
 
     jwtService = new JwtService({ secret: 'test-secret' });
@@ -61,6 +66,23 @@ describe('AuthService', () => {
     );
   });
 
+  it('issues a token carrying a jti claim, unique per login', async () => {
+    const first = await authService.login({
+      email: 'ciso@example.local',
+      password: 'CorrectHorseBattery1!',
+    });
+    const second = await authService.login({
+      email: 'ciso@example.local',
+      password: 'CorrectHorseBattery1!',
+    });
+
+    const firstPayload = await authService.validateToken(first.access_token);
+    const secondPayload = await authService.validateToken(second.access_token);
+    expect(firstPayload.jti).toEqual(expect.any(String));
+    expect(secondPayload.jti).toEqual(expect.any(String));
+    expect(firstPayload.jti).not.toBe(secondPayload.jti);
+  });
+
   it('rejects an incorrect password', async () => {
     await expect(
       authService.login({ email: 'ciso@example.local', password: 'wrong-password' }),
@@ -81,11 +103,12 @@ describe('AuthService', () => {
     ).rejects.toThrow(UnauthorizedException);
   });
 
-  it('round-trips a token through refreshToken', async () => {
+  it('round-trips a token through refreshToken, rotating the jti and revoking the old one', async () => {
     const { access_token } = await authService.login({
       email: 'ciso@example.local',
       password: 'CorrectHorseBattery1!',
     });
+    const originalPayload = await authService.validateToken(access_token);
 
     const refreshed = await authService.refreshToken(access_token);
     expect(refreshed.access_token).toBeDefined();
@@ -93,6 +116,15 @@ describe('AuthService', () => {
     const payload = await authService.validateToken(refreshed.access_token);
     expect(payload.sub).toBe('user-1');
     expect(payload.tenantId).toBe('tenant-1');
+    // Rotated: a fresh jti, not a reused one -- see AuthService.refreshToken.
+    expect(payload.jti).not.toBe(originalPayload.jti);
+
+    expect(prisma.revokedToken.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { jti: originalPayload.jti },
+        create: expect.objectContaining({ jti: originalPayload.jti, userId: 'user-1' }),
+      }),
+    );
   });
 
   it('logs a LOGOUT audit event for the calling user', async () => {
@@ -104,10 +136,52 @@ describe('AuthService', () => {
       organisationId: 'org-1',
       role: 'CISO',
       roles: ['CISO'],
+      jti: 'test-jti',
     });
 
     expect(auditService.log).toHaveBeenCalledWith(
       expect.objectContaining({ action: 'LOGOUT', tenantId: 'tenant-1', userId: 'user-1' }),
     );
+  });
+
+  it('revokes the token being logged out of when exp is present (the real request.user shape)', async () => {
+    const exp = Math.floor(Date.now() / 1000) + 3600;
+    await authService.logout({
+      sub: 'user-1',
+      email: 'ciso@example.local',
+      name: 'CISO',
+      tenantId: 'tenant-1',
+      organisationId: 'org-1',
+      role: 'CISO',
+      roles: ['CISO'],
+      jti: 'test-jti',
+      exp,
+    });
+
+    expect(prisma.revokedToken.upsert).toHaveBeenCalledWith({
+      where: { jti: 'test-jti' },
+      create: {
+        jti: 'test-jti',
+        tenantId: 'tenant-1',
+        userId: 'user-1',
+        expiresAt: new Date(exp * 1000),
+      },
+      update: {},
+    });
+  });
+
+  it('does not attempt revocation when logging out a payload with no exp (e.g. a test/malformed call)', async () => {
+    await authService.logout({
+      sub: 'user-1',
+      email: 'ciso@example.local',
+      name: 'CISO',
+      tenantId: 'tenant-1',
+      organisationId: 'org-1',
+      role: 'CISO',
+      roles: ['CISO'],
+      jti: 'test-jti',
+    });
+
+    expect(prisma.revokedToken.upsert).not.toHaveBeenCalled();
   });
 });

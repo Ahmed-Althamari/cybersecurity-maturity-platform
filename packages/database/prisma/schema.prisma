@@ -762,6 +762,31 @@ model PlatformSetting {
   @@map("platform_settings")
 }
 
+// Logout-side revocation list (docs/threat-model.md's token-revocation gap).
+// Every issued JWT carries a random `jti` claim; JwtStrategy.validate()
+// checks this table on every authenticated request, so a logged-out or
+// refreshed-away token stops working immediately instead of remaining
+// valid for its full 24h lifetime. Not a session store -- there is no row
+// here for a token that hasn't been revoked, so a normal request costs one
+// extra indexed lookup, not a join against "all active tokens."
+model RevokedToken {
+  jti String @id
+
+  tenantId String
+  userId   String
+
+  // The *original* token's own expiry, copied from its `exp` claim -- once
+  // this passes, the token would already be rejected by JwtStrategy's own
+  // `ignoreExpiration: false` check regardless, so the row is provably dead
+  // weight. Rows past this are opportunistically deleted on the next
+  // logout/refresh rather than needing a separate cleanup job.
+  expiresAt DateTime
+  revokedAt DateTime @default(now())
+
+  @@index([expiresAt])
+  @@map("revoked_tokens")
+}
+
 // ============================================================================
 // DATA IMPORT
 // ============================================================================
