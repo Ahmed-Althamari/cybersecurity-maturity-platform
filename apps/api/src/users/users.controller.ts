@@ -5,6 +5,7 @@ import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
+import type { AuthenticatedUser } from '../auth/types/authenticated-user';
 
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
@@ -21,7 +22,7 @@ export class UsersController {
   @Roles(UserRole.PLATFORM_ADMIN, UserRole.ORGANISATION_ADMIN)
   async create(
     @Body() createUserDto: CreateUserDto,
-    @CurrentUser() user: any,
+    @CurrentUser() user: AuthenticatedUser,
   ) {
     return this.usersService.create(user.tenantId, createUserDto);
   }
@@ -30,7 +31,7 @@ export class UsersController {
   async findAll(
     @Query('page') page: string | undefined,
     @Query('pageSize') pageSize: string | undefined,
-    @CurrentUser() user: any,
+    @CurrentUser() user: AuthenticatedUser,
   ) {
     return this.usersService.findAll(user.tenantId, { page: Number(page), pageSize: Number(pageSize) });
   }
@@ -38,7 +39,7 @@ export class UsersController {
   @Get(':id')
   async findOne(
     @Param('id') id: string,
-    @CurrentUser() user: any,
+    @CurrentUser() user: AuthenticatedUser,
   ) {
     return this.usersService.findOne(id, user.tenantId);
   }
@@ -49,7 +50,7 @@ export class UsersController {
   async update(
     @Param('id') id: string,
     @Body() updateUserDto: UpdateUserDto,
-    @CurrentUser() user: any,
+    @CurrentUser() user: AuthenticatedUser,
   ) {
     return this.usersService.update(id, user.tenantId, updateUserDto);
   }
@@ -59,7 +60,7 @@ export class UsersController {
   @Roles(UserRole.PLATFORM_ADMIN)
   async remove(
     @Param('id') id: string,
-    @CurrentUser() user: any,
+    @CurrentUser() user: AuthenticatedUser,
   ) {
     return this.usersService.remove(id, user.tenantId);
   }
@@ -67,7 +68,7 @@ export class UsersController {
   @Get(':id/roles')
   async getUserRoles(
     @Param('id') id: string,
-    @CurrentUser() user: any,
+    @CurrentUser() user: AuthenticatedUser,
   ) {
     return this.usersService.getUserRoles(id, user.tenantId);
   }
@@ -78,7 +79,7 @@ export class UsersController {
   async assignRole(
     @Param('id') id: string,
     @Param('role') role: string,
-    @CurrentUser() user: any,
+    @CurrentUser() user: AuthenticatedUser,
   ) {
     return this.usersService.assignRole(id, user.tenantId, role);
   }
@@ -89,7 +90,7 @@ export class UsersController {
   async removeRole(
     @Param('id') id: string,
     @Param('role') role: string,
-    @CurrentUser() user: any,
+    @CurrentUser() user: AuthenticatedUser,
   ) {
     return this.usersService.removeRole(id, user.tenantId, role);
   }

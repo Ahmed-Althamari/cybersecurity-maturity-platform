@@ -6,6 +6,7 @@ import { ExecutiveDashboardAccessible } from '../auth/decorators/executive-dashb
 import { Roles } from '../auth/decorators/roles.decorator';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
+import type { AuthenticatedUser } from '../auth/types/authenticated-user';
 
 import { AssessmentsService } from './assessments.service';
 import { CreateAssessmentDto } from './dto/create-assessment.dto';
@@ -30,7 +31,7 @@ export class AssessmentsController {
   @Post()
   @UseGuards(RolesGuard)
   @Roles(...AUTHORS)
-  async create(@Body() dto: CreateAssessmentDto, @CurrentUser() user: any) {
+  async create(@Body() dto: CreateAssessmentDto, @CurrentUser() user: AuthenticatedUser) {
     return this.assessmentsService.create(user.tenantId, user.sub, dto);
   }
 
@@ -44,7 +45,7 @@ export class AssessmentsController {
     @Query('organisationId') organisationId: string | undefined,
     @Query('page') page: string | undefined,
     @Query('pageSize') pageSize: string | undefined,
-    @CurrentUser() user: any,
+    @CurrentUser() user: AuthenticatedUser,
   ) {
     return this.assessmentsService.findAll(user.tenantId, organisationId, {
       page: Number(page),
@@ -53,21 +54,21 @@ export class AssessmentsController {
   }
 
   @Get(':id')
-  async findOne(@Param('id') id: string, @CurrentUser() user: any) {
+  async findOne(@Param('id') id: string, @CurrentUser() user: AuthenticatedUser) {
     return this.assessmentsService.findOne(user.tenantId, id);
   }
 
   @Patch(':id')
   @UseGuards(RolesGuard)
   @Roles(...AUTHORS)
-  async update(@Param('id') id: string, @Body() dto: UpdateAssessmentDto, @CurrentUser() user: any) {
+  async update(@Param('id') id: string, @Body() dto: UpdateAssessmentDto, @CurrentUser() user: AuthenticatedUser) {
     return this.assessmentsService.update(user.tenantId, user.sub, id, dto);
   }
 
   @Delete(':id')
   @UseGuards(RolesGuard)
   @Roles(...ARCHIVERS)
-  async remove(@Param('id') id: string, @CurrentUser() user: any) {
+  async remove(@Param('id') id: string, @CurrentUser() user: AuthenticatedUser) {
     return this.assessmentsService.remove(user.tenantId, id);
   }
 
@@ -78,7 +79,7 @@ export class AssessmentsController {
     @Param('id') id: string,
     @Param('itemId') itemId: string,
     @Body() dto: UpdateAssessmentItemDto,
-    @CurrentUser() user: any,
+    @CurrentUser() user: AuthenticatedUser,
   ) {
     return this.assessmentsService.updateItem(user.tenantId, user.sub, id, itemId, dto);
   }
@@ -86,33 +87,33 @@ export class AssessmentsController {
   @Post(':id/submit')
   @UseGuards(RolesGuard)
   @Roles(...AUTHORS)
-  async submit(@Param('id') id: string, @CurrentUser() user: any) {
+  async submit(@Param('id') id: string, @CurrentUser() user: AuthenticatedUser) {
     return this.assessmentsService.submit(user.tenantId, user.sub, id);
   }
 
   @Post(':id/approve')
   @UseGuards(RolesGuard)
   @Roles(...APPROVERS)
-  async approve(@Param('id') id: string, @CurrentUser() user: any) {
+  async approve(@Param('id') id: string, @CurrentUser() user: AuthenticatedUser) {
     return this.assessmentsService.approve(user.tenantId, user.sub, id);
   }
 
   @Post(':id/reopen')
   @UseGuards(RolesGuard)
   @Roles(...AUTHORS)
-  async reopen(@Param('id') id: string, @CurrentUser() user: any) {
+  async reopen(@Param('id') id: string, @CurrentUser() user: AuthenticatedUser) {
     return this.assessmentsService.reopen(user.tenantId, user.sub, id);
   }
 
   @Post(':id/archive')
   @UseGuards(RolesGuard)
   @Roles(...ARCHIVERS)
-  async archive(@Param('id') id: string, @CurrentUser() user: any) {
+  async archive(@Param('id') id: string, @CurrentUser() user: AuthenticatedUser) {
     return this.assessmentsService.archive(user.tenantId, user.sub, id);
   }
 
   @Get(':id/history')
-  async getHistory(@Param('id') id: string, @CurrentUser() user: any) {
+  async getHistory(@Param('id') id: string, @CurrentUser() user: AuthenticatedUser) {
     return this.assessmentsService.getHistory(user.tenantId, id);
   }
 
@@ -121,7 +122,7 @@ export class AssessmentsController {
     @Param('id') id: string,
     @Query('levels') levels: string | undefined,
     @Query('minGap') minGap: string | undefined,
-    @CurrentUser() user: any,
+    @CurrentUser() user: AuthenticatedUser,
   ) {
     return this.assessmentsService.getScores(user.tenantId, id, {
       levels: levels?.split(',') as ('function' | 'category' | 'subcategory')[] | undefined,

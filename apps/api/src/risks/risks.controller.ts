@@ -5,6 +5,7 @@ import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
+import type { AuthenticatedUser } from '../auth/types/authenticated-user';
 
 import { CreateRiskDto } from './dto/create-risk.dto';
 import { UpdateRiskDto } from './dto/update-risk.dto';
@@ -29,7 +30,7 @@ export class RisksController {
   @Post()
   @UseGuards(RolesGuard)
   @Roles(...AUTHORS)
-  async create(@Body() dto: CreateRiskDto, @CurrentUser() user: any) {
+  async create(@Body() dto: CreateRiskDto, @CurrentUser() user: AuthenticatedUser) {
     return this.risksService.create(user.tenantId, dto);
   }
 
@@ -42,7 +43,7 @@ export class RisksController {
     @Query('sortBy') sortBy: 'score' | 'createdAt' | undefined,
     @Query('page') page: string | undefined,
     @Query('pageSize') pageSize: string | undefined,
-    @CurrentUser() user: any,
+    @CurrentUser() user: AuthenticatedUser,
   ) {
     return this.risksService.findAll(
       user.tenantId,
@@ -52,21 +53,21 @@ export class RisksController {
   }
 
   @Get(':id')
-  async findOne(@Param('id') id: string, @CurrentUser() user: any) {
+  async findOne(@Param('id') id: string, @CurrentUser() user: AuthenticatedUser) {
     return this.risksService.findOne(user.tenantId, id);
   }
 
   @Patch(':id')
   @UseGuards(RolesGuard)
   @Roles(...AUTHORS)
-  async update(@Param('id') id: string, @Body() dto: UpdateRiskDto, @CurrentUser() user: any) {
+  async update(@Param('id') id: string, @Body() dto: UpdateRiskDto, @CurrentUser() user: AuthenticatedUser) {
     return this.risksService.update(user.tenantId, id, dto);
   }
 
   @Delete(':id')
   @UseGuards(RolesGuard)
   @Roles(...DELETERS)
-  async remove(@Param('id') id: string, @CurrentUser() user: any) {
+  async remove(@Param('id') id: string, @CurrentUser() user: AuthenticatedUser) {
     return this.risksService.remove(user.tenantId, id);
   }
 
@@ -76,7 +77,7 @@ export class RisksController {
   async linkInitiative(
     @Param('id') id: string,
     @Param('initiativeId') initiativeId: string,
-    @CurrentUser() user: any,
+    @CurrentUser() user: AuthenticatedUser,
   ) {
     return this.risksService.linkInitiative(user.tenantId, id, initiativeId);
   }
@@ -87,7 +88,7 @@ export class RisksController {
   async unlinkInitiative(
     @Param('id') id: string,
     @Param('initiativeId') initiativeId: string,
-    @CurrentUser() user: any,
+    @CurrentUser() user: AuthenticatedUser,
   ) {
     return this.risksService.unlinkInitiative(user.tenantId, id, initiativeId);
   }

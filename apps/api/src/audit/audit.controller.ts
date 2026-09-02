@@ -5,6 +5,7 @@ import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
+import type { AuthenticatedUser } from '../auth/types/authenticated-user';
 
 import { AuditService } from './audit.service';
 
@@ -34,7 +35,7 @@ export class AuditController {
     @Query('to') to: string | undefined,
     @Query('page') page: string | undefined,
     @Query('pageSize') pageSize: string | undefined,
-    @CurrentUser() user: any,
+    @CurrentUser() user: AuthenticatedUser,
   ) {
     return this.auditService.findAll(user.tenantId, {
       userId,
@@ -52,7 +53,7 @@ export class AuditController {
   @Get('summary')
   @UseGuards(RolesGuard)
   @Roles(...AUDIT_READERS)
-  async getSummary(@Query('sinceDays') sinceDays: string | undefined, @CurrentUser() user: any) {
+  async getSummary(@Query('sinceDays') sinceDays: string | undefined, @CurrentUser() user: AuthenticatedUser) {
     return this.auditService.getSummary(user.tenantId, sinceDays ? Number(sinceDays) : undefined);
   }
 }

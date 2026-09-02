@@ -5,6 +5,7 @@ import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
+import type { AuthenticatedUser } from '../auth/types/authenticated-user';
 
 import { CreateInitiativeDto } from './dto/create-initiative.dto';
 import { UpdateInitiativeDto } from './dto/update-initiative.dto';
@@ -28,7 +29,7 @@ export class InitiativesController {
   @Post()
   @UseGuards(RolesGuard)
   @Roles(...AUTHORS)
-  async create(@Body() dto: CreateInitiativeDto, @CurrentUser() user: any) {
+  async create(@Body() dto: CreateInitiativeDto, @CurrentUser() user: AuthenticatedUser) {
     return this.initiativesService.create(user.tenantId, dto);
   }
 
@@ -39,7 +40,7 @@ export class InitiativesController {
     @Query('sortBy') sortBy: 'priority' | 'createdAt' | undefined,
     @Query('page') page: string | undefined,
     @Query('pageSize') pageSize: string | undefined,
-    @CurrentUser() user: any,
+    @CurrentUser() user: AuthenticatedUser,
   ) {
     return this.initiativesService.findAll(
       user.tenantId,
@@ -51,27 +52,27 @@ export class InitiativesController {
   @Get('timeline')
   async getTimeline(
     @Query('organisationId') organisationId: string | undefined,
-    @CurrentUser() user: any,
+    @CurrentUser() user: AuthenticatedUser,
   ) {
     return this.initiativesService.getTimeline(user.tenantId, organisationId);
   }
 
   @Get(':id')
-  async findOne(@Param('id') id: string, @CurrentUser() user: any) {
+  async findOne(@Param('id') id: string, @CurrentUser() user: AuthenticatedUser) {
     return this.initiativesService.findOne(user.tenantId, id);
   }
 
   @Patch(':id')
   @UseGuards(RolesGuard)
   @Roles(...AUTHORS)
-  async update(@Param('id') id: string, @Body() dto: UpdateInitiativeDto, @CurrentUser() user: any) {
+  async update(@Param('id') id: string, @Body() dto: UpdateInitiativeDto, @CurrentUser() user: AuthenticatedUser) {
     return this.initiativesService.update(user.tenantId, id, dto);
   }
 
   @Delete(':id')
   @UseGuards(RolesGuard)
   @Roles(...DELETERS)
-  async remove(@Param('id') id: string, @CurrentUser() user: any) {
+  async remove(@Param('id') id: string, @CurrentUser() user: AuthenticatedUser) {
     return this.initiativesService.remove(user.tenantId, id);
   }
 
@@ -81,7 +82,7 @@ export class InitiativesController {
   async linkRisk(
     @Param('id') id: string,
     @Param('riskId') riskId: string,
-    @CurrentUser() user: any,
+    @CurrentUser() user: AuthenticatedUser,
   ) {
     return this.initiativesService.linkRisk(user.tenantId, id, riskId);
   }
@@ -92,7 +93,7 @@ export class InitiativesController {
   async unlinkRisk(
     @Param('id') id: string,
     @Param('riskId') riskId: string,
-    @CurrentUser() user: any,
+    @CurrentUser() user: AuthenticatedUser,
   ) {
     return this.initiativesService.unlinkRisk(user.tenantId, id, riskId);
   }

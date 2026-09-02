@@ -1980,18 +1980,83 @@ login-specific brute-force throttle that already existed.
       normally (`201`), proving the two independent budgets coexist
       without interference this time.
 
+### Post-Phase-17: CSRF Protection — Investigated and Live-Verified, No Code Change
+README.md's "Honest gaps" listed "No CSRF-specific protection... not
+something explicitly implemented or tested for." Investigated both real
+attack surfaces instead of leaving that as an unexamined assumption --
+concluded both were already adequately protected by existing design
+choices, so nothing needed building, only testing and documenting.
+
+- [x] The NestJS API itself needs nothing further: a stateless bearer-
+      token API, not cookie-session-based, so classic CSRF (which relies
+      on the browser auto-attaching an ambient cookie credential) doesn't
+      apply -- every real call carries its token in an explicit
+      `Authorization` header set by `apps/web/lib/api.ts`'s own JS.
+- [x] **Live-verified** the one place the web app does use a cookie-based
+      flow, NextAuth's own `/api/auth/callback/credentials`: a POST with
+      no `csrfToken`, or the real cookie paired with a wrong token value,
+      both came back `{"url":".../auth/signin?csrf=true"}` with no
+      session cookie set; only the correct cookie+token pair reached
+      credential validation and set a real `next-auth.session-token`
+      cookie (confirmed `SameSite=Lax` in the live response headers -- an
+      independent second layer). `apps/web/pages/auth/signin.tsx` uses
+      NextAuth's own `signIn()` client helper, which is what correctly
+      wires the CSRF token in on every real attempt.
+- [x] No tests added and no code changed -- this was a documentation-only
+      closure of an already-adequately-protected surface. Docs updated:
+      `security-architecture.md` (new "CSRF" section with the full
+      investigation), `threat-model.md` (STRIDE row updated with the
+      live-verified specifics), `README.md` (moved out of "Honest gaps").
+
+### Post-Phase-17: `AuthenticatedUser` Type
+Continuing through remaining debt items: `@CurrentUser() user: any` had
+been used verbatim across every controller since Phase 16 downgraded
+`@typescript-eslint/no-explicit-any` from `error` to `warn` specifically
+to avoid blocking that phase's actual goal (getting CI green) on this
+unrelated, purely mechanical refactor -- explicitly flagged there as real
+debt "that should eventually get a proper `AuthenticatedUser` type
+threaded through."
+
+- [x] New `AuthenticatedUser` interface
+      (`apps/api/src/auth/types/authenticated-user.ts`), matching exactly
+      what `JwtStrategy.validate()` attaches to `request.user` (`sub`,
+      `email`, `name`, `tenantId`, `organisationId`, `role`, `roles`,
+      `jti`, `exp`) -- what `@CurrentUser()` always returns.
+- [x] Replaced `@CurrentUser() user: any` with
+      `@CurrentUser() user: AuthenticatedUser` at all 51 call sites across
+      9 controllers (`users`, `audit`, `framework`, `assessments`,
+      `risks`, `initiatives` + its `roadmap` sub-controller, `import`,
+      `dashboard`). A mechanical, purely additive type-safety change --
+      confirmed by `tsc --noEmit` passing with zero errors on the first
+      try, meaning nothing in any of those 51 call sites was actually
+      relying on `any`'s laxity to do something the real shape doesn't
+      support.
+- [x] `apps/api` lint warnings dropped from 85 to 34 -- the exact 51-count
+      reduction expected, confirming this closed precisely the debt it
+      set out to and nothing else. The remaining 34 are unrelated
+      `no-explicit-any` warnings (test-mock casts, etc.), out of this
+      item's scope. `@typescript-eslint/no-explicit-any` stays `warn`
+      rather than `error` regardless of this fix -- that rule-level
+      decision was never specific to this one pattern.
+- [x] Full regression pass: 181 unit tests / 24 suites and 22 integration
+      tests / 7 suites, all still green, plus a full lint/type-check/build
+      across every workspace -- a refactor touching 9 files this broadly
+      gets the same validation rigor as a new feature, not less because
+      "it's just types."
+
 ## Known Issues 🐛
 
 - ~~Root `.eslintrc.json` references missing ESLint plugins~~ — fixed in
   Phase 16 (see that section for the full story: missing plugins installed,
   `eslint-plugin-security` pinned to a legacy-config-compatible major,
   `import/order`'s invalid option name corrected, ~230 mechanical
-  import-order violations auto-fixed). `@typescript-eslint/no-explicit-any`
-  is deliberately `warn` rather than `error` — ~82 pre-existing
-  `@CurrentUser() user: any`-style usages across `apps/api`'s controllers
-  are real debt that should eventually get a proper `AuthenticatedUser`
-  type threaded through, but doing that now would be a large, risky,
-  purely mechanical refactor unrelated to what Phase 16 actually needed.
+  import-order violations auto-fixed).
+- ~~`@CurrentUser() user: any` across every controller~~ — **fixed** (see
+  "Post-Phase-17: `AuthenticatedUser` Type" below): a real
+  `AuthenticatedUser` type now threaded through all 51 usages across 9
+  controllers. `@typescript-eslint/no-explicit-any` stays `warn` rather
+  than `error` regardless — the remaining ~34 warnings are unrelated
+  (test-mock casts, etc.), not this pattern.
 - `packages/database`'s local `prisma` devDependency resolves inconsistently
   under npm workspaces (`@prisma/client`'s `peerDependencies: { prisma: "*" }`
   can pull in a newer major version than the pinned `^5.22.0`, marked

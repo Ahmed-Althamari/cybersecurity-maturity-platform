@@ -5,6 +5,7 @@ import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
+import type { AuthenticatedUser } from '../auth/types/authenticated-user';
 
 import { InitiativesService } from './initiatives.service';
 
@@ -26,7 +27,7 @@ export class RoadmapController {
   async generate(
     @Param('id') assessmentId: string,
     @Body('minGap') minGap: number | undefined,
-    @CurrentUser() user: any,
+    @CurrentUser() user: AuthenticatedUser,
   ) {
     return this.initiativesService.generateFromGaps(user.tenantId, assessmentId, minGap);
   }

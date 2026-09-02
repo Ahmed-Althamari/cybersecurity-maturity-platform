@@ -16,6 +16,7 @@ import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
+import type { AuthenticatedUser } from '../auth/types/authenticated-user';
 
 import { ImportService } from './import.service';
 
@@ -40,7 +41,7 @@ export class ImportController {
     @Param('id') assessmentId: string,
     @UploadedFile() file: Express.Multer.File | undefined,
     @Body('format') format: string | undefined,
-    @CurrentUser() user: any,
+    @CurrentUser() user: AuthenticatedUser,
   ) {
     if (!file) {
       throw new BadRequestException("No file uploaded (expected multipart field 'file')");
@@ -67,7 +68,7 @@ export class ImportController {
     @Body('format') format: string | undefined,
     @Body('mapping') mappingJson: string | undefined,
     @Body('sheetName') sheetName: string | undefined,
-    @CurrentUser() user: any,
+    @CurrentUser() user: AuthenticatedUser,
   ) {
     if (!file) {
       throw new BadRequestException("No file uploaded (expected multipart field 'file')");

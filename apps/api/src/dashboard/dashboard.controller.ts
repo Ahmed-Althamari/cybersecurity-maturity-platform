@@ -3,6 +3,7 @@ import { Controller, Get, Param, Query, UseGuards } from '@nestjs/common';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { ExecutiveDashboardAccessible } from '../auth/decorators/executive-dashboard-accessible.decorator';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import type { AuthenticatedUser } from '../auth/types/authenticated-user';
 
 import { DashboardService } from './dashboard.service';
 
@@ -16,19 +17,19 @@ export class DashboardController {
 
   @Get()
   @ExecutiveDashboardAccessible()
-  async getExecutiveDashboard(@Param('id') id: string, @CurrentUser() user: any) {
+  async getExecutiveDashboard(@Param('id') id: string, @CurrentUser() user: AuthenticatedUser) {
     return this.dashboardService.getExecutiveDashboard(user.tenantId, id);
   }
 
   @Get('maturity-overview')
   @ExecutiveDashboardAccessible()
-  async getMaturityOverview(@Param('id') id: string, @CurrentUser() user: any) {
+  async getMaturityOverview(@Param('id') id: string, @CurrentUser() user: AuthenticatedUser) {
     return this.dashboardService.getMaturityOverview(user.tenantId, id);
   }
 
   @Get('functions')
   @ExecutiveDashboardAccessible()
-  async getFunctionMaturity(@Param('id') id: string, @CurrentUser() user: any) {
+  async getFunctionMaturity(@Param('id') id: string, @CurrentUser() user: AuthenticatedUser) {
     return this.dashboardService.getFunctionMaturity(user.tenantId, id);
   }
 
@@ -37,7 +38,7 @@ export class DashboardController {
   async getGapAnalysis(
     @Param('id') id: string,
     @Query('minGap') minGap: string | undefined,
-    @CurrentUser() user: any,
+    @CurrentUser() user: AuthenticatedUser,
   ) {
     return this.dashboardService.getGapAnalysis(
       user.tenantId,
@@ -48,19 +49,19 @@ export class DashboardController {
 
   @Get('heatmap')
   @ExecutiveDashboardAccessible()
-  async getMaturityHeatmap(@Param('id') id: string, @CurrentUser() user: any) {
+  async getMaturityHeatmap(@Param('id') id: string, @CurrentUser() user: AuthenticatedUser) {
     return this.dashboardService.getMaturityHeatmap(user.tenantId, id);
   }
 
   @Get('risks')
   @ExecutiveDashboardAccessible()
-  async getRiskSummary(@Param('id') id: string, @CurrentUser() user: any) {
+  async getRiskSummary(@Param('id') id: string, @CurrentUser() user: AuthenticatedUser) {
     return this.dashboardService.getRiskSummary(user.tenantId, id);
   }
 
   @Get('roadmap')
   @ExecutiveDashboardAccessible()
-  async getRoadmapStatus(@Param('id') id: string, @CurrentUser() user: any) {
+  async getRoadmapStatus(@Param('id') id: string, @CurrentUser() user: AuthenticatedUser) {
     return this.dashboardService.getRoadmapStatus(user.tenantId, id);
   }
 }
