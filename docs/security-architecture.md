@@ -432,10 +432,30 @@ elsewhere in this repo's docs:
    "Audit logging" above.
 6. **Trivy and ZAP are report-only**, not yet enforcing (deliberately, on
    a documented timeline — see `docs/devsecops-pipeline.md`).
-7. **No file-upload evidence scanning** — the `Evidence` model exists but
-   nothing uploads to it yet (see `docs/data-model.md`); the one real file
-   upload path today (spreadsheet import) is size-capped and parsed by a
-   library, not executed, but isn't run through any malware scanner.
+7. **No file-upload evidence scanning — partially addressed.** The
+   `Evidence` model still has no upload endpoint at all (see
+   `docs/data-model.md`), so there is nothing there to scan yet. The one
+   real file upload path (spreadsheet import) now validates the file's
+   actual content against its claimed `format` before any parsing is
+   attempted (`validateFileSignature()`, `@cmmp/import-engine`) — an xlsx
+   must start with the real ZIP file signature, a CSV must not contain
+   binary content — closing the "a renamed/disguised file claims to be a
+   spreadsheet" gap. This is **not** malware/antivirus scanning: there is
+   no AV engine (e.g. ClamAV) integrated, and none was attempted here —
+   this sandbox has no reliable way to fetch and verify current virus
+   definitions, and it would be a real, separate infrastructure dependency
+   (a scanning daemon, definition updates) rather than a code change. The
+   practical residual risk is already bounded regardless: uploaded files
+   are parsed from an in-memory buffer only (`multer`'s default memory
+   storage, confirmed — no `diskStorage`, no `file.path` used anywhere),
+   never written to disk or served back to any other user, so there is no
+   persistence path for a malicious upload to later be executed or
+   distributed through this application. Also not built: protection
+   against a zip-bomb-style xlsx (a small compressed file that expands to
+   an enormous size) — the 5MB upload cap bounds this somewhat, but a
+   dedicated guard would need to inspect the ZIP's own declared
+   uncompressed size before `exceljs` decompresses it, which isn't
+   something this pass attempted.
 8. ~~No pagination on most list endpoints~~ — **fixed**: `/users`,
    `/assessments`, `/risks`, and `/initiatives` now all paginate
    (`PaginatedResponse<T>`, default page size 20, capped at 100 — see

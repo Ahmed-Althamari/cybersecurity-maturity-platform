@@ -9,6 +9,42 @@ export class SpreadsheetParseError extends Error {
   }
 }
 
+// xlsx is a ZIP archive under the hood -- every real one starts with this
+// exact 4-byte ZIP local-file-header signature. A file whose content
+// doesn't match this (whatever its filename or claimed `format` says) is
+// rejected here, before ExcelJS ever attempts to unzip/parse it -- fast,
+// and closes the "renamed/disguised file claims to be .xlsx" gap the file
+// size cap alone doesn't (docs/security-architecture.md's "no file-upload
+// scanning" known gap; there's no malware-scanning engine to integrate in
+// this environment, but validating the file actually *is* what it claims
+// to be, before spending any parse effort on it, is the standard first-line
+// OWASP-recommended control regardless).
+const XLSX_ZIP_SIGNATURE = Buffer.from([0x50, 0x4b, 0x03, 0x04]);
+
+/**
+ * Rejects a file whose content doesn't match its claimed `format`, before
+ * any real parsing is attempted. CSV has no universal magic byte (it's
+ * plain text), so it's checked with the same text-vs-binary heuristic
+ * `file`/git use: a genuine text file should never contain a NUL byte.
+ */
+export function validateFileSignature(buffer: Buffer, format: SpreadsheetFormat): void {
+  if (format === 'xlsx') {
+    if (buffer.length < 4 || !buffer.subarray(0, 4).equals(XLSX_ZIP_SIGNATURE)) {
+      throw new SpreadsheetParseError(
+        'File does not look like a real .xlsx file (missing the ZIP file signature) -- rejected before parsing.',
+      );
+    }
+    return;
+  }
+
+  const probeLength = Math.min(buffer.length, 1024);
+  if (buffer.subarray(0, probeLength).includes(0x00)) {
+    throw new SpreadsheetParseError(
+      'File does not look like a real CSV file (binary content detected) -- rejected before parsing.',
+    );
+  }
+}
+
 /**
  * Parses every tab in the workbook (xlsx) -- or the single implicit "sheet"
  * a CSV represents -- in one pass. This is the primitive both the
@@ -17,6 +53,7 @@ export class SpreadsheetParseError extends Error {
  * of this) are built on, so a workbook is only ever parsed once per request.
  */
 export async function parseAllSheets(buffer: Buffer, format: SpreadsheetFormat): Promise<SheetRows[]> {
+  validateFileSignature(buffer, format);
   return format === 'csv' ? [{ sheetName: 'Sheet1', rows: parseCsv(buffer) }] : parseXlsxAllSheets(buffer);
 }
 

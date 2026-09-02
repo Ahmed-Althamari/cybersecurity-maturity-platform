@@ -1876,6 +1876,60 @@ directly, bypassing the application entirely.
   `DELETE` as well (deliberately out of scope -- see the cascade reasoning
   above).
 
+### Post-Phase-17: File-Upload Signature Validation (Partial Gap Closure)
+Continuing through the remaining gaps in `docs/security-architecture.md`'s
+"Known gaps" list: "no file-upload evidence scanning." Investigated what's
+actually feasible here first, rather than assuming a full malware-scanner
+integration was the right scope.
+
+- [x] **Confirmed the real blast radius before deciding scope**: the
+      `Evidence` model has no upload endpoint at all yet (nothing to scan
+      there), and the one real upload path (spreadsheet import,
+      `ImportController`) uses multer's default memory storage --
+      confirmed by grep that `file.buffer` is used throughout
+      `ImportService`/`@cmmp/import-engine` and `file.path`/`diskStorage`
+      appear nowhere. An uploaded file is parsed from memory and never
+      written to disk or served back to any user, which already bounds
+      the practical risk regardless of what else is or isn't built.
+- [x] New `validateFileSignature()` (`@cmmp/import-engine`'s
+      `parse.ts`, called at the top of `parseAllSheets()`): rejects a file
+      whose actual content doesn't match its claimed `format`, before any
+      real parsing is attempted. `.xlsx` must start with the real ZIP
+      local-file-header signature (`50 4B 03 04` -- xlsx is a ZIP archive
+      under the hood); CSV (no universal magic byte, since it's plain
+      text) is checked with the same text-vs-binary heuristic `file`/git
+      use -- a NUL byte anywhere in the first 1KB means it isn't really
+      text. This is the standard, OWASP-recommended first-line control
+      for validating upload content against its claim, not malware
+      scanning -- explicitly not conflated with that in the docs update.
+- [x] Tests: 6 new tests in `@cmmp/import-engine/src/parse.spec.ts`
+      (accepts a real xlsx/CSV, rejects a disguised/renamed file for each
+      format, rejects a too-short buffer, and confirms a file with a
+      *valid* ZIP signature but garbage xlsx content inside still fails
+      via exceljs's own parser -- proving the new check and the existing
+      parser validation work together rather than one masking the
+      other). 37 tests total in `@cmmp/import-engine` (up from 31).
+- [x] Live-verified against the real running API: uploaded a genuine CSV
+      and a genuine xlsx (generated fresh via `exceljs`) to the real
+      `POST /assessments/:id/import/preview` endpoint and got `201` for
+      both; uploaded a plain-text file renamed to claim `format=xlsx` and
+      a binary-laced file claiming `format=csv` and got a real `400` with
+      the intended message for each, confirming the whole path (multipart
+      upload -> `ImportController` -> `ImportService` ->
+      `@cmmp/import-engine`) rejects disguised files before spending any
+      parse effort on them.
+
+  **Not built this pass, and explicitly not attempted**: real malware/
+  antivirus scanning (no AV engine like ClamAV is integrated -- this
+  sandbox has no reliable way to fetch and verify current virus
+  definitions, and standing one up is a real infrastructure dependency, a
+  scanning daemon plus a definitions-update pipeline, not a code change);
+  zip-bomb protection for xlsx (a dedicated guard would need to inspect
+  the ZIP's own declared uncompressed size before `exceljs` decompresses
+  it -- the existing 5MB upload cap bounds this somewhat but doesn't solve
+  it); an upload endpoint for the `Evidence` model (doesn't exist yet, so
+  there's nothing there to add scanning to).
+
 ## Known Issues 🐛
 
 - ~~Root `.eslintrc.json` references missing ESLint plugins~~ — fixed in
