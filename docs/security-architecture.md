@@ -108,6 +108,35 @@ need to change shape, just gain rotation.
   remains valid for that window — inherent to any blacklist-based scheme,
   not specific to this implementation.
 
+## CSRF
+
+Two separate surfaces, two separate reasons neither needs additional
+work — investigated and live-verified rather than left as an unexamined
+"probably fine":
+
+- **The NestJS API itself** is a stateless bearer-token API, not
+  cookie-session-based. Classic CSRF relies on the browser automatically
+  attaching an ambient credential (a cookie) to a cross-origin request the
+  victim never intended; every real call to this API instead carries its
+  token in an explicit `Authorization` header, set by `apps/web/lib/api.ts`'s
+  own JS — not something a cross-origin attacker page can forge or have
+  the browser attach on its behalf. There is nothing here for a CSRF token
+  to protect that isn't already protected by this design.
+- **NextAuth's own `/api/auth/callback/credentials` sign-in endpoint**
+  (the one place the web app *does* use a cookie-based flow) has its own
+  built-in CSRF-token check, and it was live-verified rather than assumed
+  from NextAuth's documentation: a POST with no `csrfToken` field, or with
+  the real `next-auth.csrf-token` cookie present but a wrong token value,
+  both come back `{"url":".../auth/signin?csrf=true"}` with no session
+  cookie ever set; only the correct cookie+token pair reaches credential
+  validation and (with valid credentials) sets a real
+  `next-auth.session-token` cookie. That cookie is also `SameSite=Lax`
+  (confirmed in the live response headers), an independent second layer —
+  a cross-site POST wouldn't carry it regardless of the token check.
+  `apps/web/pages/auth/signin.tsx` uses NextAuth's own `signIn()` client
+  helper (not a raw `fetch`/form POST), which is what correctly wires the
+  CSRF token in on every real sign-in attempt.
+
 ## Authorization (RBAC)
 
 - **11 roles** (`UserRole` enum — see `docs/data-model.md`), assigned via

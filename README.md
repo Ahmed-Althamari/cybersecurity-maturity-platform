@@ -341,12 +341,11 @@ role requirement).
   a `jti` claim, checked on every authenticated request) plus rotation on
   `POST /auth/refresh`; a logged-out token stops working on the very next
   request instead of remaining valid for its full 24h lifetime
-
-### Honest gaps — not yet implemented, despite what older docs/`.env.example` imply
-
-- **No CSRF-specific protection** — not currently needed given the
-  stateless bearer-token API design, but also not something explicitly
-  implemented or tested for.
+- **CSRF protection** — the API is stateless bearer-token (no cookies to
+  forge a request with); the web app's own NextAuth sign-in additionally
+  has its built-in CSRF-token check live-verified (a missing/wrong token
+  is rejected before credentials are even checked), on top of its
+  `SameSite=Lax` session cookie
 
 See `docs/security-architecture.md` for the full picture, including every
 other known gap, and `docs/threat-model.md` for the STRIDE analysis these
