@@ -1,12 +1,16 @@
-import { Controller, Get, Post, Body, Patch, Param, Delete, UseGuards } from '@nestjs/common';
 import { UserRole } from '@cmmp/shared';
-import { UsersService } from './users.service';
-import { CreateUserDto } from './dto/create-user.dto';
-import { UpdateUserDto } from './dto/update-user.dto';
+import { Controller, Get, Post, Body, Patch, Param, Delete, UseGuards } from '@nestjs/common';
+
+import { CurrentUser } from '../auth/decorators/current-user.decorator';
+import { Roles } from '../auth/decorators/roles.decorator';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
-import { Roles } from '../auth/decorators/roles.decorator';
-import { CurrentUser } from '../auth/decorators/current-user.decorator';
+import type { RequestUser } from '../auth/types/authenticated-request';
+
+import { CreateUserDto } from './dto/create-user.dto';
+import { UpdateUserDto } from './dto/update-user.dto';
+import { UsersService } from './users.service';
+
 
 @Controller('users')
 @UseGuards(JwtAuthGuard)
@@ -18,20 +22,20 @@ export class UsersController {
   @Roles(UserRole.PLATFORM_ADMIN, UserRole.ORGANISATION_ADMIN)
   async create(
     @Body() createUserDto: CreateUserDto,
-    @CurrentUser() user: any,
+    @CurrentUser() user: RequestUser,
   ) {
     return this.usersService.create(user.tenantId, createUserDto);
   }
 
   @Get()
-  async findAll(@CurrentUser() user: any) {
+  async findAll(@CurrentUser() user: RequestUser) {
     return this.usersService.findAll(user.tenantId);
   }
 
   @Get(':id')
   async findOne(
     @Param('id') id: string,
-    @CurrentUser() user: any,
+    @CurrentUser() user: RequestUser,
   ) {
     return this.usersService.findOne(id, user.tenantId);
   }
@@ -42,7 +46,7 @@ export class UsersController {
   async update(
     @Param('id') id: string,
     @Body() updateUserDto: UpdateUserDto,
-    @CurrentUser() user: any,
+    @CurrentUser() user: RequestUser,
   ) {
     return this.usersService.update(id, user.tenantId, updateUserDto);
   }
@@ -52,7 +56,7 @@ export class UsersController {
   @Roles(UserRole.PLATFORM_ADMIN)
   async remove(
     @Param('id') id: string,
-    @CurrentUser() user: any,
+    @CurrentUser() user: RequestUser,
   ) {
     return this.usersService.remove(id, user.tenantId);
   }
@@ -60,7 +64,7 @@ export class UsersController {
   @Get(':id/roles')
   async getUserRoles(
     @Param('id') id: string,
-    @CurrentUser() user: any,
+    @CurrentUser() user: RequestUser,
   ) {
     return this.usersService.getUserRoles(id, user.tenantId);
   }
@@ -71,7 +75,7 @@ export class UsersController {
   async assignRole(
     @Param('id') id: string,
     @Param('role') role: string,
-    @CurrentUser() user: any,
+    @CurrentUser() user: RequestUser,
   ) {
     return this.usersService.assignRole(id, user.tenantId, role);
   }
@@ -82,7 +86,7 @@ export class UsersController {
   async removeRole(
     @Param('id') id: string,
     @Param('role') role: string,
-    @CurrentUser() user: any,
+    @CurrentUser() user: RequestUser,
   ) {
     return this.usersService.removeRole(id, user.tenantId, role);
   }

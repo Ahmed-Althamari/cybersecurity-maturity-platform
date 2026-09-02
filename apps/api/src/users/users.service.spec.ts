@@ -1,10 +1,14 @@
 import { ConflictException, NotFoundException } from '@nestjs/common';
-import { UsersService } from './users.service';
+
 import { PrismaService } from '../prisma/prisma.service';
+
+import { UsersService } from './users.service';
+
+type MockModel = Record<string, jest.Mock>;
 
 describe('UsersService', () => {
   let usersService: UsersService;
-  let prisma: { user: any; userRoleAssignment: any };
+  let prisma: { user: MockModel; userRoleAssignment: MockModel };
 
   beforeEach(() => {
     prisma = {
@@ -54,7 +58,7 @@ describe('UsersService', () => {
   describe('create', () => {
     it('hashes the password and never stores it in plaintext', async () => {
       prisma.user.findFirst.mockResolvedValueOnce(null);
-      prisma.user.create.mockImplementationOnce(({ data }: any) =>
+      prisma.user.create.mockImplementationOnce(({ data }: { data: Record<string, unknown> }) =>
         Promise.resolve({ id: 'new-user', ...data }),
       );
 

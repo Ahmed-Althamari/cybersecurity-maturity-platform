@@ -293,7 +293,63 @@ None recorded yet
 
 ## Security Findings
 
-None recorded yet
+From `npm audit` (2026-08-31, after removing the unused `xlsx` dependency
+and running non-breaking `npm audit fix`): 29 findings remain (9 high, 15
+moderate, 5 low), all requiring a major-version bump to resolve. Classified
+per the finding-remediation scheme in the master prompt (section 73):
+
+- **Dependency Issue — Next.js 14.0.2** (high): several CVEs (SSRF via
+  rewrites, Server Action/RSC DoS, cache poisoning). User-facing surface
+  (`apps/web`), so this is the one worth prioritizing. Fix requires
+  upgrading to Next 16.x, which is a real breaking change (App Router/config
+  surface) — not attempted blind; needs its own scoped PR with the app
+  actually exercised in a browser afterward, per this repo's own UI-testing
+  expectations.
+- **Dependency Issue — `@nestjs/cli`/`turbo`/`@angular-devkit/*` toolchain**
+  (mixed moderate/high: ajv, glob, picomatch, webpack, tmp, inquirer): all
+  devDependencies used only for local builds/codegen, not shipped or
+  reachable by an end user. Lower real-world risk than the Next.js findings.
+  Fix requires `@nestjs/cli@12` (breaking relative to the `@nestjs/core@10`
+  runtime this repo pins) and `turbo@2.10`.
+- **Dependency Issue — `exceljs`** (moderate, via nested `uuid`): `npm audit
+  fix --force` offers to *downgrade* to `exceljs@3.4.0` to resolve this,
+  which would be a backwards step, not a fix. No consuming code exists yet
+  (Phase 8 territory) — revisit when `import-engine` is actually built.
+- **Resolved**: removed the `xlsx` (SheetJS) dependency from
+  `packages/reporting` — it had an advisory with no available fix and
+  nothing in the codebase imports it (`exceljs` already covers this need).
+
+None of these are wired as a required branch-protection check yet (see CI
+notes below) — `npm audit --audit-level=high` runs on every PR/push via
+`.github/workflows/security.yml` and will show red until the Next.js/NestJS
+CLI upgrades happen, but doesn't block merges in the meantime.
+
+## CI / DevSecOps Pipeline
+
+- `.github/workflows/ci.yml` — Lint, Type Check, Test, Build as separate
+  jobs. All four verified green locally (`turbo run lint/type-check/test/
+  build` across all 10 workspaces) before being wired into Actions.
+- `.github/workflows/security.yml` — CodeQL (SAST), Gitleaks (secrets),
+  `npm audit`, `dependency-review-action` (PRs only), weekly CycloneDX SBOM.
+- `.github/workflows/dast.yml` — OWASP ZAP baseline scan. Schedule +
+  manual-dispatch only for now, **not** on PR/push: the API has no
+  `/health` endpoint yet and no migration has been generated, so a
+  docker-compose-in-CI target isn't reliable yet. Revisit once Phase 4+
+  lands a health endpoint.
+- `.github/workflows/container-security.yml` — Trivy scan of both
+  Dockerfiles, SARIF uploaded to GitHub code scanning. `exit-code: 0`
+  (report-only) until a real run has been observed from this environment
+  (no Docker available in the sandbox that did this work).
+- `.github/dependabot.yml` — npm (workspace-aware), github-actions, docker.
+- `.github/CODEOWNERS` — points at the actual repo owner; the original
+  Phase 1 version referenced teams (`@developers`, `@security-team`, etc.)
+  that don't exist on a personal GitHub account and were silent no-ops.
+
+**Required branch-protection status checks**: only the four `ci.yml` jobs
+(Lint, Type Check, Test, Build) — the only ones verifiable from this
+sandbox before being pushed. CodeQL/Gitleaks/audit/DAST/Trivy run and
+report for real visibility but aren't blocking yet; promote them once
+they've been observed passing on an actual PR.
 
 ## Next Steps
 

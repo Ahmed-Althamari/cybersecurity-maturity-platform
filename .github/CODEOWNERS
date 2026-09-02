@@ -1,20 +1,27 @@
 # Code Owners for CMMP
+#
+# This is a solo-owned repository today, so every path below resolves to
+# @Ahmed-Althamari. The path structure mirrors the review boundaries the
+# master prompt calls for (security-sensitive code, database schema, CI/CD,
+# docs) so it's ready to hand specific paths to teammates or teams as soon
+# as they're added as collaborators — swap the owner on the relevant line(s)
+# rather than restructuring this file.
 
 # Global default owner
-* @developers
+* @Ahmed-Althamari
 
-# Security-sensitive paths require security-team review
-/packages/security/ @security-team
-/.github/workflows/ @devops-team
-/infrastructure/ @devops-team
-/apps/api/src/auth/ @security-team
-/docs/security-architecture.md @security-team
-/docs/threat-model.md @security-team
+# Security-sensitive paths
+/packages/security/ @Ahmed-Althamari
+/.github/workflows/ @Ahmed-Althamari
+/infrastructure/ @Ahmed-Althamari
+/apps/api/src/auth/ @Ahmed-Althamari
+/docs/security-architecture.md @Ahmed-Althamari
+/docs/threat-model.md @Ahmed-Althamari
 
-# Database changes require database team review
-/packages/database/ @database-team
-/apps/api/src/prisma/ @database-team
+# Database changes
+/packages/database/ @Ahmed-Althamari
+/apps/api/src/prisma/ @Ahmed-Althamari
 
 # Documentation
-/docs/ @documentation-team
-/README.md @documentation-team
+/docs/ @Ahmed-Althamari
+/README.md @Ahmed-Althamari

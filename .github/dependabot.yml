@@ -1,0 +1,36 @@
+version: 2
+updates:
+  # npm workspaces (root, apps/*, packages/*) — Dependabot understands npm
+  # workspaces natively when pointed at the workspace root.
+  - package-ecosystem: npm
+    directory: '/'
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 10
+    groups:
+      nestjs:
+        patterns: ['@nestjs/*']
+      eslint:
+        patterns: ['eslint*', '@typescript-eslint/*']
+    labels: ['dependencies', 'security']
+    commit-message:
+      prefix: 'chore(deps)'
+
+  - package-ecosystem: github-actions
+    directory: '/'
+    schedule:
+      interval: weekly
+      day: monday
+    labels: ['dependencies', 'devsecops']
+    commit-message:
+      prefix: 'chore(ci)'
+
+  - package-ecosystem: docker
+    directory: '/infrastructure'
+    schedule:
+      interval: weekly
+      day: monday
+    labels: ['dependencies', 'docker']
+    commit-message:
+      prefix: 'chore(docker)'

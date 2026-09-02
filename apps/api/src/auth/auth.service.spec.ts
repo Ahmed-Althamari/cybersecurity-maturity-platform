@@ -1,12 +1,16 @@
 import { UnauthorizedException } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import * as bcrypt from 'bcryptjs';
-import { AuthService } from './auth.service';
+
 import { PrismaService } from '../prisma/prisma.service';
+
+import { AuthService } from './auth.service';
+
+type MockModel = Record<string, jest.Mock>;
 
 describe('AuthService', () => {
   let authService: AuthService;
-  let prisma: { user: any; userRoleAssignment: any };
+  let prisma: { user: MockModel; userRoleAssignment: MockModel };
   let jwtService: JwtService;
 
   const activeUser = {

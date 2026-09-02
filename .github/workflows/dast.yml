@@ -1,0 +1,67 @@
+name: DAST
+
+# Intentionally NOT wired to pull_request/push yet: the API has no /health
+# endpoint and no generated migration to seed against (see
+# docs/IMPLEMENTATION_STATUS.md, Phase 3 known gaps). Once those land this
+# should also run nightly against a real deployed target rather than a
+# docker-compose-in-CI approximation. Runs on schedule/manual dispatch only
+# so it never blocks a PR merge in the meantime.
+on:
+  schedule:
+    # Nightly, 02:00 UTC
+    - cron: '0 2 * * *'
+  workflow_dispatch:
+
+jobs:
+  zap-baseline:
+    name: OWASP ZAP Baseline Scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+
+      - run: npm ci
+      - run: npm run db:generate
+
+      - name: Start stack
+        run: docker compose up -d --build
+        env:
+          # Non-production, CI-only values — never used outside this ephemeral run.
+          JWT_SECRET: ci-dast-secret-not-for-production-min-32-chars
+          NEXTAUTH_SECRET: ci-dast-secret-not-for-production-min-32-chars
+
+      - name: Wait for API to be reachable
+        run: |
+          for i in $(seq 1 30); do
+            if curl -sf http://localhost:3001/api/v1 >/dev/null 2>&1; then
+              echo "API is up"
+              exit 0
+            fi
+            sleep 5
+          done
+          echo "API did not become reachable in time"
+          docker compose logs
+          exit 1
+
+      - name: Run database migrations and seed
+        run: |
+          cd packages/database
+          npx prisma migrate deploy
+          npm run seed
+        env:
+          DATABASE_URL: postgresql://cmmp_user:cmmp_password@localhost:5432/cmmp_db?schema=public
+
+      - name: OWASP ZAP Baseline Scan
+        uses: zaproxy/action-baseline@v0.14.0
+        with:
+          target: 'http://localhost:3001/api/v1'
+          cmd_options: '-a'
+          fail_action: false
+
+      - name: Stop stack
+        if: always()
+        run: docker compose down -v
