@@ -38,13 +38,14 @@ export class InitiativesController {
     @Query('organisationId') organisationId: string | undefined,
     @Query('status') status: string | undefined,
     @Query('sortBy') sortBy: 'priority' | 'createdAt' | undefined,
+    @Query('search') search: string | undefined,
     @Query('page') page: string | undefined,
     @Query('pageSize') pageSize: string | undefined,
     @CurrentUser() user: AuthenticatedUser,
   ) {
     return this.initiativesService.findAll(
       user.tenantId,
-      { organisationId, status, sortBy },
+      { organisationId, status, sortBy, search },
       { page: Number(page), pageSize: Number(pageSize) },
     );
   }

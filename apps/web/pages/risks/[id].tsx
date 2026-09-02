@@ -14,6 +14,7 @@ const inputClass =
 const labelClass = 'mb-1 block text-sm text-slate-300';
 
 const STATUSES = ['OPEN', 'IN_PROGRESS', 'CLOSED'];
+const INITIATIVE_PAGE_SIZE = 10;
 
 export default function RiskDetailPage() {
   const { data: session, status: sessionStatus } = useSession();
@@ -24,7 +25,12 @@ export default function RiskDetailPage() {
   const [error, setError] = useState<string | null>(null);
   const [owner, setOwner] = useState('');
   const [riskStatus, setRiskStatus] = useState('OPEN');
-  const [availableInitiatives, setAvailableInitiatives] = useState<InitiativeDetail[] | null>(null);
+  const [availableInitiatives, setAvailableInitiatives] = useState<InitiativeDetail[]>([]);
+  const [initiativesLoading, setInitiativesLoading] = useState(true);
+  const [initiativeSearchInput, setInitiativeSearchInput] = useState('');
+  const [initiativeSearch, setInitiativeSearch] = useState('');
+  const [initiativePage, setInitiativePage] = useState(1);
+  const [initiativeTotalPages, setInitiativeTotalPages] = useState(1);
   const [initiativeId, setInitiativeId] = useState('');
   const [saving, setSaving] = useState(false);
 
@@ -50,10 +56,33 @@ export default function RiskDetailPage() {
 
   useEffect(load, [sessionStatus, session, riskId]);
 
+  // Debounce the search box so every keystroke doesn't fire a request --
+  // resets to page 1 since a new search invalidates the old result set's
+  // page count.
+  useEffect(() => {
+    const handle = setTimeout(() => {
+      setInitiativeSearch(initiativeSearchInput.trim());
+      setInitiativePage(1);
+    }, 300);
+    return () => clearTimeout(handle);
+  }, [initiativeSearchInput]);
+
   useEffect(() => {
     if (sessionStatus !== 'authenticated') return;
-    api.listInitiatives(session.accessToken).then(setAvailableInitiatives).catch(() => setAvailableInitiatives([]));
-  }, [sessionStatus, session]);
+    setInitiativesLoading(true);
+    api
+      .listInitiatives(session.accessToken, {
+        search: initiativeSearch,
+        page: initiativePage,
+        pageSize: INITIATIVE_PAGE_SIZE,
+      })
+      .then((result) => {
+        setAvailableInitiatives(result.data);
+        setInitiativeTotalPages(Math.max(1, result.totalPages));
+      })
+      .catch(() => setAvailableInitiatives([]))
+      .finally(() => setInitiativesLoading(false));
+  }, [sessionStatus, session, initiativeSearch, initiativePage]);
 
   if (sessionStatus === 'loading' || (sessionStatus === 'authenticated' && !risk && !error)) {
     return <CenteredMessage>Loading…</CenteredMessage>;
@@ -213,30 +242,71 @@ export default function RiskDetailPage() {
                   </li>
                 ))}
               </ul>
-              <form onSubmit={handleLinkInitiative} className="flex gap-2">
-                <select
-                  value={initiativeId}
-                  onChange={(e) => setInitiativeId(e.target.value)}
+              <form onSubmit={handleLinkInitiative} className="space-y-2">
+                <input
+                  type="text"
+                  value={initiativeSearchInput}
+                  onChange={(e) => setInitiativeSearchInput(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') e.preventDefault();
+                  }}
+                  placeholder="Search initiatives by title…"
                   className={inputClass}
-                >
-                  <option value="">
-                    {availableInitiatives === null ? 'Loading initiatives…' : 'Select an initiative to link…'}
-                  </option>
-                  {unlinkedInitiatives.map((initiative) => (
-                    <option key={initiative.id} value={initiative.id}>
-                      {initiative.title} ({initiative.status})
-                    </option>
-                  ))}
-                </select>
+                />
+                <div className="max-h-48 overflow-y-auto rounded-md border border-slate-700">
+                  {initiativesLoading && <p className="p-3 text-sm text-slate-500">Loading initiatives…</p>}
+                  {!initiativesLoading && unlinkedInitiatives.length === 0 && (
+                    <p className="p-3 text-sm text-slate-500">
+                      {initiativeSearch
+                        ? 'No matching initiatives.'
+                        : 'Every existing remediation initiative is already linked to this risk.'}
+                    </p>
+                  )}
+                  {!initiativesLoading &&
+                    unlinkedInitiatives.map((initiative) => (
+                      <button
+                        key={initiative.id}
+                        type="button"
+                        onClick={() => setInitiativeId(initiative.id)}
+                        className={`block w-full px-3 py-2 text-left text-sm ${
+                          initiativeId === initiative.id
+                            ? 'bg-blue-600/30 text-white'
+                            : 'text-slate-300 hover:bg-slate-700/40'
+                        }`}
+                      >
+                        {initiative.title} ({initiative.status})
+                      </button>
+                    ))}
+                </div>
+                {initiativeTotalPages > 1 && (
+                  <div className="flex items-center justify-center gap-3">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setInitiativePage((p) => p - 1)}
+                      disabled={initiativePage <= 1}
+                    >
+                      Previous
+                    </Button>
+                    <span className="text-xs text-slate-400">
+                      Page {initiativePage} of {initiativeTotalPages}
+                    </span>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setInitiativePage((p) => p + 1)}
+                      disabled={initiativePage >= initiativeTotalPages}
+                    >
+                      Next
+                    </Button>
+                  </div>
+                )}
                 <Button type="submit" variant="outline" disabled={!initiativeId}>
                   Link
                 </Button>
               </form>
-              {availableInitiatives !== null && unlinkedInitiatives.length === 0 && (
-                <p className="text-xs text-slate-500">
-                  Every existing remediation initiative is already linked to this risk.
-                </p>
-              )}
             </CardContent>
           </Card>
         </div>

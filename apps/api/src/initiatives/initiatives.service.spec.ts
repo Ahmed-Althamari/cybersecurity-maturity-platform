@@ -103,6 +103,28 @@ describe('InitiativesService', () => {
       prisma.remediationInitiative.findFirst.mockResolvedValueOnce(null);
       await expect(service.findOne('tenant-b', 'initiative-1')).rejects.toThrow(NotFoundException);
     });
+
+    it('filters by a case-insensitive title substring when search is given', async () => {
+      prisma.remediationInitiative.findMany.mockResolvedValueOnce([]);
+      await service.findAll('tenant-a', { search: 'firewall' });
+      expect(prisma.remediationInitiative.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({
+            title: { contains: 'firewall', mode: 'insensitive' },
+          }),
+        }),
+      );
+    });
+
+    it('omits the title filter entirely when no search is given', async () => {
+      prisma.remediationInitiative.findMany.mockResolvedValueOnce([]);
+      await service.findAll('tenant-a', {});
+      expect(prisma.remediationInitiative.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({ title: undefined }),
+        }),
+      );
+    });
   });
 
   describe('risk linking', () => {

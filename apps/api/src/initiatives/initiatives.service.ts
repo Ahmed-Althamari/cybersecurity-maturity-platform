@@ -41,6 +41,8 @@ export interface FindAllInitiativesFilters {
   organisationId?: string;
   status?: string;
   sortBy?: 'priority' | 'createdAt';
+  /** Case-insensitive substring match against the initiative title. */
+  search?: string;
 }
 
 export interface InitiativeTimeline {
@@ -79,6 +81,7 @@ export class InitiativesService {
         deletedAt: null,
         organisationId: filters.organisationId,
         status: filters.status,
+        title: filters.search ? { contains: filters.search, mode: 'insensitive' as const } : undefined,
       },
       orderBy:
         filters.sortBy === 'createdAt'

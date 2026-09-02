@@ -330,17 +330,16 @@ export const api = {
 
   getRoadmapTimeline: (token: string) => apiFetch<InitiativeTimeline>(token, '/initiatives/timeline'),
 
-  // Powers the risk-detail page's initiative *picker* -- a dropdown wants
-  // "all of them", not one page, so this requests the largest page the API
-  // allows (100) rather than exposing page params to callers. A tenant with
-  // more than 100 initiatives will have some missing from the picker; a
-  // known, documented limitation (see docs/api-reference.md) rather than
-  // building a searchable/paginated picker for what's still a small-scale
-  // feature today.
-  listInitiatives: (token: string) =>
-    apiFetch<PaginatedResponse<InitiativeDetail>>(token, '/initiatives?sortBy=priority&pageSize=100').then(
-      (result) => result.data,
-    ),
+  // Powers the risk-detail page's initiative *picker*. Search + real
+  // pagination (rather than the previous "just request the largest page
+  // the API allows and hope it covers every initiative") so a tenant with
+  // more than 100 initiatives can still find and link any of them.
+  listInitiatives: (token: string, options: { search?: string; page?: number; pageSize?: number } = {}) => {
+    const { search = '', page = 1, pageSize = 10 } = options;
+    const params = new URLSearchParams({ sortBy: 'priority', page: String(page), pageSize: String(pageSize) });
+    if (search) params.set('search', search);
+    return apiFetch<PaginatedResponse<InitiativeDetail>>(token, `/initiatives?${params.toString()}`);
+  },
 
   generateRoadmap: (token: string, assessmentId: string) =>
     apiFetch<InitiativeDetail[]>(token, `/assessments/${assessmentId}/roadmap/generate`, {

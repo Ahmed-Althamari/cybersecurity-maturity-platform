@@ -2044,6 +2044,61 @@ threaded through."
       gets the same validation rigor as a new feature, not less because
       "it's just types."
 
+### Post-Phase-17: Searchable/Paginated Initiative Picker
+The risk-detail page's "link an initiative" picker previously called
+`GET /initiatives?sortBy=priority&pageSize=100` (the server's own max
+`pageSize`) and treated that as "all of them" for a plain `<select>` —
+documented since Phase 17's frontend gap closure as a known limitation: a
+tenant with more than 100 initiatives would have some permanently missing
+from the picker, with no way to reach them at all.
+
+- [x] `GET /initiatives` gained a `search` query param
+      (`FindAllInitiativesFilters.search`) — a case-insensitive substring
+      match against `title` via Prisma's `contains`/`mode: 'insensitive'`,
+      composed into the same `where` clause as the existing
+      `organisationId`/`status` filters and left `undefined` (i.e. no
+      filter at all) when no search term is given.
+- [x] `apps/web/lib/api.ts`'s `listInitiatives()` now takes
+      `{ search?, page?, pageSize? }` and returns the full
+      `PaginatedResponse<InitiativeDetail>` instead of unwrapping to a bare
+      array capped at one 100-row page.
+- [x] The risk-detail page's picker is now a text search box (debounced
+      300ms, resets to page 1 on every new search term) over a scrollable
+      list of matching, not-yet-linked initiatives (10 per page) with
+      Previous/Next controls — replacing the old `<select>` entirely. A
+      tenant with any number of initiatives can now find and link all of
+      them, not just the first 100.
+- [x] Unit tests: 2 new `InitiativesService` cases (search applies a
+      case-insensitive `contains` filter; omitted entirely when no search
+      given) plus 4 new RTL tests on the risk-detail page (initial
+      page-1 load, debounced search resetting to page 1, Next/Previous
+      pagination, selecting a row enables Link) — all using `fireEvent`
+      rather than adding a new `@testing-library/user-event` dependency,
+      matching this repo's existing lightweight test style.
+- [x] Live-verified end-to-end against the real Postgres instance: seeded
+      15 temporary initiatives (18 total for the tenant), confirmed via
+      direct `curl` against the running API that pagination math is
+      correct (`total: 18, totalPages: 2`, 10 + 8 split), that `search`
+      is a real case-insensitive substring match (`INITIATIVE #3` matched
+      a mixed-case title; a nonsense term returned zero), and that it
+      stays tenant-scoped. Then built the web app for production, started
+      it against the same API, and drove the actual picker with a
+      throwaway Playwright script signed in as `ciso@example.local`:
+      page-1 load, Next/Previous, typing a search term, selecting a row,
+      linking it, and confirming it disappears from the picker afterward
+      (still tenant/risk-scoped correctly) all worked exactly as unit
+      tests predicted. The 15 seeded rows (and the resulting risk↔
+      initiative link) were deleted afterward, restoring the database to
+      its pre-test state.
+- **Not built this pass**: no new dependency was added for the picker UI
+  (no `react-select`/combobox library) — it's a plain text input + button
+  list, consistent with the rest of the frontend's minimal-dependency
+  style. This means no keyboard arrow-key navigation within the results
+  list; clicking (or tabbing + Enter/Space on) a row is required. Given
+  the picker is used from a single page for a single, low-frequency
+  action (linking a remediation initiative to a risk), that's judged an
+  acceptable trade-off rather than justifying a new UI dependency.
+
 ## Known Issues 🐛
 
 - ~~Root `.eslintrc.json` references missing ESLint plugins~~ — fixed in
