@@ -46,7 +46,7 @@ Role name abbreviations used below match the `UserRole` enum exactly:
 
 | Method | Path | Roles | Notes |
 |---|---|---|---|
-| POST | `/auth/login` | — | `{ email, password }` → real Prisma `User` lookup + `bcryptjs.compare`; issues a JWT (`expiresIn: '24h'`, see `AuthModule`) carrying `sub`, `email`, `tenantId`, `organisationId`, `role`, `roles[]`. Logs an `AuditAction.LOGIN` event directly (bypasses the generic interceptor so it can attach IP/user-agent even though `AuthController` responses are excluded from that interceptor's path). |
+| POST | `/auth/login` | — | `{ email, password }` → real Prisma `User` lookup + `bcryptjs.compare`; issues a JWT (`expiresIn: '24h'`, see `AuthModule`) carrying `sub`, `email`, `tenantId`, `organisationId`, `role`, `roles[]`. Logs an `AuditAction.LOGIN` event directly (bypasses the generic interceptor so it can attach IP/user-agent even though `AuthController` responses are excluded from that interceptor's path). **Rate-limited**: `AUTH_RATE_LIMIT_MAX_ATTEMPTS` per IP per `AUTH_RATE_LIMIT_WINDOW_MS` (defaults 20/60s) — every attempt counts regardless of outcome, so a `429` is possible even on a correct password once the budget is spent. See `docs/security-architecture.md`. |
 | POST | `/auth/logout` | any authenticated | Logs `AuditAction.LOGOUT`. Stateless — there is no server-side session or token blacklist; this only records the event. |
 | POST | `/auth/refresh` | any authenticated | Re-signs a **valid, unexpired** token with a fresh expiry. Not a rotation scheme — the old token remains valid until its own expiry too. See "Known Issues" in `IMPLEMENTATION_STATUS.md`: no revocation/rotation exists yet. |
 | GET | `/auth/me` | any authenticated | Returns the caller's own decoded JWT claims. |

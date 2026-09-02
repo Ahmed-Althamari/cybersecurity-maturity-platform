@@ -36,7 +36,7 @@ plainly rather than glossed over — this document is meant to be acted on.
 | Threat | Mitigation | Residual risk |
 |---|---|---|
 | Attacker forges a JWT to impersonate a user | HMAC-signed JWT (`JwtStrategy` verifies signature against `JWT_SECRET`); no algorithm-confusion risk (`@nestjs/jwt` defaults to `HS256`, and the strategy doesn't accept an alternate algorithm from the token header) | Low, **provided** `JWT_SECRET` is a real, non-default value in production — the hardcoded fallback is a known public string in this repo, so a deployment that forgets to override it is trivially spoofable. See `docs/security-architecture.md`'s "Secrets management." |
-| Credential stuffing / brute force against `/auth/login` | **None.** No rate limiting exists in this codebase despite `.env.example` implying it does (confirmed by grep — see `docs/security-architecture.md`). | **High** for an internet-facing deployment with weak passwords. This is the single most actionable finding in this threat model: add `@nestjs/throttler` (or an upstream WAF rule) on `POST /auth/login` before any real deployment. |
+| Credential stuffing / brute force against `/auth/login` | **Fixed.** `@nestjs/throttler` on the login handler only: `AUTH_RATE_LIMIT_MAX_ATTEMPTS` (default 20) per `AUTH_RATE_LIMIT_WINDOW_MS` (default 60s) per IP, every attempt counted regardless of outcome. Live-verified: attempt 21 in a window returns `429`, an unrelated route in the same window is unaffected. | Low-Medium — meaningfully raises the cost of automated guessing, but tracking by IP means a distributed attack (many source IPs) isn't slowed by this alone; that needs a WAF/CDN-level control in front of a real deployment, which is out of this application's own scope. |
 | Stolen/leaked JWT reused after logout or password change | `POST /auth/logout` only logs the event — it does not invalidate the token. A stolen token remains valid for up to 24h regardless. | Medium. Mitigated only by the 24h expiry ceiling; no revocation list exists. Tracked in "Known gaps." |
 | CSRF against a browser-held session | The API is a stateless bearer-token API, not cookie-session-based, so classic CSRF (which relies on the browser auto-attaching cookies) doesn't directly apply to it. NextAuth's own session cookie on the Next.js side is `HttpOnly`/`SameSite`-protected by NextAuth's defaults. | Low. |
 
@@ -75,7 +75,7 @@ plainly rather than glossed over — this document is meant to be acted on.
 |---|---|---|
 | Oversized spreadsheet upload exhausting memory/CPU during parsing | 5MB hard cap enforced by the multipart interceptor before parsing begins (`MAX_IMPORT_FILE_BYTES`). | Low for this one endpoint. |
 | Unbounded/expensive query (e.g. a very large `GET /risks` with no pagination) | **No pagination exists** on most list endpoints (only `/audit-events` paginates) — a tenant with a very large dataset returns its entire result set in one response. | Medium as data volume grows; not exploitable cross-tenant (an attacker can only hurt their own tenant's response time), but a real scalability gap worth addressing before onboarding a large customer. |
-| Login-endpoint flooding | No rate limiting — see "Spoofing" above; the same gap applies here as a resource-exhaustion vector, not just a credential-guessing one. | High for an internet-facing deployment. |
+| Login-endpoint flooding | The same per-IP throttle covers this too (see "Spoofing" above) — a flood from one IP is capped identically whether the intent is guessing credentials or just burning CPU on `bcrypt.compare`. | Low-Medium, same caveat as above: a distributed flood across many IPs isn't slowed by a per-IP limit alone. |
 | CI pipeline abuse (e.g. a malicious PR triggering expensive jobs repeatedly) | GitHub Actions' own default concurrency/cost controls apply; `ci.yml` additionally cancels superseded runs on the same ref (`concurrency: cancel-in-progress: true`). | Low — standard GitHub Actions posture, nothing CMMP-specific added beyond the cancel-in-progress setting. |
 
 ## Elevation of Privilege
@@ -92,16 +92,22 @@ plainly rather than glossed over — this document is meant to be acted on.
 Ranked by a rough severity × likelihood judgment, for whoever picks this up
 next:
 
-1. **Add rate limiting to `/auth/login`** (Spoofing/DoS) — the single
-   highest-value fix in this document; currently zero mitigation.
+1. ~~Add rate limiting to `/auth/login`~~ — **done**: `@nestjs/throttler`,
+   per-IP, scoped to the login handler only. Was the single highest-value
+   fix in this document; see `docs/security-architecture.md`.
 2. **Confirm `JWT_SECRET`/`NEXTAUTH_SECRET` are real values, never the
    hardcoded fallback, before any non-local deployment** — a process/
    checklist fix, not a code fix (though a startup check that refuses to
    boot on the default value would be a stronger, code-level guarantee).
 3. **Add pagination to the remaining list endpoints** (DoS/scalability) —
-   before onboarding a tenant with a large dataset.
+   before onboarding a tenant with a large dataset. Now the top unaddressed
+   item.
 4. **Decide whether `EXECUTIVE_VIEWER` needs real behavior** — either wire
    it to a dashboard-only guard, or fold it into `READ_ONLY_VIEWER` and
    remove the distinction rather than leave it silently unenforced.
 5. **Token revocation** — at minimum a logout-side blacklist, ideally
    short-lived access tokens plus a refresh-token rotation scheme.
+6. **A WAF/CDN-level rate limit for a real internet-facing deployment** —
+   the new per-IP login throttle helps against a single attacking host,
+   but not a distributed one; that class of mitigation belongs in front of
+   the application, not inside it.

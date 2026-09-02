@@ -1387,6 +1387,67 @@ separate, not-yet-requested piece of work.
       real network call -- actually works end-to-end, not just up to the
       point a mock would have stopped.
 
+### Post-Phase-17: Rate Limiting on `/auth/login`
+Working through the ranked gap list from `docs/threat-model.md`'s summary,
+one item at a time (user's explicit direction), starting with the
+single highest-priority finding: `/auth/login` had zero brute-force
+protection despite `.env.example` defining rate-limit variables that
+implied otherwise.
+
+- [x] **`@nestjs/throttler` added, scoped to `POST /auth/login` only** --
+      `AuthModule` registers `ThrottlerModule.forRootAsync` with its own
+      dedicated `AUTH_RATE_LIMIT_WINDOW_MS`/`AUTH_RATE_LIMIT_MAX_ATTEMPTS`
+      env vars (defaults 60000ms / 20 attempts); `AuthController.login`
+      is the only handler with `@UseGuards(ThrottlerGuard)`. Deliberately
+      **not** registered as a global `APP_GUARD` -- every other route
+      already requires a valid JWT to reach at all, so a global sweep
+      would have added risk (breaking legitimate multi-request UI flows
+      or the existing test suites) without protecting anything a global
+      guard would newly cover.
+- [x] **Deliberately separate from the still-unused
+      `ENABLE_RATE_LIMITING`/`RATE_LIMIT_WINDOW_MS`/`RATE_LIMIT_MAX_REQUESTS`**
+      -- those describe a generic, API-wide request budget (a materially
+      larger, separate feature that remains unbuilt), not a login-specific
+      brute-force guard; reusing them would have silently conflated two
+      different operator-tunable things under one name.
+- [x] Every request against `/auth/login` counts toward the same per-IP
+      budget regardless of outcome -- a correct password submitted after
+      the budget is spent still gets `429`, which is the correct behavior
+      for a brute-force guard (an attacker who eventually guesses right is
+      still capped).
+- [x] Tests: 1 new unit test (`auth.controller.spec.ts` -- a
+      `@UseGuards(ThrottlerGuard)`-on-`login` regression test, mirroring
+      the metadata-presence pattern `AuditController`'s and
+      `SettingsController`'s specs already established) -- 144 tests total
+      in `apps/api`, up from 143. Plus a new **integration** spec
+      (`test/auth-rate-limit.integration-spec.ts`, boots the real
+      `AppModule` over real HTTP, matching `tenant-security.integration-spec.ts`'s
+      existing pattern): 6 rapid requests with a wrong password assert the
+      first 5 return `401` and the 6th returns `429` (using a small,
+      deterministic 5-attempt budget set via `process.env` before the
+      module compiles, independent of the real deployment default); a
+      second test bursts an unrelated route (`/frameworks`) in the same
+      window and confirms it keeps returning its normal `401`
+      (unauthenticated) rather than `429`, proving the guard's scope
+      didn't leak. Confirmed the pre-existing `tenant-security.integration-spec.ts`
+      (which itself calls `/auth/login` ~9 times in one run) still passes
+      unmodified against the real 20/60s default -- comfortably under
+      budget, no interference.
+- [x] Live-verified against the real running API (not just Jest): 20 rapid
+      requests with a wrong password each returned `401`, the 21st
+      returned `429`; a *correct* password submitted immediately after
+      still returned `429` (proving the budget, not the credential, is
+      what's being checked); `GET /health` and `GET /frameworks` in the
+      same window returned their normal `200`/`401` rather than `429`,
+      confirming the guard's scope is exactly `POST /auth/login` and
+      nothing else.
+
+  **Not built this pass**: the generic, API-wide rate limit the leftover
+  `RATE_LIMIT_*` env vars describe (a separate, larger feature); a
+  WAF/CDN-level control for a distributed (many-IP) attack, which a
+  per-IP in-application throttle can't address on its own and belongs in
+  front of the application in a real deployment, not inside it.
+
 ## Known Issues 🐛
 
 - ~~Root `.eslintrc.json` references missing ESLint plugins~~ — fixed in
@@ -1582,17 +1643,17 @@ None recorded yet
     grouping instead of a flat filterable list (see this pass's "Not
     built" note) and let a heatmap category cell drill into its own
     subcategories inline.
-12. **New, from Phase 17's threat-model pass** — the single highest-value
-    fix identified across this entire project: add rate limiting (e.g.
-    `@nestjs/throttler`) to `POST /auth/login`. `.env.example` already
-    defines `ENABLE_RATE_LIMITING`/`RATE_LIMIT_WINDOW_MS`/
-    `RATE_LIMIT_MAX_REQUESTS`, but grepping the codebase confirms none of
-    the three is read anywhere — the login endpoint has zero brute-force
-    protection today. See `docs/threat-model.md`'s "Summary of the
-    highest-priority items" for this and four more ranked findings
-    (token revocation, missing CSP/HSTS headers, unpaginated list
-    endpoints, and `EXECUTIVE_VIEWER` never actually being distinguished
-    from `READ_ONLY_VIEWER` by any guard).
+12. ~~Add rate limiting to `POST /auth/login`~~ — **done** (see
+    "Post-Phase-17: Rate Limiting on `/auth/login`" above): `@nestjs/throttler`,
+    scoped to the login handler only, live-verified against the real
+    running API. The remaining ranked findings from `docs/threat-model.md`'s
+    "Summary of the highest-priority items" are, in order: pagination on
+    the remaining list endpoints (now the top unaddressed item), confirming
+    `JWT_SECRET`/`NEXTAUTH_SECRET` are never left at their hardcoded
+    fallback in a real deployment, `EXECUTIVE_VIEWER` never actually being
+    distinguished from `READ_ONLY_VIEWER` by any guard, token
+    revocation/rotation, and a WAF/CDN-level rate limit for a distributed
+    (many-IP) attack the new per-IP login throttle can't address alone.
 
 ## Contact & Questions
 

@@ -321,14 +321,15 @@ role requirement).
 - **Parameterized queries** throughout (Prisma), preventing SQL injection
 - **CSV/Excel formula-injection sanitization** on spreadsheet import
 - **Audit logging** of all authenticated mutating actions plus login/logout
+- **Rate limiting on `POST /auth/login`** — per-IP, via `@nestjs/throttler`
+  (`AUTH_RATE_LIMIT_MAX_ATTEMPTS`/`AUTH_RATE_LIMIT_WINDOW_MS`)
 
 ### Honest gaps — not yet implemented, despite what older docs/`.env.example` imply
 
-- **No rate limiting anywhere** — `.env.example` defines
-  `ENABLE_RATE_LIMITING`/`RATE_LIMIT_WINDOW_MS`/`RATE_LIMIT_MAX_REQUESTS`,
-  but nothing in the codebase reads them; `/auth/login` has no brute-force
-  protection today. This is the single highest-priority fix identified in
-  `docs/threat-model.md`.
+- **`ENABLE_RATE_LIMITING`/`RATE_LIMIT_WINDOW_MS`/`RATE_LIMIT_MAX_REQUESTS`
+  in `.env.example` are still unread by any code path** — those describe a
+  separate, generic API-wide request budget, not the login-specific
+  throttle above (which uses its own, different env vars).
 - **No CSRF-specific protection** — not currently needed given the
   stateless bearer-token API design, but also not something explicitly
   implemented or tested for.

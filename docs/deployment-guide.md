@@ -35,6 +35,7 @@ variables specifically, which are the same kind of gap):
 | `PORT` | API | Defaults to `3001` if unset. |
 | `ANTHROPIC_API_KEY` | API (`AiMappingService`, via `SettingsService`) | Optional — powers the AI-assisted import column-mapping suggestion (`docs/excel-import-guide.md`). Unset means that one feature silently no-ops (falls back to exact-header-name auto-mapping); nothing else depends on it. A value saved by a `PLATFORM_ADMIN` through `/admin/settings` (database, encrypted) takes priority over this env var when both are set. |
 | `SETTINGS_ENCRYPTION_KEY` | API (`SettingsService`) | Optional, but required before the `/admin/settings` UI can actually save anything — a 32-byte value (base64 or hex) that encrypts any secret saved there at rest. Generate with `node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"`. Losing/rotating it makes a previously-saved value undecryptable (treated as "not configured," not an error — see `docs/security-architecture.md`). |
+| `AUTH_RATE_LIMIT_WINDOW_MS` / `AUTH_RATE_LIMIT_MAX_ATTEMPTS` | API (`AuthModule`) | Optional — per-IP brute-force throttle on `POST /auth/login` only. Defaults (60000 / 20) apply if unset; the code's own fallback matches `.env.example`. |
 
 ## Running locally with Docker Compose
 

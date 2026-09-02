@@ -40,6 +40,10 @@ services:
       # not an error. See .env.example.
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       SETTINGS_ENCRYPTION_KEY: ${SETTINGS_ENCRYPTION_KEY:-}
+      # Login brute-force protection -- code defaults (60s / 20 attempts)
+      # apply if left unset, matching .env.example.
+      AUTH_RATE_LIMIT_WINDOW_MS: ${AUTH_RATE_LIMIT_WINDOW_MS:-}
+      AUTH_RATE_LIMIT_MAX_ATTEMPTS: ${AUTH_RATE_LIMIT_MAX_ATTEMPTS:-}
     ports:
       - "3001:3001"
     # Applies pending Prisma migrations before every start -- safe to run on

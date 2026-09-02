@@ -199,16 +199,31 @@ middleware that injects a tenant filter automatically):
   HSTS, or Referrer-Policy header set** — these three headers are the
   extent of it today. This is a real, honest gap: adding `helmet` (or the
   equivalent headers by hand) would be a low-effort improvement.
-- **No rate limiting is actually implemented**, despite `.env.example`
-  defining `ENABLE_RATE_LIMITING`, `RATE_LIMIT_WINDOW_MS`, and
-  `RATE_LIMIT_MAX_REQUESTS` — grepping the codebase confirms none of these
-  three variables is read anywhere in `apps/api` or `apps/web`, and there
-  is no `@nestjs/throttler` (or equivalent) dependency installed. This
-  means `POST /auth/login` has **no brute-force protection** today beyond
-  whatever sits in front of it in a real deployment (a WAF, an API
-  gateway). This is the most concrete, actionable gap in this document —
-  see `docs/threat-model.md`'s authentication section for the specific
-  threat this leaves open.
+- **`POST /auth/login` is rate-limited** (`@nestjs/throttler`, scoped to
+  just that one handler via `@UseGuards(ThrottlerGuard)` — not applied
+  globally): `AUTH_RATE_LIMIT_MAX_ATTEMPTS` attempts (default 20) per
+  `AUTH_RATE_LIMIT_WINDOW_MS` (default 60s) per IP, tracked in-memory.
+  Every request counts against the same budget regardless of outcome — a
+  correct password submitted after the budget is spent still gets `429`,
+  which is the correct behavior for a brute-force guard (an attacker who
+  eventually guesses right is still capped). Deliberately *not* applied
+  globally: every other route already requires a valid JWT to reach at
+  all, so only this one unauthenticated, credential-guessing surface
+  needed it. Live-verified: 20 requests with a wrong password returned
+  `401` each, the 21st returned `429`, and a burst at an unrelated route
+  (`/frameworks`) in the same window kept returning its normal `401`
+  (unauthenticated) rather than `429`, confirming the guard's scope. This
+  closes what was, until this fix, the single most concrete, actionable
+  gap in this document (see `docs/threat-model.md`).
+- `ENABLE_RATE_LIMITING`/`RATE_LIMIT_WINDOW_MS`/`RATE_LIMIT_MAX_REQUESTS`
+  in `.env.example` **remain unread by any code path** — those describe a
+  separate, larger-scope feature (a generic, API-wide request budget
+  across every endpoint), which is still not built. Deliberately not
+  reused for the login throttle above (see `AUTH_RATE_LIMIT_WINDOW_MS`/
+  `AUTH_RATE_LIMIT_MAX_ATTEMPTS` instead) — conflating "the login
+  brute-force limit" and "the whole API's request budget" under one
+  variable would silently surprise an operator tuning one and not
+  expecting it to affect the other.
 
 ## Secrets management
 
@@ -288,9 +303,12 @@ elsewhere in this repo's docs:
 1. **No token revocation/rotation** — a compromised or stale JWT remains
    valid for its full 24h lifetime regardless of any server-side state
    change.
-2. **No rate limiting anywhere**, despite env vars suggesting otherwise —
-   `/auth/login` is unprotected against credential-stuffing/brute-force at
-   the application layer.
+2. ~~No rate limiting anywhere~~ — **fixed**: `POST /auth/login` is now
+   throttled per IP (`@nestjs/throttler`, see "HTTP-level hardening"
+   above). The generic, API-wide request budget the leftover
+   `RATE_LIMIT_*` env vars imply is still unbuilt, but that's a separate,
+   larger-scope feature, not the credential-stuffing gap this item
+   originally flagged.
 3. **No CSP/HSTS/Referrer-Policy headers**, no `helmet`.
 4. **`EXECUTIVE_VIEWER`'s intended scope (dashboards only) isn't actually
    enforced** — it behaves identically to `READ_ONLY_VIEWER` today.
@@ -303,3 +321,6 @@ elsewhere in this repo's docs:
    nothing uploads to it yet (see `docs/data-model.md`); the one real file
    upload path today (spreadsheet import) is size-capped and parsed by a
    library, not executed, but isn't run through any malware scanner.
+8. **No pagination on most list endpoints** — only `/audit-events` caps
+   its result set; every other list endpoint returns everything, which
+   will become a real scalability problem before it becomes a security one.

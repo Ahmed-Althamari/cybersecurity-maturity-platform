@@ -1,4 +1,5 @@
 import { Controller, Post, Body, Get, UseGuards, Req } from '@nestjs/common';
+import { ThrottlerGuard } from '@nestjs/throttler';
 import type { Request } from 'express';
 
 import { AuthService } from './auth.service';
@@ -9,6 +10,14 @@ import { JwtAuthGuard } from './guards/jwt-auth.guard';
 export class AuthController {
   constructor(private authService: AuthService) {}
 
+  // Brute-force protection: AUTH_RATE_LIMIT_MAX_ATTEMPTS attempts per
+  // AUTH_RATE_LIMIT_WINDOW_MS per IP (see AuthModule) -- this was a real,
+  // documented gap (docs/threat-model.md's top-priority finding) with zero
+  // mitigation before this. Not applied globally (see AuthModule's
+  // ThrottlerModule.forRootAsync comment) -- only login is an unauthenticated,
+  // credential-guessing surface; every other route already requires a valid
+  // JWT to reach at all.
+  @UseGuards(ThrottlerGuard)
   @Post('login')
   async login(@Body() loginDto: LoginDto, @Req() req: Request) {
     return this.authService.login(loginDto, {
