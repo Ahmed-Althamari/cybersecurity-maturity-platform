@@ -55,12 +55,18 @@ jobs:
           # docs/IMPLEMENTATION_STATUS.md. Flip to "1" once that's done.
           exit-code: "0"
 
-      - name: Upload Trivy results to the Security tab
+      # Uploading to the Security tab requires GitHub Advanced Security,
+      # unavailable on a private repo without a paid add-on (same 403
+      # confirmed for codeql.yml's upload -- see that file's comment).
+      # Archiving as an artifact instead; switch back to upload-sarif if
+      # GHAS gets enabled.
+      - name: Archive Trivy SARIF results
         if: always()
-        uses: github/codeql-action/upload-sarif@v3
+        uses: actions/upload-artifact@v4
         with:
-          sarif_file: trivy-${{ matrix.image }}.sarif
-          category: trivy-${{ matrix.image }}
+          name: trivy-${{ matrix.image }}-sarif
+          path: trivy-${{ matrix.image }}.sarif
+          retention-days: 30
 
       - name: Generate SBOM (SPDX)
         uses: anchore/sbom-action@v0.17.2

@@ -1,6 +1,6 @@
 # CMMP Implementation Status
 
-Last Updated: 2026-09-01
+Last Updated: 2026-09-02 (branch reconciliation — see "Branch Reconciliation" below)
 
 ## Overall Progress
 
@@ -2290,9 +2290,9 @@ None recorded yet
 
 ## Security Findings
 
-- **[Fixed, this session] JWT signing/verification secret mismatch**
-  (auth availability, not a bypass — the failure mode was every
-  authenticated request 401ing, not unauthorized access): `AuthModule`'s
+- **[Fixed] JWT signing/verification secret mismatch** (auth availability,
+  not a bypass — the failure mode was every authenticated request 401ing,
+  not unauthorized access): `AuthModule`'s
   `JwtModule.register({ secret: process.env.JWT_SECRET })` read the env
   var before `ConfigModule` had loaded `.env`, silently falling back to
   the hardcoded default secret for signing, while `JwtStrategy` verified
@@ -2301,6 +2301,133 @@ None recorded yet
   Verification" above) — no unit test exercises Nest's actual module
   bootstrap/DI ordering. Fixed via `JwtModule.registerAsync()` +
   `ConfigService`, in both `auth.module.ts` and `jwt.strategy.ts`.
+
+From `npm audit` (2026-08-31, after removing the unused `xlsx` dependency
+and running non-breaking `npm audit fix`): 29 findings remain (9 high, 15
+moderate, 5 low), all requiring a major-version bump to resolve. Classified
+per the finding-remediation scheme in the master prompt (section 73):
+
+- **Dependency Issue — Next.js 14.0.2** (high): several CVEs (SSRF via
+  rewrites, Server Action/RSC DoS, cache poisoning). User-facing surface
+  (`apps/web`), so this is the one worth prioritizing. Fix requires
+  upgrading to Next 16.x, which is a real breaking change (App Router/config
+  surface) — not attempted blind; needs its own scoped PR with the app
+  actually exercised in a browser afterward, per this repo's own UI-testing
+  expectations.
+- **Dependency Issue — `@nestjs/cli`/`turbo`/`@angular-devkit/*` toolchain**
+  (mixed moderate/high: ajv, glob, picomatch, webpack, tmp, inquirer): all
+  devDependencies used only for local builds/codegen, not shipped or
+  reachable by an end user. Lower real-world risk than the Next.js findings.
+  Fix requires `@nestjs/cli@12` (breaking relative to the `@nestjs/core@10`
+  runtime this repo pins) and `turbo@2.10`.
+- **Dependency Issue — `exceljs`** (moderate, via nested `uuid`): `npm audit
+  fix --force` offers to *downgrade* to `exceljs@3.4.0` to resolve this,
+  which would be a backwards step, not a fix.
+- **Resolved**: removed the `xlsx` (SheetJS) dependency from
+  `packages/reporting` — it had an advisory with no available fix and
+  nothing in the codebase imports it (`exceljs` already covers this need).
+
+None of these are wired as a required branch-protection check — `npm audit
+--audit-level=high` isn't part of `ci.yml`'s gate and will show red until
+the Next.js/NestJS CLI upgrades happen. Run `npm audit` directly to see
+current status; nothing currently automates it as a PR check.
+
+## CI / DevSecOps Pipeline
+
+Two parallel builds of this (my own `security.yml`/`container-security.yml`,
+and a separate session's `codeql.yml`/`gitleaks.yml`/`container-scan.yml`)
+were reconciled into one on 2026-09-02 — see "Branch Reconciliation" below.
+The surviving set:
+
+- `.github/workflows/ci.yml` — six jobs: Lint & Type-check, Unit Tests,
+  Build, Integration Tests (live Postgres service container, real
+  `AppModule` boot, seeded demo tenant), E2E Tests (Playwright against the
+  real dev servers), and a `security-gate` job that requires every prior
+  job to have succeeded — the one check worth making required once branch
+  protection is available (see below).
+- `.github/workflows/codeql.yml` — CodeQL SAST, weekly + push/PR.
+- `.github/workflows/gitleaks.yml` — secret scanning, push/PR.
+- `.github/workflows/container-scan.yml` — builds both Docker images for
+  real, Trivy scan, dual SBOM (per-image SPDX + source-tree CycloneDX).
+- `.github/workflows/dast.yml` — OWASP ZAP baseline scan against a real
+  `docker compose up` stack, push/PR.
+- `.github/workflows/deploy.yml` — builds/pushes images to GHCR on push to
+  main; the actual "deploy" step is a placeholder gated behind a GitHub
+  Environment (needs manual approval + real secrets before it can run
+  anywhere) — no live hosting target exists yet.
+- `.github/dependabot.yml` — npm (workspace-aware, grouped by
+  production/dev + update-type), github-actions, docker.
+- `.github/CODEOWNERS` — points at the actual repo owner; the original
+  Phase 1 version referenced teams (`@developers`, `@security-team`, etc.)
+  that don't exist on a personal GitHub account and were silent no-ops.
+
+**SARIF upload to the Security tab is disabled** in `codeql.yml` and
+`container-scan.yml` (`upload: never` / archived as an artifact instead of
+`upload-sarif`) — confirmed by two failed real runs against this exact repo
+that GitHub Advanced Security is required for code-scanning uploads on a
+private repo, and that isn't available without a paid add-on. Both jobs
+still run their real analysis; only the Security-tab upload is skipped.
+Flip back to uploading if GHAS gets enabled. `codeql.yml` also needed
+`actions: read` and `gitleaks.yml` needed `pull-requests: read` beyond what
+each action's own docs suggested — both confirmed by real 403s on this
+repo's Actions runs, not guessed.
+
+**Branch protection on `main` is not configured** — confirmed (twice: both
+classic branch protection and the newer rulesets API) that GitHub requires
+GitHub Pro or a public repo to protect a branch on a private
+personal-account repo; there's no free tier for this. The user chose to
+leave `main` unprotected for now rather than upgrade or go public. CI still
+runs and reports on every PR — it just can't technically block a direct
+push. Revisit if the account upgrades; the `security-gate` job in `ci.yml`
+is designed to be the single required check whenever that happens.
+
+## Branch Reconciliation (2026-09-02)
+
+Two Claude Code sessions ended up working this repo in parallel, unknown to
+each other until this point: one did Phase 3 (Auth & RBAC) then a full
+CI/CD-pipeline pass (`security.yml`, `container-security.yml`, CODEOWNERS,
+Dependabot) on `main`, actually pushing and watching real GitHub Actions
+runs to find and fix real permission/config bugs along the way (the GHAS
+paywall, `pull-requests: read`/`actions: read` gaps, a Turbo task-dependency
+ordering bug). The other, on branch `claude/proceed-bo89gm`, independently
+built out essentially this entire document's Phases 4 through 17 plus a
+round of post-Phase-17 hardening (rate limiting, token revocation,
+CSRF/CSP/HSTS, audit-log immutability, a password-change endpoint), diverged
+from a point before any of the CI work existed, and built its own version of
+the same CI/CD pipeline.
+
+Reconciled by merging `main` into `claude/proceed-bo89gm` and resolving each
+conflict on its merits rather than wholesale-favoring either side:
+
+- Feature code (packages/scoring-engine, packages/security,
+  packages/framework-engine, the whole apps/web frontend, the hardened
+  auth/users services with token revocation and audit logging): took the
+  `claude/proceed-bo89gm` side essentially throughout — it was the more
+  complete, more mature implementation in every case checked.
+- CI/CD workflows: took `claude/proceed-bo89gm`'s six-job `ci.yml`
+  (integration + E2E tests against a live Postgres service container, a
+  `security-gate` aggregate check) over the simpler four-job version, since
+  it's a strict superset. Kept `claude/proceed-bo89gm`'s split
+  `codeql.yml`/`gitleaks.yml`/`container-scan.yml`/`deploy.yml` over the
+  combined `security.yml`/`container-security.yml` (now deleted), but
+  applied the real, GitHub-verified fixes from the other session's actual
+  Actions runs: `actions: read` on CodeQL, `pull-requests: read` on
+  Gitleaks, and `upload: never` + artifact archival instead of
+  `upload-sarif` on both CodeQL and Trivy (the GHAS-paywall finding above).
+- A few genuine small-scale combinations rather than one-side-wins: e.g.
+  `RolesGuard` ended up using the proceed branch's Reflector-based metadata
+  lookup (fixing a real bug the `main`-side version still had) together
+  with `main`'s multi-role authorization check (a correctness improvement
+  `main` had that `proceed` didn't).
+- `package-lock.json` was regenerated from scratch post-merge rather than
+  hand-resolved (not realistic to merge a ~20k-line generated file by hand).
+
+Not yet done as of writing this note: pushing the merged result and
+watching it actually run on GitHub Actions for real, the way the CI-only
+branch was verified before it merged. `claude/proceed-bo89gm`'s own CI/
+Docker work was never run against a real Actions runner either (see Next
+Steps #9) — so this merge is the first time either session's full pipeline
+gets a real end-to-end check. Expect to find and fix something.
 
 ## Next Steps
 
@@ -2357,9 +2484,12 @@ None recorded yet
    never against a real image build or a real Actions runner
 10. Once Trivy/ZAP have had a first real triage pass (see Phase 16),
     flip both from report-only to enforcing (`exit-code: "1"` /
-    `fail_action: true`), and have a repo admin mark `Security Gate`,
-    `Gitleaks`, and CodeQL's analyze job as required status checks in
-    Settings -> Branches -- no committed workflow file can do that part
+    `fail_action: true`). Marking `security-gate` (or `Gitleaks`/CodeQL) as
+    a required status check in Settings -> Branches is **currently
+    impossible**, not just undone: confirmed (2026-09-02, both classic
+    branch protection and the rulesets API) that GitHub requires GitHub Pro
+    or a public repo to protect a branch on a private personal-account
+    repo. Revisit if the account upgrades or the repo goes public.
 11. Give the take-assessment page real function/category/subcategory
     grouping instead of a flat filterable list (see this pass's "Not
     built" note) and let a heatmap category cell drill into its own

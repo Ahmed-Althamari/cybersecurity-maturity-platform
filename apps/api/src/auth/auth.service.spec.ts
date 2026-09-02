@@ -7,9 +7,11 @@ import { PrismaService } from '../prisma/prisma.service';
 
 import { AuthService } from './auth.service';
 
+type MockModel = Record<string, jest.Mock>;
+
 describe('AuthService', () => {
   let authService: AuthService;
-  let prisma: { user: any; userRoleAssignment: any; revokedToken: any };
+  let prisma: { user: MockModel; userRoleAssignment: MockModel; revokedToken: MockModel };
   let jwtService: JwtService;
   let auditService: { log: jest.Mock };
 

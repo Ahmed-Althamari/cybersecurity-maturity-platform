@@ -8,6 +8,7 @@ import { ExecutiveDashboardAccessible } from './decorators/executive-dashboard-a
 import { ChangePasswordDto } from './dto/change-password.dto';
 import { LoginDto } from './dto/login.dto';
 import { JwtAuthGuard } from './guards/jwt-auth.guard';
+import type { AuthenticatedRequest } from './types/authenticated-request';
 import type { AuthenticatedUser } from './types/authenticated-user';
 
 @Controller('auth')
@@ -37,8 +38,8 @@ export class AuthController {
   @Post('logout')
   @UseGuards(JwtAuthGuard)
   @ExecutiveDashboardAccessible()
-  async logout(@Req() req: Request) {
-    return this.authService.logout((req as any).user, {
+  async logout(@Req() req: AuthenticatedRequest) {
+    return this.authService.logout(req.user, {
       ipAddress: req.ip,
       userAgent: req.headers['user-agent'],
     });
@@ -48,7 +49,7 @@ export class AuthController {
   @UseGuards(JwtAuthGuard)
   @ExecutiveDashboardAccessible()
   async refresh(@Req() req: Request) {
-    const token = (req as any).headers.authorization?.replace('Bearer ', '');
+    const token = req.headers.authorization?.replace('Bearer ', '');
     if (!token) {
       throw new Error('No token provided');
     }
@@ -72,8 +73,8 @@ export class AuthController {
   @Get('me')
   @UseGuards(JwtAuthGuard)
   @ExecutiveDashboardAccessible()
-  async getCurrentUser(@Req() req: Request) {
-    const user = (req as any).user;
+  async getCurrentUser(@Req() req: AuthenticatedRequest) {
+    const user = req.user;
     return {
       id: user.sub,
       email: user.email,
