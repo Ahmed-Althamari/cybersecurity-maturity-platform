@@ -105,6 +105,11 @@ export default function AssessmentDashboardPage() {
 
   const { maturityOverview, functionMaturity, topGaps, riskSummary, roadmapStatus } = dashboard;
 
+  // See pages/assessments/index.tsx's own comment -- Roadmap/Risk Register
+  // now 403 for an EXECUTIVE_VIEWER-only session (ExecutiveViewerScopeGuard).
+  const isExecutiveViewerOnly =
+    session.user.roles.length === 1 && session.user.roles[0] === 'EXECUTIVE_VIEWER';
+
   return (
     <>
       <Head>
@@ -147,12 +152,16 @@ export default function AssessmentDashboardPage() {
                   <Button variant="outline">View Responses</Button>
                 </Link>
               )}
-              <Link href="/roadmap">
-                <Button variant="outline">Roadmap</Button>
-              </Link>
-              <Link href="/risks">
-                <Button variant="outline">Risk Register</Button>
-              </Link>
+              {!isExecutiveViewerOnly && (
+                <>
+                  <Link href="/roadmap">
+                    <Button variant="outline">Roadmap</Button>
+                  </Link>
+                  <Link href="/risks">
+                    <Button variant="outline">Risk Register</Button>
+                  </Link>
+                </>
+              )}
               <Button variant="outline" onClick={() => signOut({ callbackUrl: '/auth/signin' })}>
                 Sign Out
               </Button>

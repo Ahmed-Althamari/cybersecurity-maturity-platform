@@ -3,6 +3,7 @@ import { ThrottlerGuard } from '@nestjs/throttler';
 import type { Request } from 'express';
 
 import { AuthService } from './auth.service';
+import { ExecutiveDashboardAccessible } from './decorators/executive-dashboard-accessible.decorator';
 import { LoginDto } from './dto/login.dto';
 import { JwtAuthGuard } from './guards/jwt-auth.guard';
 
@@ -26,8 +27,13 @@ export class AuthController {
     });
   }
 
+  // Session lifecycle (logout/refresh/me) is available to every
+  // authenticated role regardless of ExecutiveViewerScopeGuard's
+  // dashboard-only restriction -- an EXECUTIVE_VIEWER-only user must still
+  // be able to log out, refresh, or see who they are.
   @Post('logout')
   @UseGuards(JwtAuthGuard)
+  @ExecutiveDashboardAccessible()
   async logout(@Req() req: Request) {
     return this.authService.logout((req as any).user, {
       ipAddress: req.ip,
@@ -37,6 +43,7 @@ export class AuthController {
 
   @Post('refresh')
   @UseGuards(JwtAuthGuard)
+  @ExecutiveDashboardAccessible()
   async refresh(@Req() req: Request) {
     const token = (req as any).headers.authorization?.replace('Bearer ', '');
     if (!token) {
@@ -47,6 +54,7 @@ export class AuthController {
 
   @Get('me')
   @UseGuards(JwtAuthGuard)
+  @ExecutiveDashboardAccessible()
   async getCurrentUser(@Req() req: Request) {
     const user = (req as any).user;
     return {

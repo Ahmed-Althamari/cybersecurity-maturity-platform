@@ -2,6 +2,7 @@ import { UserRole } from '@cmmp/shared';
 import { Body, Controller, Delete, Get, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
 
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
+import { ExecutiveDashboardAccessible } from '../auth/decorators/executive-dashboard-accessible.decorator';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
@@ -33,7 +34,12 @@ export class AssessmentsController {
     return this.assessmentsService.create(user.tenantId, user.sub, dto);
   }
 
+  // An EXECUTIVE_VIEWER-only session needs this to pick which assessment's
+  // dashboard to open -- findOne() (the raw assessment with every item/
+  // answer/rationale) deliberately does NOT carry this decorator; that's
+  // exactly the "dashboard, not raw data" line docs/architecture.md draws.
   @Get()
+  @ExecutiveDashboardAccessible()
   async findAll(
     @Query('organisationId') organisationId: string | undefined,
     @Query('page') page: string | undefined,

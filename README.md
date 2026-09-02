@@ -314,7 +314,9 @@ role requirement).
 
 - **Tenant isolation** enforced in application code (every query scoped by
   `tenantId`, verified by a dedicated integration test suite)
-- **RBAC** via an 11-role model with per-endpoint `@Roles()` gates
+- **RBAC** via an 11-role model with per-endpoint `@Roles()` gates, plus a
+  dashboard-only scope guard for `EXECUTIVE_VIEWER` (a token holding only
+  that role is denied everything outside the executive dashboard)
 - **Input validation** server-side (`ValidationPipe` with
   `forbidNonWhitelisted`) and Zod schemas for framework definitions
 - **Output encoding** via React/Next.js's default JSX escaping

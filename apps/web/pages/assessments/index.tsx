@@ -42,6 +42,14 @@ export default function AssessmentsPage() {
     return null;
   }
 
+  // EXECUTIVE_VIEWER-only sessions are API-side restricted to the executive
+  // dashboard (ExecutiveViewerScopeGuard) -- Roadmap/Risk Register/Audit Log
+  // would all now 403 for them, so hide the dead-end links rather than let
+  // them click through to an error. A user who also holds a broader role
+  // keeps full nav, matching the guard's own multi-role treatment.
+  const isExecutiveViewerOnly =
+    session.user.roles.length === 1 && session.user.roles[0] === 'EXECUTIVE_VIEWER';
+
   return (
     <>
       <Head>
@@ -55,18 +63,22 @@ export default function AssessmentsPage() {
               <p className="text-slate-400">{session.user.name} &middot; {session.user.role}</p>
             </div>
             <div className="flex gap-2">
-              <Link href="/assessments/new">
-                <Button>New Assessment</Button>
-              </Link>
-              <Link href="/roadmap">
-                <Button variant="outline">Roadmap</Button>
-              </Link>
-              <Link href="/risks">
-                <Button variant="outline">Risk Register</Button>
-              </Link>
-              <Link href="/audit">
-                <Button variant="outline">Audit Log</Button>
-              </Link>
+              {!isExecutiveViewerOnly && (
+                <>
+                  <Link href="/assessments/new">
+                    <Button>New Assessment</Button>
+                  </Link>
+                  <Link href="/roadmap">
+                    <Button variant="outline">Roadmap</Button>
+                  </Link>
+                  <Link href="/risks">
+                    <Button variant="outline">Risk Register</Button>
+                  </Link>
+                  <Link href="/audit">
+                    <Button variant="outline">Audit Log</Button>
+                  </Link>
+                </>
+              )}
               {session.user.roles.includes('PLATFORM_ADMIN') && (
                 <Link href="/admin/settings">
                   <Button variant="outline">Settings</Button>

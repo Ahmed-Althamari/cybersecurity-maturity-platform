@@ -84,7 +84,7 @@ plainly rather than glossed over — this document is meant to be acted on.
 |---|---|---|
 | A user with one role reaches an endpoint gated to another role | `RolesGuard` checks the caller's full `roles[]` array against the route's `@Roles()` metadata — see the two real bugs already found and fixed in this exact mechanism (documented in `docs/security-architecture.md`, not repeated here). | Low today, given both were found and fixed with regression tests, but this guard is hand-written (not a framework-provided, independently-audited primitive) — any new controller must apply `@Roles()` at the method level, matching the established pattern, or it silently falls through to "no roles required." |
 | A user without an organisation assignment reaches organisation-scoped data anyway | `Organisation`-scoped queries filter by the resource's own `organisationId`, checked against organisations the caller's tenant/role legitimately has access to at the service layer (e.g. `AssessmentsService` checks organisation ownership against the caller's tenant before an assessment can even be created against it). | Low, but this is enforced per-service rather than by one central authorization primitive — a new resource type added without following the same pattern could reintroduce a gap. |
-| `EXECUTIVE_VIEWER` reaching non-dashboard endpoints it was conceptually meant to be excluded from | **Not enforced.** Confirmed by grep: no guard anywhere in `apps/api/src` references `UserRole.EXECUTIVE_VIEWER` specifically — it is only ever included in role lists identically to `READ_ONLY_VIEWER`. Functionally, today, `EXECUTIVE_VIEWER` **is** `READ_ONLY_VIEWER` with a different label. | Low as a security issue (it doesn't grant *more* access than a read-only viewer already has — see `docs/architecture.md`'s permission matrix aspiration vs. reality), but it's a real product/design gap if "executive-only, dashboard-only" access was an actual requirement. |
+| `EXECUTIVE_VIEWER` reaching non-dashboard endpoints it was conceptually meant to be excluded from | **Fixed.** `ExecutiveViewerScopeGuard`, composed into `JwtAuthGuard`, denies a token whose *only* role is `EXECUTIVE_VIEWER` on every endpoint except those marked `@ExecutiveDashboardAccessible()` (the dashboard sub-routes, the assessment list, and session lifecycle). Live-verified over real HTTP and in a real browser — see `docs/security-architecture.md`'s "RBAC" section for why a naive version of this (a global `APP_GUARD`) looked correct in every unit test yet did nothing in production. | Low. A user who also holds a broader role keeps that role's full access, matching every other guard in this codebase. |
 | Import endpoint used to create/modify resources beyond assessment items (path traversal via a crafted mapping, arbitrary field writes) | `ColumnMapping`'s target fields are restricted to a fixed, typed key set (`keyof MappedAssessmentRow`) — a mapping can only ever address one of those named fields, never an arbitrary Prisma field. | Low. |
 
 ## Summary of the highest-priority items
@@ -106,12 +106,14 @@ next:
 3. ~~Add pagination to the remaining list endpoints~~ — **done**: `/users`,
    `/assessments`, `/risks`, `/initiatives` all paginate now (`PaginatedResponse<T>`,
    default 20/page, capped at 100 — see `docs/api-reference.md`).
-4. **Decide whether `EXECUTIVE_VIEWER` needs real behavior** — either wire
-   it to a dashboard-only guard, or fold it into `READ_ONLY_VIEWER` and
-   remove the distinction rather than leave it silently unenforced. Now
-   the top unaddressed item.
+4. ~~Decide whether `EXECUTIVE_VIEWER` needs real behavior~~ — **done**:
+   wired to a real dashboard-only guard (`ExecutiveViewerScopeGuard`),
+   matching `docs/architecture.md`'s original "executive dashboard only"
+   design intent rather than folding the role away. See
+   `docs/security-architecture.md`'s "RBAC" section.
 5. **Token revocation** — at minimum a logout-side blacklist, ideally
-   short-lived access tokens plus a refresh-token rotation scheme.
+   short-lived access tokens plus a refresh-token rotation scheme. Now the
+   top unaddressed item.
 6. **A WAF/CDN-level rate limit for a real internet-facing deployment** —
    the new per-IP login throttle helps against a single attacking host,
    but not a distributed one; that class of mitigation belongs in front of

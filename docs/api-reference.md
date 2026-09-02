@@ -26,7 +26,18 @@ types; nothing here is speculative.
   (on top of the class-level `JwtAuthGuard`), the required roles are listed
   below. A route with **no roles listed** means any authenticated member of
   the tenant can call it — this is intentional for read endpoints
-  (dashboards, framework browsing) and is not an oversight.
+  (dashboards, framework browsing) and is not an oversight. The one
+  exception: a token whose *only* role is `EXECUTIVE_VIEWER` gets a 403
+  from every route below — including ones with no roles listed — unless
+  it's explicitly marked `@ExecutiveDashboardAccessible()`
+  (`ExecutiveViewerScopeGuard`, composed into `JwtAuthGuard`). That marked
+  set is exactly: `GET /assessments` (to pick one), the seven dashboard
+  sub-routes, and session lifecycle (`/auth/me`, `/auth/logout`,
+  `/auth/refresh`) — called out individually only where a route is
+  otherwise easy to mistake for being in scope (e.g. `GET /assessments/:id`,
+  the *raw* assessment, is not). A user who also holds a broader role
+  keeps that role's full access. See `docs/security-architecture.md`'s
+  "RBAC" section.
 - **Validation**: global `ValidationPipe({ whitelist: true,
   forbidNonWhitelisted: true, transform: true })` (`main.ts`) — any request
   body field not declared on the target DTO is rejected outright (mass-
@@ -66,11 +77,11 @@ Role name abbreviations used below match the `UserRole` enum exactly:
 | Method | Path | Roles | Notes |
 |---|---|---|---|
 | POST | `/users` | `PLATFORM_ADMIN`, `ORGANISATION_ADMIN` | Create a user in the caller's tenant. |
-| GET | `/users?page=&pageSize=` | any authenticated | Tenant-scoped list. **Paginated** — returns `PaginatedResponse<User>` (`{ data, total, page, pageSize, totalPages }`), default `pageSize` 20, capped at 100. |
-| GET | `/users/:id` | any authenticated | Tenant-scoped lookup; 404 across tenants. |
+| GET | `/users?page=&pageSize=` | any authenticated, **except EXECUTIVE_VIEWER** | Tenant-scoped list. **Paginated** — returns `PaginatedResponse<User>` (`{ data, total, page, pageSize, totalPages }`), default `pageSize` 20, capped at 100. |
+| GET | `/users/:id` | any authenticated, **except EXECUTIVE_VIEWER** | Tenant-scoped lookup; 404 across tenants. |
 | PATCH | `/users/:id` | `ORGANISATION_ADMIN`, `PLATFORM_ADMIN` | |
 | DELETE | `/users/:id` | `PLATFORM_ADMIN` | Soft delete (`deletedAt`). |
-| GET | `/users/:id/roles` | any authenticated | Lists the user's `UserRoleAssignment` rows. |
+| GET | `/users/:id/roles` | any authenticated, **except EXECUTIVE_VIEWER** | Lists the user's `UserRoleAssignment` rows. |
 | POST | `/users/:id/roles/:role` | `ORGANISATION_ADMIN`, `PLATFORM_ADMIN` | Grants an additional role. |
 | DELETE | `/users/:id/roles/:role` | `ORGANISATION_ADMIN`, `PLATFORM_ADMIN` | Revokes a role assignment. |
 
@@ -78,10 +89,10 @@ Role name abbreviations used below match the `UserRole` enum exactly:
 
 | Method | Path | Roles | Notes |
 |---|---|---|---|
-| GET | `/frameworks` | any authenticated | Every active framework in the tenant (name/version/description) — powers the assessment-creation framework picker. |
-| GET | `/frameworks/:slug` | any authenticated | The full hydrated `FrameworkTree` (Function → Category → Subcategory → Question) for the latest version of that slug. |
-| GET | `/frameworks/:slug/components` | any authenticated | The compact `buildFrameworkComponentDescriptor()` output (function list with color + counts) — for chart/nav rendering without hard-coding NIST CSF's six functions. |
-| POST | `/frameworks/validate` | any authenticated | Dry-run: validates a `FrameworkDefinition` (Zod shape + structural checks) without persisting anything. |
+| GET | `/frameworks` | any authenticated, **except EXECUTIVE_VIEWER** | Every active framework in the tenant (name/version/description) — powers the assessment-creation framework picker. |
+| GET | `/frameworks/:slug` | any authenticated, **except EXECUTIVE_VIEWER** | The full hydrated `FrameworkTree` (Function → Category → Subcategory → Question) for the latest version of that slug. |
+| GET | `/frameworks/:slug/components` | any authenticated, **except EXECUTIVE_VIEWER** | The compact `buildFrameworkComponentDescriptor()` output (function list with color + counts) — for chart/nav rendering without hard-coding NIST CSF's six functions. |
+| POST | `/frameworks/validate` | any authenticated, **except EXECUTIVE_VIEWER** | Dry-run: validates a `FrameworkDefinition` (Zod shape + structural checks) without persisting anything. |
 | POST | `/frameworks` | `PLATFORM_ADMIN`, `ORGANISATION_ADMIN` | Persists a new framework via `persistFrameworkDefinition()` (nested nested Prisma create of the whole tree). |
 
 ## Assessments (`/assessments`)
@@ -94,7 +105,7 @@ Role name abbreviations used below match the `UserRole` enum exactly:
 |---|---|---|---|
 | POST | `/assessments` | AUTHORS | Resolves the named framework/version, flattens every question, bulk-creates one `AssessmentItem` per question. |
 | GET | `/assessments?organisationId=&page=&pageSize=` | any authenticated | Organisation-scoped list. **Paginated** — `PaginatedResponse<AssessmentSummary>`, default `pageSize` 20, capped at 100. |
-| GET | `/assessments/:id` | any authenticated | Includes `items[]` (see `AssessmentItemDetail`). |
+| GET | `/assessments/:id` | any authenticated, **except EXECUTIVE_VIEWER** | Includes `items[]` (see `AssessmentItemDetail`) — raw item-level data, not the aggregated dashboard, so it's outside that role's scope (see the "Role gating" note above). |
 | PATCH | `/assessments/:id` | AUTHORS | Name/description/date only — item edits go through the item endpoint below. |
 | DELETE | `/assessments/:id` | ARCHIVERS | Soft delete. |
 | PATCH | `/assessments/:id/items/:itemId` | AUTHORS | Per-item update (maturity, risk, control status, rationale, evidence, owner, due date). Blocked once the assessment is `SUBMITTED`/`APPROVED`/`ARCHIVED` — reopen first. First edit on a `DRAFT` assessment auto-transitions it to `IN_PROGRESS`. Recomputes and persists the assessment's `currentMaturity`/`targetMaturity`/`maturityGap`/`completionPercentage` in the same write. |
@@ -102,14 +113,15 @@ Role name abbreviations used below match the `UserRole` enum exactly:
 | POST | `/assessments/:id/approve` | APPROVERS | `SUBMITTED → APPROVED`. |
 | POST | `/assessments/:id/reopen` | AUTHORS | `SUBMITTED`/`APPROVED → IN_PROGRESS`, re-enabling item edits. |
 | POST | `/assessments/:id/archive` | ARCHIVERS | Reachable from any non-terminal state. |
-| GET | `/assessments/:id/history` | any authenticated | Every `AssessmentHistory` row, versioned/timestamped. |
-| GET | `/assessments/:id/scores` | any authenticated | `?levels=function,category,subcategory&minGap=` — the full hierarchical score plus gap-analysis list. |
+| GET | `/assessments/:id/history` | any authenticated, **except EXECUTIVE_VIEWER** | Every `AssessmentHistory` row, versioned/timestamped. |
+| GET | `/assessments/:id/scores` | any authenticated, **except EXECUTIVE_VIEWER** | `?levels=function,category,subcategory&minGap=` — the full hierarchical score plus gap-analysis list. |
 
 ## Assessment Dashboard (`/assessments/:id/dashboard`) — no extra role gate
 
-All six of these require only `JwtAuthGuard` — any authenticated tenant
+All seven of these require only `JwtAuthGuard` — any authenticated tenant
 member can view an assessment's dashboard; there is no `@Roles()` on this
-controller.
+controller. This is also the entire accessible surface for an
+`EXECUTIVE_VIEWER`-only token (see the footnote above).
 
 | Method | Path | Returns |
 |---|---|---|
@@ -147,8 +159,8 @@ Roles on all three routes: `PLATFORM_ADMIN`, `ORGANISATION_ADMIN`, `CISO`,
 | Method | Path | Roles | Notes |
 |---|---|---|---|
 | POST | `/risks` | AUTHORS | `inherentRiskScore` always server-computed (`likelihood × impact`); `riskLevel` auto-suggested unless supplied. |
-| GET | `/risks?sortBy=score&organisationId=&riskLevel=&status=&assessmentItemId=&page=&pageSize=` | any authenticated | Default sort: `inherentRiskScore` descending. **Paginated** — `PaginatedResponse<Risk>`, default `pageSize` 20, capped at 100. |
-| GET | `/risks/:id` | any authenticated | Includes linked control (subcategory code/question) and linked initiatives. |
+| GET | `/risks?sortBy=score&organisationId=&riskLevel=&status=&assessmentItemId=&page=&pageSize=` | any authenticated, **except EXECUTIVE_VIEWER** | Default sort: `inherentRiskScore` descending. **Paginated** — `PaginatedResponse<Risk>`, default `pageSize` 20, capped at 100. |
+| GET | `/risks/:id` | any authenticated, **except EXECUTIVE_VIEWER** | Includes linked control (subcategory code/question) and linked initiatives. |
 | PATCH | `/risks/:id` | AUTHORS | Recomputes score/level if likelihood/impact change. |
 | DELETE | `/risks/:id` | DELETERS | Hard-scoped soft delete. |
 | POST | `/risks/:id/initiatives/:initiativeId` | AUTHORS | Links an existing `RemediationInitiative` (verified to belong to the caller's own tenant first). |
@@ -162,9 +174,9 @@ Roles on all three routes: `PLATFORM_ADMIN`, `ORGANISATION_ADMIN`, `CISO`,
 | Method | Path | Roles | Notes |
 |---|---|---|---|
 | POST | `/initiatives` | AUTHORS | Manual creation (in addition to `/roadmap/generate` above). |
-| GET | `/initiatives?organisationId=&status=&sortBy=&page=&pageSize=` | any authenticated | Organisation-scoped list. **Paginated** — `PaginatedResponse<RemediationInitiative>`, default `pageSize` 20, capped at 100. The risk-detail page's initiative picker calls this with `pageSize=100` (the max) to approximate "all of them" for a dropdown — a tenant with more than 100 initiatives will have some missing from that picker specifically, a known limitation. |
-| GET | `/initiatives/timeline` | any authenticated | Buckets every non-completed initiative into `next3Months`/`next6Months`/`next12Months`/`beyondOrUnscheduled` by `targetCompletionDate`. |
-| GET | `/initiatives/:id` | any authenticated | |
+| GET | `/initiatives?organisationId=&status=&sortBy=&page=&pageSize=` | any authenticated, **except EXECUTIVE_VIEWER** | Organisation-scoped list. **Paginated** — `PaginatedResponse<RemediationInitiative>`, default `pageSize` 20, capped at 100. The risk-detail page's initiative picker calls this with `pageSize=100` (the max) to approximate "all of them" for a dropdown — a tenant with more than 100 initiatives will have some missing from that picker specifically, a known limitation. |
+| GET | `/initiatives/timeline` | any authenticated, **except EXECUTIVE_VIEWER** | Buckets every non-completed initiative into `next3Months`/`next6Months`/`next12Months`/`beyondOrUnscheduled` by `targetCompletionDate`. |
+| GET | `/initiatives/:id` | any authenticated, **except EXECUTIVE_VIEWER** | |
 | PATCH | `/initiatives/:id` | AUTHORS | Any of the five `status` values (`PLANNED`/`IN_PROGRESS`/`COMPLETED`/`BLOCKED`/`ON_HOLD`) — a plain field, not an audited state-machine like `Assessment.status`. |
 | DELETE | `/initiatives/:id` | DELETERS | |
 | POST | `/initiatives/:id/risks/:riskId` | AUTHORS | Same many-to-many as the risk-side endpoint, from the initiative side. |

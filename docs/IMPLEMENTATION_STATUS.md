@@ -1600,6 +1600,86 @@ process/checklist item to an enforced, code-level guarantee.
   `/admin/settings`), not something every deployment must set, so failing
   the whole app's startup over it would be wrong.
 
+### Post-Phase-17: `EXECUTIVE_VIEWER` Wired to a Real Dashboard-Only Guard
+Continuing through the ranked gap list (user's explicit direction): item #4
+-- `docs/architecture.md`'s original design lists `EXECUTIVE_VIEWER` as
+"Executive dashboard only," but no guard anywhere referenced that role
+specifically; it behaved identically to `READ_ONLY_VIEWER`. Decided to
+build the real restriction (matching the documented product intent) rather
+than fold the role away, since it doesn't grant *more* access than a
+read-only viewer already has today -- only less, once enforced.
+
+- [x] New `ExecutiveDashboardAccessible()` decorator (metadata-only, mirrors
+      the existing `@Roles()` pattern) marks a handler as reachable by an
+      `EXECUTIVE_VIEWER`-only token. Applied to exactly: all seven
+      `DashboardController` routes (that whole controller *is* the
+      executive dashboard), `AssessmentsController.findAll` (`GET
+      /assessments`, needed to pick which assessment's dashboard to open --
+      deliberately NOT applied to `findOne`, the raw item-level assessment,
+      which is exactly the "dashboard vs. raw data" line the design draws),
+      and `AuthController`'s `logout`/`refresh`/`getCurrentUser` (session
+      lifecycle stays available to every authenticated role regardless).
+- [x] **Found and fixed a real bug in this feature's own first
+      implementation, via live testing, not unit testing**: the natural
+      first design was a `RolesGuard`-style deny-by-default guard
+      registered globally (`APP_GUARD` in `app.module.ts`). Every unit test
+      for it passed (mocking `request.user` directly proves the guard's own
+      logic works in isolation) -- but NestJS runs global guards *before*
+      controller-scoped ones, and `JwtAuthGuard` (which populates
+      `request.user`) is controller-scoped. Booting the real API and
+      hitting it with a real EXECUTIVE_VIEWER-only JWT over real HTTP
+      showed `GET /assessments/:id` and `GET /users` both returning a real
+      `200`, not the intended `403` -- the guard was silently never firing
+      in production. Fixed by moving the check into `JwtAuthGuard` itself
+      (`canActivate` calls `super.canActivate()` first, then composes
+      `ExecutiveViewerScopeGuard`'s logic, guaranteeing the correct order by
+      construction) rather than a second guard a future controller could
+      forget to attach. `ExecutiveViewerScopeGuard` stays its own,
+      independently unit-tested class; it's just no longer registered as a
+      global guard.
+- [x] Frontend: `pages/assessments/index.tsx` and `pages/assessments/[id].tsx`
+      hide the Roadmap/Risk Register/Audit Log nav links for an
+      `EXECUTIVE_VIEWER`-only session (they'd now 403), mirroring the
+      existing `PLATFORM_ADMIN`-only Settings link pattern. A user who also
+      holds a broader role sees the full nav, matching the guard's own
+      multi-role treatment.
+- [x] Tests: 6 new tests in `executive-viewer-scope.guard.spec.ts` (the
+      guard's own logic, mocking `request.user` directly) plus 9 in a new
+      `executive-dashboard-accessible.wiring.spec.ts` regression suite
+      asserting the *exact* decorated-handler allowlist (would catch a
+      future refactor silently widening or narrowing it) -- but see above:
+      neither of those would have caught the ordering bug on their own.
+      170 tests total in `apps/api`, up from 161.
+- [x] **Live-verified end-to-end against the real stack, which is what
+      actually caught the ordering bug above**: created a temporary
+      `EXECUTIVE_VIEWER` user via the real API (`POST /users` +
+      `POST /users/:id/roles/EXECUTIVE_VIEWER`), logged in for a real JWT,
+      and hit every endpoint in this document over real HTTP -- confirmed
+      `200` from `GET /assessments`, all seven dashboard sub-routes,
+      `/auth/me`, and `/auth/logout`; confirmed `403` from
+      `GET /assessments/:id`, `/assessments/:id/history`, `/risks`,
+      `/users`, `/initiatives/timeline`, `/audit-events/summary`, and
+      `/frameworks`. Assigned a second role (`GRC_MANAGER`) to the same
+      user and confirmed full access returned, proving the multi-role
+      carve-out works. Separately confirmed a `CISO` login was completely
+      unaffected (no regression for every other role). Added a new
+      `executive-viewer-scope.integration-spec.ts` (real HTTP, real
+      Postgres, following `tenant-security.integration-spec.ts`'s pattern)
+      to keep this behavior pinned going forward -- 15 integration tests
+      total, up from 11. Then live-verified the frontend too, in a real
+      browser against the real standalone production build: nav correctly
+      shows only "Sign Out," the dashboard itself renders fully (KPIs,
+      radar chart, heatmap, gap table), and a direct `/risks` visit shows
+      the guard's own error message gracefully instead of crashing.
+      Deleted the temporary test user afterward.
+
+  **Not built this pass**: hiding the "Generate Roadmap from Gaps" button
+  on the dashboard page for this role -- it already 403s for
+  `EXECUTIVE_VIEWER` via the pre-existing `RolesGuard`/`@Roles()` on
+  `RoadmapController`, unrelated to and unchanged by this pass, and
+  matches how the same button already behaves for `READ_ONLY_VIEWER`
+  today; out of this gap's scope.
+
 ## Known Issues 🐛
 
 - ~~Root `.eslintrc.json` references missing ESLint plugins~~ — fixed in
@@ -1811,13 +1891,21 @@ None recorded yet
     and the web app now refuse to start with `NODE_ENV=production` if
     either secret is unset or equals any known placeholder, live-verified
     against the real compiled `dist/main.js` and the real standalone
-    Next.js server under all four scenarios. The remaining ranked findings
-    from `docs/threat-model.md`'s "Summary of the highest-priority items"
-    are, in order: `EXECUTIVE_VIEWER` never actually being distinguished
-    from `READ_ONLY_VIEWER` by any guard (now the top unaddressed item),
-    token revocation/rotation, and a WAF/CDN-level rate limit for a
-    distributed (many-IP) attack the new per-IP login throttle can't
-    address alone.
+    Next.js server under all four scenarios.
+15. ~~`EXECUTIVE_VIEWER` never actually being distinguished from
+    `READ_ONLY_VIEWER` by any guard~~ — **done** (see "Post-Phase-17:
+    `EXECUTIVE_VIEWER` Wired to a Real Dashboard-Only Guard" above): a
+    token whose only role is `EXECUTIVE_VIEWER` now gets a real 403 outside
+    the dashboard/assessment-list/session-lifecycle surface, live-verified
+    over real HTTP and in a real browser. Along the way, found and fixed a
+    real bug in the fix's own first draft: a naive global-guard
+    implementation looked correct in every unit test and silently did
+    nothing in production, caught only by testing against the real running
+    app. The remaining ranked findings from `docs/threat-model.md`'s
+    "Summary of the highest-priority items" are, in order: token
+    revocation/rotation (now the top unaddressed item) and a WAF/CDN-level
+    rate limit for a distributed (many-IP) attack the new per-IP login
+    throttle can't address alone.
 
 ## Contact & Questions
 

@@ -100,12 +100,21 @@ continuously checks this codebase.
     see assessments belonging to organisations you're a member of), not by
     a specific role on top of that. `READ_ONLY_VIEWER` and
     `EXECUTIVE_VIEWER` exist specifically to represent "can see everything,
-    can write nothing" and "can see only the executive dashboard" — but the
-    latter distinction (limiting `EXECUTIVE_VIEWER` to *only* dashboard
-    endpoints) is not currently enforced anywhere; that role today behaves
-    identically to `READ_ONLY_VIEWER` from the API's point of view. This is
-    a real gap, not a design decision — tracked here rather than silently
-    left undocumented.
+    can write nothing" and "can see only the executive dashboard."
+    **Fixed**: the latter distinction is now enforced by
+    `ExecutiveViewerScopeGuard`, composed into `JwtAuthGuard` itself (see
+    that file's own comment for why it has to live there rather than as a
+    separate global guard — the naive version of this fix looked correct
+    in every unit test and still let an EXECUTIVE_VIEWER-only token read
+    raw assessment data and the full user list over real HTTP, caught only
+    by a live integration test, not by mocked ones). A token whose *only*
+    role is `EXECUTIVE_VIEWER` gets a 403 from every endpoint except the
+    ones explicitly marked `@ExecutiveDashboardAccessible()` — the seven
+    `DashboardController` routes, `GET /assessments` (to pick one), and
+    session lifecycle (`/auth/me`, `/auth/logout`, `/auth/refresh`). A user
+    who also holds a broader role (e.g. `GRC_MANAGER`) keeps that role's
+    full access, matching how every other guard in this codebase treats
+    multi-role users.
 
 ## Tenant isolation
 
@@ -325,8 +334,8 @@ elsewhere in this repo's docs:
    larger-scope feature, not the credential-stuffing gap this item
    originally flagged.
 3. **No CSP/HSTS/Referrer-Policy headers**, no `helmet`.
-4. **`EXECUTIVE_VIEWER`'s intended scope (dashboards only) isn't actually
-   enforced** — it behaves identically to `READ_ONLY_VIEWER` today.
+4. ~~`EXECUTIVE_VIEWER`'s intended scope (dashboards only) isn't actually
+   enforced~~ — **fixed**: see "RBAC" above and `ExecutiveViewerScopeGuard`.
 5. **Audit log immutability is application-level only** — no database
    grant revokes `UPDATE`/`DELETE` on `audit_events` for the app's own
    database role.
