@@ -228,13 +228,32 @@ middleware that injects a tenant filter automatically):
   its own `LOGIN`/`LOGOUT` directly, since `login()` has no
   `request.user` yet at request time and `logout()` doesn't fit a
   CRUD-shaped action.
-- **Immutability**: `AuditService` exposes only `log()` (create) and read
-  methods (`findAll()`, `getSummary()`) — there is no update or delete
-  path anywhere in the codebase, and no other service imports
-  `prisma.auditEvent` directly. This is an application-level guarantee,
-  not a database-level one (no Postgres `REVOKE UPDATE/DELETE` grant is
-  in place) — a determined operator with direct database access could
-  still tamper with the table.
+- **Immutability, enforced at both levels**: `AuditService` exposes only
+  `log()` (create) and read methods (`findAll()`, `getSummary()`) — there
+  is no update or delete path anywhere in the codebase, and no other
+  service imports `prisma.auditEvent` directly. That was previously an
+  application-level guarantee only. **Fixed**: a Postgres trigger
+  (`audit_events_no_update`, `packages/database/prisma/migrations/
+  *_audit_events_immutable_update`) now rejects any `UPDATE` against
+  `audit_events` unconditionally, for every role and every connection —
+  no bypass flag, no exception. `REVOKE UPDATE/DELETE` grants weren't used
+  instead because `cmmp_user` (the same role that runs migrations and the
+  app's own runtime queries — see "Secrets management" below) *owns* the
+  table it creates, and Postgres table owners bypass GRANT/REVOKE on their
+  own objects entirely; a trigger is the mechanism that actually works
+  without introducing a second, more-restricted database role (a real,
+  larger architectural change to the single-role setup this repo's
+  docker-compose/`.env.example` currently use). Deliberately scoped to
+  `UPDATE` only, not `DELETE`: `AuditEvent.tenantId` has `onDelete:
+  Cascade`, so deleting a `Tenant` (a real, legitimate operation — account
+  offboarding, GDPR erasure) cascades into deleting its `audit_events` rows
+  through the same `DELETE` machinery a row-level trigger can't
+  distinguish from a direct, illegitimate `DELETE` against this table —
+  found by tracing the schema's own cascade behavior before writing the
+  migration, not by breaking tenant deletion first and debugging backward.
+  Live-verified: a direct `UPDATE` via Prisma is rejected with the row
+  left unchanged; a direct `DELETE` still succeeds; deleting a throwaway
+  tenant still cascades into its audit events successfully.
 - **Fail-safe, never fail-open on the wrong axis**: `log()` truncates
   oversized `newValue` payloads (5,000-char cap) and never throws — a
   failed audit write is caught, logged via `Logger.error`, and swallowed,
@@ -409,9 +428,8 @@ elsewhere in this repo's docs:
    "HTTP-level hardening" above.
 4. ~~`EXECUTIVE_VIEWER`'s intended scope (dashboards only) isn't actually
    enforced~~ — **fixed**: see "RBAC" above and `ExecutiveViewerScopeGuard`.
-5. **Audit log immutability is application-level only** — no database
-   grant revokes `UPDATE`/`DELETE` on `audit_events` for the app's own
-   database role.
+5. ~~Audit log immutability is application-level only~~ — **fixed**: see
+   "Audit logging" above.
 6. **Trivy and ZAP are report-only**, not yet enforcing (deliberately, on
    a documented timeline — see `docs/devsecops-pipeline.md`).
 7. **No file-upload evidence scanning** — the `Evidence` model exists but

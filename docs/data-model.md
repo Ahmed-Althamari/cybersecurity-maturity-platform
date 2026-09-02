@@ -221,6 +221,16 @@ User   (1) ──── (N) AuditEvent
   `AuditEvent.user` uses `onDelete: Restrict` — deliberately, so a user row
   can never be hard-deleted out from under its own audit trail (soft
   deletion via `deletedAt` is always the path for a departing user).
+  `AuditEvent.tenant`, by contrast, uses `onDelete: Cascade` — deleting a
+  `Tenant` deletes its audit trail with it, which is why the DB-level
+  immutability trigger below is scoped to `UPDATE` only, not `DELETE`.
+- A Postgres trigger (`audit_events_no_update`, added by a raw-SQL
+  migration Prisma's schema DSL can't express — `packages/database/prisma/
+  migrations/*_audit_events_immutable_update`) rejects any `UPDATE`
+  against this table unconditionally, for every role. See
+  `docs/security-architecture.md`'s "Audit logging" section for the full
+  reasoning, including why `DELETE` is deliberately left alone.
+
   See `docs/security-architecture.md` for how logging is wired
   (`AuditInterceptor`) and its immutability guarantees.
 

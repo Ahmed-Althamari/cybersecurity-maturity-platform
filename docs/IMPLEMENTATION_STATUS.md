@@ -1818,6 +1818,64 @@ CSP, HSTS, or Referrer-Policy at all, and `helmet` wasn't in use.
       pages, capturing browser console output and finding zero CSP
       violations.
 
+### Post-Phase-17: Audit Log Immutability at the Database Level
+Continuing through the remaining gaps in `docs/security-architecture.md`'s
+"Known gaps" list: `AuditService` only ever exposed `log()`/read
+methods -- a real application-level guarantee, but not a database-level
+one. A determined actor with the app's own database credentials (a
+compromised app process, a SQL-injection-class bug, direct psql access
+using the same connection string) could still `UPDATE audit_events`
+directly, bypassing the application entirely.
+
+- [x] **Investigated the "obvious" fix first and found it doesn't work
+      for this schema**: `REVOKE UPDATE/DELETE` grants require a database
+      role distinct from the table's owner -- Postgres owners bypass
+      GRANT/REVOKE on their own objects unconditionally. This repo's
+      `cmmp_user` (docker-compose.yml/.env.example) is both the migration
+      role (creates and owns every table) and the app's own runtime
+      connection role -- the same credentials for both. A real GRANT/
+      REVOKE fix would require introducing a second, more-restricted
+      database role and updating every environment's connection string --
+      a materially larger architectural change than this gap warrants on
+      its own.
+- [x] Built it as a Postgres trigger instead
+      (`audit_events_no_update`, a raw-SQL migration Prisma's schema DSL
+      can't express -- `packages/database/prisma/migrations/
+      *_audit_events_immutable_update`): `BEFORE UPDATE ON audit_events`
+      raises an exception unconditionally, for every role, with no bypass
+      flag (a bypass the app's own credentials could flip would defeat
+      the point).
+- [x] **Traced the schema's own cascade behavior before writing the
+      migration, not after breaking something**: `AuditEvent.tenantId` has
+      `onDelete: Cascade` -- deleting a `Tenant` (a real, legitimate
+      operation: account offboarding, GDPR erasure) cascades into deleting
+      its `audit_events` rows through the same `DELETE` machinery a
+      row-level trigger can't distinguish from a direct, illegitimate
+      `DELETE` against this table. A blanket trigger blocking both UPDATE
+      and DELETE would have broken tenant deletion (and, concretely, two
+      existing integration tests' own cleanup, plus `seed.ts`'s
+      `auditEvent.deleteMany()` reset step). Scoped to `UPDATE` only --
+      no application code path ever updates an audit event anyway (grep
+      confirmed it), so this is a purely additive guarantee with nothing
+      to break.
+- [x] Tests: new `audit-immutability.integration-spec.ts` (2 tests: a
+      direct `UPDATE` is rejected and the row is confirmed unchanged; a
+      direct `DELETE` still succeeds, proving the scoping is exactly what
+      was intended). 21 integration tests total (up from 19).
+- [x] Live-verified beyond the automated tests: ran `npm run db:seed`
+      end-to-end against the real local Postgres with the trigger in
+      place, confirming the reseed flow (which deletes and recreates audit
+      events) still completes successfully; separately created a
+      throwaway tenant/user/audit-event via a real Prisma script and
+      confirmed deleting the tenant still cascades into its audit events
+      without error.
+
+  **Not built this pass**: a second, restricted database role for true
+  `REVOKE`-based immutability (see the investigation above for why this
+  would be a materially larger, separate architectural change); blocking
+  `DELETE` as well (deliberately out of scope -- see the cascade reasoning
+  above).
+
 ## Known Issues 🐛
 
 - ~~Root `.eslintrc.json` references missing ESLint plugins~~ — fixed in

@@ -322,7 +322,9 @@ role requirement).
 - **Output encoding** via React/Next.js's default JSX escaping
 - **Parameterized queries** throughout (Prisma), preventing SQL injection
 - **CSV/Excel formula-injection sanitization** on spreadsheet import
-- **Audit logging** of all authenticated mutating actions plus login/logout
+- **Audit logging** of all authenticated mutating actions plus login/logout,
+  immutable at the database level (a Postgres trigger rejects any `UPDATE`
+  against `audit_events` unconditionally, for every role)
 - **CSP/HSTS/Referrer-Policy headers** — `helmet` on the API (a maximal
   `default-src 'none'` CSP, since it's a pure JSON API), a tuned CSP plus
   the same headers on the web app (`next.config.js`)
