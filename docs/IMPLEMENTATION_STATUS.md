@@ -1759,6 +1759,65 @@ need to change shape.
   revocation-epoch column would be a natural, small extension if a real
   "deactivate this account everywhere, right now" requirement emerges.
 
+### Post-Phase-17: CSP/HSTS/Referrer-Policy Headers (helmet)
+Continuing through the remaining gaps in `docs/security-architecture.md`'s
+"Known gaps" list (user's explicit direction, working through all of them
+one at a time): a hand-rolled three-header `main.ts` middleware
+(`X-Content-Type-Options`, `X-Frame-Options`, `X-XSS-Protection`) had no
+CSP, HSTS, or Referrer-Policy at all, and `helmet` wasn't in use.
+
+- [x] Installed `helmet` in `apps/api`; `main.ts`'s middleware now sets a
+      maximal CSP (`default-src`/`frame-ancestors: 'none'` -- this is a
+      pure JSON API that never renders HTML of its own, so blocking
+      everything by default costs nothing and only helps if a response is
+      ever misread as HTML by a buggy client), HSTS
+      (`max-age=31536000; includeSubDomains`), `Referrer-Policy:
+      no-referrer`, plus helmet's other bonus headers
+      (`Cross-Origin-Opener-Policy`, `Cross-Origin-Resource-Policy`,
+      `X-DNS-Prefetch-Control`, etc.). `X-XSS-Protection` deliberately
+      not re-added -- deprecated, removed from helmet's own defaults
+      since v6, superseded by the CSP.
+- [x] `apps/web/next.config.js`'s existing headers (already had
+      `X-Content-Type-Options`, `X-Frame-Options`, `X-XSS-Protection`, and
+      HSTS from an earlier phase, undocumented until now) gained the two
+      that were actually missing: `Content-Security-Policy`
+      (`default-src 'self'`, `script-src 'self'` with no
+      `unsafe-inline`/`unsafe-eval`, `connect-src 'self'
+      <NEXT_PUBLIC_API_URL>` so the browser's direct-to-API fetch calls
+      aren't blocked) and `Referrer-Policy: strict-origin-when-cross-origin`.
+      `X-XSS-Protection` dropped here too, for the same reason.
+- [x] **Found a real constraint only by testing against the actual
+      dashboard, not by reasoning about it**: a first-draft strict
+      `style-src 'self'` (no exceptions) broke chart rendering --
+      Recharts (the library behind the maturity radar/gap-bar/heatmap
+      components) renders inline `style=""` attributes directly on SVG
+      elements, not just external CSS. Fixed by adding `'unsafe-inline'`
+      to `style-src` specifically (not `script-src`, which stays locked
+      to `'self'` with no exceptions -- that's the directive that
+      actually matters for stopping injected-script XSS).
+- [x] Extracted `apps/api/test/test-app.ts`, a shared `createTestApp()`
+      used by all five integration spec files (previously each one
+      hand-copied its own `setGlobalPrefix`/`ValidationPipe` setup, and
+      none of them had ever applied CORS or helmet at all). This wasn't
+      optional cleanup: writing a first draft of the new
+      `security-headers.integration-spec.ts` the old way (its own
+      inline setup, not calling `helmet()`) produced a real, if
+      short-lived, false failure -- the test asserted on headers a
+      hand-assembled test app never actually applied, exactly the kind of
+      drift a shared helper prevents by construction.
+- [x] Tests: new `security-headers.integration-spec.ts` (1 test, asserting
+      CSP/HSTS/Referrer-Policy/legacy headers on a real HTTP response from
+      the real app). 19 integration tests total (up from 18); unit test
+      count unchanged (175) since this is a bootstrap/middleware-only
+      change with no service logic to unit-test.
+- [x] Live-verified end-to-end: `curl -I` against both the real compiled
+      API and the real standalone web server, confirming every header's
+      exact value; a Playwright click-through of sign-in, the assessments
+      list, the executive dashboard (with its Recharts SVG charts --
+      confirmed 7 `<svg>` elements rendered), risks, roadmap, and audit
+      pages, capturing browser console output and finding zero CSP
+      violations.
+
 ## Known Issues 🐛
 
 - ~~Root `.eslintrc.json` references missing ESLint plugins~~ — fixed in

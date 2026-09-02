@@ -23,6 +23,26 @@ const nextConfig = {
     unoptimized: process.env.NODE_ENV === "development",
   },
   headers: async () => {
+    // The browser calls the API directly (NEXT_PUBLIC_API_URL), not via
+    // this server, so connect-src must allow it explicitly or every
+    // api.ts fetch() call would be blocked. style-src needs 'unsafe-inline'
+    // for the chart components (Recharts renders inline `style=""`
+    // attributes on SVG elements, not just external CSS) -- script-src
+    // stays locked to 'self' with no such exception, which is the
+    // directive that actually matters for stopping injected-script XSS.
+    const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:3001";
+    const csp = [
+      "default-src 'self'",
+      "script-src 'self'",
+      "style-src 'self' 'unsafe-inline'",
+      "img-src 'self' data:",
+      "font-src 'self'",
+      `connect-src 'self' ${apiUrl}`,
+      "frame-ancestors 'none'",
+      "base-uri 'self'",
+      "form-action 'self'",
+    ].join("; ");
+
     return [
       {
         source: "/:path*",
@@ -36,12 +56,16 @@ const nextConfig = {
             value: "DENY",
           },
           {
-            key: "X-XSS-Protection",
-            value: "1; mode=block",
-          },
-          {
             key: "Strict-Transport-Security",
             value: "max-age=31536000; includeSubDomains",
+          },
+          {
+            key: "Referrer-Policy",
+            value: "strict-origin-when-cross-origin",
+          },
+          {
+            key: "Content-Security-Policy",
+            value: csp,
           },
         ],
       },

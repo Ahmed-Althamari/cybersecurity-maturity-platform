@@ -1,6 +1,6 @@
-import { INestApplication, ValidationPipe } from '@nestjs/common';
-import { Test } from '@nestjs/testing';
-import { AppModule } from '../src/app.module';
+import { INestApplication } from '@nestjs/common';
+
+import { createTestApp } from './test-app';
 
 /**
  * Verifies real token revocation end-to-end (docs/threat-model.md's
@@ -18,17 +18,7 @@ describe('Token revocation (integration)', () => {
   const demoPassword = process.env.DEMO_USER_PASSWORD || 'DemoPassword123!';
 
   beforeAll(async () => {
-    const moduleRef = await Test.createTestingModule({ imports: [AppModule] }).compile();
-    app = moduleRef.createNestApplication();
-    app.setGlobalPrefix('api/v1');
-    app.useGlobalPipes(
-      new ValidationPipe({
-        whitelist: true,
-        forbidNonWhitelisted: true,
-        transform: true,
-        transformOptions: { enableImplicitConversion: true },
-      }),
-    );
+    app = await createTestApp();
     await app.listen(0);
     const address = app.getHttpServer().address();
     baseUrl = `http://127.0.0.1:${address.port}/api/v1`;

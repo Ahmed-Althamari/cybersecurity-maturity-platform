@@ -323,6 +323,9 @@ role requirement).
 - **Parameterized queries** throughout (Prisma), preventing SQL injection
 - **CSV/Excel formula-injection sanitization** on spreadsheet import
 - **Audit logging** of all authenticated mutating actions plus login/logout
+- **CSP/HSTS/Referrer-Policy headers** — `helmet` on the API (a maximal
+  `default-src 'none'` CSP, since it's a pure JSON API), a tuned CSP plus
+  the same headers on the web app (`next.config.js`)
 - **Rate limiting on `POST /auth/login`** — per-IP, via `@nestjs/throttler`
   (`AUTH_RATE_LIMIT_MAX_ATTEMPTS`/`AUTH_RATE_LIMIT_WINDOW_MS`)
 - **Fail-fast startup check for `JWT_SECRET`/`NEXTAUTH_SECRET`** — both the

@@ -252,12 +252,35 @@ middleware that injects a tenant filter automatically):
 
 - **CORS**: `app.enableCors({ origin: process.env.CORS_ORIGIN, credentials:
   true, ... })` — a single configured origin, not a wildcard.
-- **Manually-set security headers** (`main.ts`): `X-Content-Type-Options:
-  nosniff`, `X-Frame-Options: DENY`, `X-XSS-Protection: 1; mode=block`.
-  There is **no `helmet` package** in use and **no Content-Security-Policy,
-  HSTS, or Referrer-Policy header set** — these three headers are the
-  extent of it today. This is a real, honest gap: adding `helmet` (or the
-  equivalent headers by hand) would be a low-effort improvement.
+- **Security headers via `helmet`** (`main.ts`, and `test/test-app.ts`'s
+  identical copy for integration tests): Content-Security-Policy
+  (`default-src`/`frame-ancestors: 'none'` — this is a pure JSON API that
+  never renders HTML or serves a script/stylesheet of its own, so the
+  policy is deliberately maximal, blocking everything on the off chance a
+  response is ever misread as HTML by a buggy client), HSTS (`max-age`
+  31536000, `includeSubDomains`), `Referrer-Policy: no-referrer`,
+  `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`. Previously a
+  hand-rolled three-header middleware with no CSP, HSTS, or
+  Referrer-Policy at all — a real, documented gap, now fixed. Live-verified
+  both directly (`curl -I` against every header) and via a Playwright
+  click-through of every major `apps/web` page (sign-in, the dashboard
+  with its Recharts SVG charts, risks, roadmap, audit) with zero CSP
+  console violations — `apps/web/next.config.js`'s own headers (below)
+  needed `style-src 'self' 'unsafe-inline'` for Recharts' inline `style=""`
+  SVG attributes, verified live rather than assumed safe.
+  `X-XSS-Protection` is deliberately **not** re-added: it's a deprecated
+  header removed from every modern browser's actual XSS filter, dropped
+  from helmet's own defaults since v6, and superseded by the CSP above.
+- **`apps/web`'s own headers** (`next.config.js`'s `headers()`, applied to
+  every route): the same set, tuned for a browser-rendered app instead of
+  a pure API — `default-src 'self'`, `script-src 'self'` (no
+  `unsafe-inline`/`unsafe-eval` — the directive that actually matters for
+  stopping injected-script XSS), `style-src 'self' 'unsafe-inline'`
+  (Recharts renders inline `style=""` attributes on SVG elements, not just
+  external CSS — a stricter `style-src` broke chart rendering when tried),
+  `connect-src 'self' <NEXT_PUBLIC_API_URL>` (the browser calls the API
+  directly, not through this server), HSTS, `Referrer-Policy:
+  strict-origin-when-cross-origin`, `frame-ancestors 'none'`.
 - **`POST /auth/login` is rate-limited** (`@nestjs/throttler`, scoped to
   just that one handler via `@UseGuards(ThrottlerGuard)` — not applied
   globally): `AUTH_RATE_LIMIT_MAX_ATTEMPTS` attempts (default 20) per
@@ -382,7 +405,8 @@ elsewhere in this repo's docs:
    `RATE_LIMIT_*` env vars imply is still unbuilt, but that's a separate,
    larger-scope feature, not the credential-stuffing gap this item
    originally flagged.
-3. **No CSP/HSTS/Referrer-Policy headers**, no `helmet`.
+3. ~~No CSP/HSTS/Referrer-Policy headers, no `helmet`~~ — **fixed**: see
+   "HTTP-level hardening" above.
 4. ~~`EXECUTIVE_VIEWER`'s intended scope (dashboards only) isn't actually
    enforced~~ — **fixed**: see "RBAC" above and `ExecutiveViewerScopeGuard`.
 5. **Audit log immutability is application-level only** — no database

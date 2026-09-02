@@ -1,6 +1,6 @@
-import { INestApplication, ValidationPipe } from '@nestjs/common';
-import { Test } from '@nestjs/testing';
-import { AppModule } from '../src/app.module';
+import { INestApplication } from '@nestjs/common';
+
+import { createTestApp } from './test-app';
 
 /**
  * Verifies the real, end-to-end behavior of the login brute-force guard
@@ -24,17 +24,7 @@ describe('Login rate limiting (integration)', () => {
     process.env.AUTH_RATE_LIMIT_MAX_ATTEMPTS = '5';
     process.env.AUTH_RATE_LIMIT_WINDOW_MS = '60000';
 
-    const moduleRef = await Test.createTestingModule({ imports: [AppModule] }).compile();
-    app = moduleRef.createNestApplication();
-    app.setGlobalPrefix('api/v1');
-    app.useGlobalPipes(
-      new ValidationPipe({
-        whitelist: true,
-        forbidNonWhitelisted: true,
-        transform: true,
-        transformOptions: { enableImplicitConversion: true },
-      }),
-    );
+    app = await createTestApp();
     await app.listen(0);
     const address = app.getHttpServer().address();
     baseUrl = `http://127.0.0.1:${address.port}/api/v1`;

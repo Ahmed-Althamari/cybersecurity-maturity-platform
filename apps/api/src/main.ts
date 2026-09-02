@@ -1,6 +1,6 @@
 import { ValidationPipe } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
-import type { Request, Response, NextFunction } from 'express';
+import helmet from 'helmet';
 
 import { AppModule } from './app.module';
 import { validateEnv } from './config/validate-env';
@@ -37,13 +37,33 @@ async function bootstrap() {
     allowedHeaders: ['Content-Type', 'Authorization'],
   });
 
-  // Security headers
-  app.use((req: Request, res: Response, next: NextFunction) => {
-    res.setHeader('X-Content-Type-Options', 'nosniff');
-    res.setHeader('X-Frame-Options', 'DENY');
-    res.setHeader('X-XSS-Protection', '1; mode=block');
-    next();
-  });
+  // Security headers. This is a pure JSON API -- it never renders HTML or
+  // serves a script/stylesheet of its own -- so the CSP is deliberately
+  // maximal: default-src/frame-ancestors 'none' blocks everything, on the
+  // off chance a response is ever rendered as HTML by a misconfigured or
+  // buggy client (an error page, a misread Content-Type). Replaces a
+  // hand-rolled X-Content-Type-Options/X-Frame-Options/X-XSS-Protection
+  // middleware that had no HSTS, CSP, or Referrer-Policy at all (a known,
+  // documented gap -- see docs/security-architecture.md). X-XSS-Protection
+  // is deliberately NOT re-added: it's a deprecated header removed from
+  // every modern browser's actual XSS filter, dropped from helmet's own
+  // defaults since v6, and superseded by the CSP below.
+  app.use(
+    helmet({
+      contentSecurityPolicy: {
+        directives: {
+          defaultSrc: ["'none'"],
+          frameAncestors: ["'none'"],
+        },
+      },
+      hsts: {
+        maxAge: 31536000,
+        includeSubDomains: true,
+      },
+      referrerPolicy: { policy: 'no-referrer' },
+      frameguard: { action: 'deny' },
+    }),
+  );
 
   const port = process.env.PORT || 3001;
   await app.listen(port);
