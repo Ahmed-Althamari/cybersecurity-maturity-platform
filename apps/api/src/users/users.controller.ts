@@ -1,5 +1,5 @@
 import { UserRole } from '@cmmp/shared';
-import { Controller, Get, Post, Body, Patch, Param, Delete, UseGuards } from '@nestjs/common';
+import { Controller, Get, Post, Body, Patch, Param, Delete, Query, UseGuards } from '@nestjs/common';
 
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { Roles } from '../auth/decorators/roles.decorator';
@@ -27,8 +27,12 @@ export class UsersController {
   }
 
   @Get()
-  async findAll(@CurrentUser() user: any) {
-    return this.usersService.findAll(user.tenantId);
+  async findAll(
+    @Query('page') page: string | undefined,
+    @Query('pageSize') pageSize: string | undefined,
+    @CurrentUser() user: any,
+  ) {
+    return this.usersService.findAll(user.tenantId, { page: Number(page), pageSize: Number(pageSize) });
   }
 
   @Get(':id')

@@ -1,6 +1,8 @@
 import type { IdentifyGapsOptions } from '@cmmp/scoring-engine';
+import type { PaginatedResponse } from '@cmmp/shared';
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 
+import { type PaginationInput, resolvePagination, toPaginatedResponse } from '../common/pagination';
 import { FrameworkService } from '../framework/framework.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { ScoringService } from '../scoring/scoring.service';
@@ -108,12 +110,24 @@ export class AssessmentsService {
     return this.findOne(tenantId, assessment.id);
   }
 
-  async findAll(tenantId: string, organisationId?: string) {
-    return this.prisma.assessment.findMany({
-      where: { tenantId, organisationId, deletedAt: null },
-      select: assessmentSummarySelect,
-      orderBy: { createdAt: 'desc' },
-    });
+  async findAll(
+    tenantId: string,
+    organisationId?: string,
+    paginationInput: PaginationInput = {},
+  ): Promise<PaginatedResponse<unknown>> {
+    const pagination = resolvePagination(paginationInput);
+    const where = { tenantId, organisationId, deletedAt: null };
+    const [total, data] = await Promise.all([
+      this.prisma.assessment.count({ where }),
+      this.prisma.assessment.findMany({
+        where,
+        select: assessmentSummarySelect,
+        orderBy: { createdAt: 'desc' },
+        skip: pagination.skip,
+        take: pagination.take,
+      }),
+    ]);
+    return toPaginatedResponse(data, total, pagination);
   }
 
   async findOne(tenantId: string, id: string) {

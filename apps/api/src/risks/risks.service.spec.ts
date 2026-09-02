@@ -50,7 +50,7 @@ describe('RisksService', () => {
   let prisma: {
     organisation: { findFirst: jest.Mock };
     assessmentItem: { findFirst: jest.Mock };
-    risk: { create: jest.Mock; findMany: jest.Mock; findFirst: jest.Mock; update: jest.Mock };
+    risk: { create: jest.Mock; findMany: jest.Mock; count: jest.Mock; findFirst: jest.Mock; update: jest.Mock };
     remediationInitiative: { findFirst: jest.Mock };
   };
 
@@ -61,6 +61,7 @@ describe('RisksService', () => {
       risk: {
         create: jest.fn(),
         findMany: jest.fn(),
+        count: jest.fn().mockResolvedValue(0),
         findFirst: jest.fn(),
         update: jest.fn(),
       },
@@ -136,6 +137,15 @@ describe('RisksService', () => {
           orderBy: { inherentRiskScore: 'desc' },
         }),
       );
+    });
+
+    it('findAll returns a paginated response', async () => {
+      prisma.risk.count.mockResolvedValueOnce(3);
+      prisma.risk.findMany.mockResolvedValueOnce([{ id: 'r1' }]);
+
+      const result = await service.findAll('tenant-a', {}, { page: 1, pageSize: 1 });
+
+      expect(result).toEqual({ data: [{ id: 'r1' }], total: 3, page: 1, pageSize: 1, totalPages: 3 });
     });
 
     it('never returns a risk belonging to another tenant', async () => {

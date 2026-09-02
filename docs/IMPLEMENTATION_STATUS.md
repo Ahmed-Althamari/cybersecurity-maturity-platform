@@ -1448,6 +1448,96 @@ implied otherwise.
   per-IP in-application throttle can't address on its own and belongs in
   front of the application in a real deployment, not inside it.
 
+### Post-Phase-17: Pagination on Remaining List Endpoints
+Continuing through the ranked gap list one item at a time (user's explicit
+direction): every list endpoint except `/audit-events` returned its entire
+tenant/organisation-scoped result set with no cap, a real scalability
+problem `docs/threat-model.md` had flagged.
+
+- [x] **Wired up `@cmmp/shared`'s already-scaffolded `PaginatedResponse<T>`/
+      `PaginationSchema`** (Phase 1 leftovers, confirmed by grep to have
+      never been imported by anything before this) rather than inventing a
+      new shape -- one more "modeled but unused" gap closed in the same
+      pass as actually using it.
+- [x] New `apps/api/src/common/pagination.ts` -- `resolvePagination()`
+      (normalizes untrusted `page`/`pageSize` query params into Prisma
+      `skip`/`take`, defaulting to page 1 / size 20, and **always** capping
+      `pageSize` at 100 server-side regardless of what's requested, so
+      `?pageSize=100000` can't turn a paginated endpoint back into an
+      unbounded one) and `toPaginatedResponse()` (shapes a page + its total
+      count into the shared contract). `GET /audit-events`'s own existing
+      pagination (Phase 13, default 50/cap 200) was deliberately left
+      exactly as it was rather than retrofitted onto this new helper --
+      it already works and is already tested; changing it would only add
+      risk for no functional gain.
+- [x] **`GET /users`, `/assessments`, `/risks`, `/initiatives`** all now
+      run a `count()` + `findMany({ skip, take })` in parallel
+      (`Promise.all`, matching the audit-events precedent) and return
+      `PaginatedResponse<T>` instead of a bare array -- a real, breaking
+      change to each endpoint's response shape, not just an additive
+      query param.
+- [x] **Found and fixed a real internal-caller bug while making this
+      change**: `InitiativesService.getTimeline()` (the roadmap's 3/6/12
+      month bucketed view) called its own `findAll()` expecting *every*
+      initiative back -- after `findAll()` became paginated, that call
+      would have silently limited the timeline to only the first page's
+      worth of initiatives (a real, DB-agnostic wrong-answer bug: the
+      roadmap would look like some initiatives had vanished, not error out
+      loudly). Fixed by extracting a shared `buildInitiativesQuery()`
+      (where/orderBy only) that both the paginated `findAll()` and an
+      unpaginated direct `prisma.remediationInitiative.findMany()` call in
+      `getTimeline()` now build from -- a timeline view genuinely needs
+      every initiative to bucket correctly, not one page of them, so it
+      deliberately doesn't route through the public paginated method at
+      all. Caught by grepping for every internal (non-controller,
+      non-spec) caller of each `findAll()` before considering this change
+      finished, not by chance.
+- [x] Frontend: `apps/web/lib/api.ts`'s `listAssessments`/`listRisks` now
+      take a `page` argument and return `PaginatedResponse<T>`;
+      `pages/assessments/index.tsx` and `pages/risks/index.tsx` both gained
+      Previous/Next controls with a "Page X of Y" indicator, wired to a new
+      `page` state that re-fetches on change. `listInitiatives` (used only
+      by the risk-detail page's initiative *picker*, a dropdown that wants
+      "all of them," not one page) keeps its original `InitiativeDetail[]`
+      return contract unchanged for its one caller -- internally it now
+      requests `pageSize=100` (the server's own max) and unwraps `.data`,
+      so the picker needed zero changes at its call site. A tenant with
+      more than 100 initiatives will have some missing from that picker
+      specifically -- a known, documented limitation, not an oversight.
+- [x] Tests: 7 new tests for the pagination helper itself
+      (`common/pagination.spec.ts` -- defaults, skip/take math, the
+      pageSize cap, invalid/fractional input handling, the
+      `toPaginatedResponse` shape including the zero-results case); one
+      new pagination-shape test added to each of the four affected
+      services' existing spec files -- 155 tests total in `apps/api`, up
+      from 144. Fixed one real integration-test break this change caused:
+      `tenant-security.integration-spec.ts`'s cross-tenant risk-listing
+      test was parsing `GET /risks`'s real HTTP response as a bare array
+      (`risksB.some(...)`) -- updated to destructure `{ data }` from the
+      new `PaginatedResponse` shape, confirming this was a genuine,
+      real-HTTP-consumer breaking change caught by an actual integration
+      test, not just a type error.
+- [x] Live-verified end-to-end in a real browser against the real stack:
+      created 24 temporary risks via the real API to push the seeded
+      tenant's risk count past the default page size (27 total, 20/page),
+      confirmed the Risk Register page showed "Page 1 of 2," clicking
+      "Next" showed the remaining 7 rows with a *different* first row than
+      page 1, "Page 2 of 2" with "Next" now disabled, and "Previous"
+      correctly returning to page 1 with "Previous" disabled there --
+      then deleted all 24 temporary risks to leave the demo database
+      clean. Separately confirmed the initiative picker on the risk-detail
+      page still populates correctly end-to-end (a real `GET
+      /initiatives?sortBy=priority&pageSize=100` call, options rendered
+      from real seeded initiative titles).
+
+  **Not built this pass**: a searchable/paginated UI for the initiative
+  picker itself (still a plain `<select>`, now backed by up to 100
+  initiatives instead of an unbounded list -- fine at today's scale, a
+  real limitation past 100); pagination for `GET /frameworks`,
+  `GET /initiatives/timeline`, or `GET /assessments/:id/history`
+  (deliberately out of scope -- see `docs/api-reference.md`'s
+  "Conventions" section for why each was left as-is).
+
 ## Known Issues 🐛
 
 - ~~Root `.eslintrc.json` references missing ESLint plugins~~ — fixed in
@@ -1646,11 +1736,16 @@ None recorded yet
 12. ~~Add rate limiting to `POST /auth/login`~~ — **done** (see
     "Post-Phase-17: Rate Limiting on `/auth/login`" above): `@nestjs/throttler`,
     scoped to the login handler only, live-verified against the real
-    running API. The remaining ranked findings from `docs/threat-model.md`'s
-    "Summary of the highest-priority items" are, in order: pagination on
-    the remaining list endpoints (now the top unaddressed item), confirming
-    `JWT_SECRET`/`NEXTAUTH_SECRET` are never left at their hardcoded
-    fallback in a real deployment, `EXECUTIVE_VIEWER` never actually being
+    running API.
+13. ~~Add pagination to the remaining list endpoints~~ — **done** (see
+    "Post-Phase-17: Pagination on Remaining List Endpoints" above):
+    `/users`, `/assessments`, `/risks`, `/initiatives` all paginate now,
+    `@cmmp/shared`'s `PaginatedResponse<T>` finally wired up, live-verified
+    with a real multi-page browser session. The remaining ranked findings
+    from `docs/threat-model.md`'s "Summary of the highest-priority items"
+    are, in order: confirming `JWT_SECRET`/`NEXTAUTH_SECRET` are never left
+    at their hardcoded fallback in a real deployment (now the top
+    unaddressed item), `EXECUTIVE_VIEWER` never actually being
     distinguished from `READ_ONLY_VIEWER` by any guard, token
     revocation/rotation, and a WAF/CDN-level rate limit for a distributed
     (many-IP) attack the new per-IP login throttle can't address alone.

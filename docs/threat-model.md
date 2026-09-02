@@ -74,7 +74,7 @@ plainly rather than glossed over — this document is meant to be acted on.
 | Threat | Mitigation | Residual risk |
 |---|---|---|
 | Oversized spreadsheet upload exhausting memory/CPU during parsing | 5MB hard cap enforced by the multipart interceptor before parsing begins (`MAX_IMPORT_FILE_BYTES`). | Low for this one endpoint. |
-| Unbounded/expensive query (e.g. a very large `GET /risks` with no pagination) | **No pagination exists** on most list endpoints (only `/audit-events` paginates) — a tenant with a very large dataset returns its entire result set in one response. | Medium as data volume grows; not exploitable cross-tenant (an attacker can only hurt their own tenant's response time), but a real scalability gap worth addressing before onboarding a large customer. |
+| Unbounded/expensive query (e.g. a very large `GET /risks` with no pagination) | **Fixed.** `/users`, `/assessments`, `/risks`, `/initiatives` all paginate now (`page`/`pageSize`, capped at 100 server-side regardless of what's requested — see `docs/api-reference.md`), same convention `/audit-events` already used. | Low. `/frameworks`, `/initiatives/timeline`, and `/assessments/:id/history` remain unpaginated deliberately (small/bounded/bucketed) — not a residual gap, a scoping choice. |
 | Login-endpoint flooding | The same per-IP throttle covers this too (see "Spoofing" above) — a flood from one IP is capped identically whether the intent is guessing credentials or just burning CPU on `bcrypt.compare`. | Low-Medium, same caveat as above: a distributed flood across many IPs isn't slowed by a per-IP limit alone. |
 | CI pipeline abuse (e.g. a malicious PR triggering expensive jobs repeatedly) | GitHub Actions' own default concurrency/cost controls apply; `ci.yml` additionally cancels superseded runs on the same ref (`concurrency: cancel-in-progress: true`). | Low — standard GitHub Actions posture, nothing CMMP-specific added beyond the cancel-in-progress setting. |
 
@@ -99,9 +99,10 @@ next:
    hardcoded fallback, before any non-local deployment** — a process/
    checklist fix, not a code fix (though a startup check that refuses to
    boot on the default value would be a stronger, code-level guarantee).
-3. **Add pagination to the remaining list endpoints** (DoS/scalability) —
-   before onboarding a tenant with a large dataset. Now the top unaddressed
-   item.
+3. ~~Add pagination to the remaining list endpoints~~ — **done**: `/users`,
+   `/assessments`, `/risks`, `/initiatives` all paginate now (`PaginatedResponse<T>`,
+   default 20/page, capped at 100 — see `docs/api-reference.md`). Now the
+   top unaddressed item is #4 below.
 4. **Decide whether `EXECUTIVE_VIEWER` needs real behavior** — either wire
    it to a dashboard-only guard, or fold it into `READ_ONLY_VIEWER` and
    remove the distinction rather than leave it silently unenforced.

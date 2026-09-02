@@ -99,6 +99,7 @@ describe('AssessmentsService', () => {
       assessment: {
         create: jest.fn(),
         findMany: jest.fn(),
+        count: jest.fn().mockResolvedValue(0),
         findFirst: jest.fn(),
         update: jest.fn(),
       },
@@ -202,6 +203,16 @@ describe('AssessmentsService', () => {
           where: { tenantId: 'tenant-a', organisationId: undefined, deletedAt: null },
         }),
       );
+    });
+
+    it('findAll returns a paginated response, page 2 skipping the first page', async () => {
+      prisma.assessment.count.mockResolvedValueOnce(25);
+      prisma.assessment.findMany.mockResolvedValueOnce([{ id: 'a3' }]);
+
+      const result = await service.findAll('tenant-a', undefined, { page: 2, pageSize: 10 });
+
+      expect(result).toEqual({ data: [{ id: 'a3' }], total: 25, page: 2, pageSize: 10, totalPages: 3 });
+      expect(prisma.assessment.findMany).toHaveBeenCalledWith(expect.objectContaining({ skip: 10, take: 10 }));
     });
 
     it('never returns an assessment belonging to another tenant', async () => {

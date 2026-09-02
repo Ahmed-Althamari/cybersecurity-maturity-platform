@@ -37,9 +37,15 @@ export class InitiativesController {
     @Query('organisationId') organisationId: string | undefined,
     @Query('status') status: string | undefined,
     @Query('sortBy') sortBy: 'priority' | 'createdAt' | undefined,
+    @Query('page') page: string | undefined,
+    @Query('pageSize') pageSize: string | undefined,
     @CurrentUser() user: any,
   ) {
-    return this.initiativesService.findAll(user.tenantId, { organisationId, status, sortBy });
+    return this.initiativesService.findAll(
+      user.tenantId,
+      { organisationId, status, sortBy },
+      { page: Number(page), pageSize: Number(pageSize) },
+    );
   }
 
   @Get('timeline')

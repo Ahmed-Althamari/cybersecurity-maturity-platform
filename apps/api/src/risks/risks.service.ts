@@ -1,6 +1,8 @@
 import { RiskLevel } from '@cmmp/shared';
+import type { PaginatedResponse } from '@cmmp/shared';
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 
+import { type PaginationInput, resolvePagination, toPaginatedResponse } from '../common/pagination';
 import { PrismaService } from '../prisma/prisma.service';
 
 import { CreateRiskDto } from './dto/create-risk.dto';
@@ -96,21 +98,31 @@ export class RisksService {
     return risk;
   }
 
-  async findAll(tenantId: string, filters: FindAllRisksFilters = {}) {
-    const risks = await this.prisma.risk.findMany({
-      where: {
-        tenantId,
-        deletedAt: null,
-        organisationId: filters.organisationId,
-        riskLevel: filters.riskLevel,
-        status: filters.status,
-        assessmentItemId: filters.assessmentItemId,
-      },
-      include: riskInclude,
-      orderBy:
-        filters.sortBy === 'createdAt' ? { createdAt: 'desc' } : { inherentRiskScore: 'desc' },
-    });
-    return risks;
+  async findAll(
+    tenantId: string,
+    filters: FindAllRisksFilters = {},
+    paginationInput: PaginationInput = {},
+  ): Promise<PaginatedResponse<unknown>> {
+    const pagination = resolvePagination(paginationInput);
+    const where = {
+      tenantId,
+      deletedAt: null,
+      organisationId: filters.organisationId,
+      riskLevel: filters.riskLevel,
+      status: filters.status,
+      assessmentItemId: filters.assessmentItemId,
+    };
+    const [total, data] = await Promise.all([
+      this.prisma.risk.count({ where }),
+      this.prisma.risk.findMany({
+        where,
+        include: riskInclude,
+        orderBy: filters.sortBy === 'createdAt' ? { createdAt: 'desc' } : { inherentRiskScore: 'desc' },
+        skip: pagination.skip,
+        take: pagination.take,
+      }),
+    ]);
+    return toPaginatedResponse(data, total, pagination);
   }
 
   async findOne(tenantId: string, id: string) {

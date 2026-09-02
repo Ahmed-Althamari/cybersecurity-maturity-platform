@@ -13,6 +13,8 @@ export default function RisksPage() {
   const { data: session, status } = useSession();
   const router = useRouter();
   const [risks, setRisks] = useState<RiskDetail[] | null>(null);
+  const [page, setPage] = useState(1);
+  const [totalPages, setTotalPages] = useState(1);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -26,10 +28,13 @@ export default function RisksPage() {
       return;
     }
     api
-      .listRisks(session.accessToken)
-      .then(setRisks)
+      .listRisks(session.accessToken, page)
+      .then((result) => {
+        setRisks(result.data);
+        setTotalPages(Math.max(1, result.totalPages));
+      })
       .catch((err) => setError(err instanceof ApiError ? err.message : 'Failed to load risks'));
-  }, [status, session]);
+  }, [status, session, page]);
 
   if (status === 'loading' || (status === 'authenticated' && risks === null && !error)) {
     return <CenteredMessage>Loading…</CenteredMessage>;
@@ -99,6 +104,20 @@ export default function RisksPage() {
               </table>
             </CardContent>
           </Card>
+
+          {totalPages > 1 && (
+            <div className="mt-6 flex items-center justify-center gap-3">
+              <Button variant="outline" onClick={() => setPage((p) => p - 1)} disabled={page <= 1}>
+                Previous
+              </Button>
+              <span className="text-sm text-slate-400">
+                Page {page} of {totalPages}
+              </span>
+              <Button variant="outline" onClick={() => setPage((p) => p + 1)} disabled={page >= totalPages}>
+                Next
+              </Button>
+            </div>
+          )}
         </div>
       </div>
     </>

@@ -31,9 +31,19 @@ types; nothing here is speculative.
   forbidNonWhitelisted: true, transform: true })` (`main.ts`) — any request
   body field not declared on the target DTO is rejected outright (mass-
   assignment protection), not silently dropped.
-- **Pagination**: only `GET /audit-events` paginates today (`page`/
-  `pageSize`, capped at 200/page). Every other list endpoint returns its
-  full tenant/organisation-scoped result set.
+- **Pagination**: `GET /users`, `/assessments`, `/risks`, and `/initiatives`
+  all take `page`/`pageSize` (default page size 20, capped at 100) and
+  return the shared `PaginatedResponse<T>` shape
+  (`{ data, total, page, pageSize, totalPages }` — `@cmmp/shared`) instead
+  of a bare array. `GET /audit-events` predates this and paginates the
+  same way but with its own higher cap (200/page) and default (50) —
+  kept as-is rather than retrofitted, to avoid changing an
+  already-shipped, already-tested endpoint's behavior for no functional
+  gain. `GET /frameworks`, `GET /initiatives/timeline`, and
+  `GET /assessments/:id/history` remain unpaginated (framework/history
+  cardinality is small and admin/workflow-bounded; the timeline endpoint
+  returns bucketed groups, not a flat list, so pagination doesn't apply
+  the same way).
 
 Role name abbreviations used below match the `UserRole` enum exactly:
 `PLATFORM_ADMIN`, `ORGANISATION_ADMIN`, `CISO`, `SECURITY_ARCHITECT`,
@@ -56,7 +66,7 @@ Role name abbreviations used below match the `UserRole` enum exactly:
 | Method | Path | Roles | Notes |
 |---|---|---|---|
 | POST | `/users` | `PLATFORM_ADMIN`, `ORGANISATION_ADMIN` | Create a user in the caller's tenant. |
-| GET | `/users` | any authenticated | Tenant-scoped list. |
+| GET | `/users?page=&pageSize=` | any authenticated | Tenant-scoped list. **Paginated** — returns `PaginatedResponse<User>` (`{ data, total, page, pageSize, totalPages }`), default `pageSize` 20, capped at 100. |
 | GET | `/users/:id` | any authenticated | Tenant-scoped lookup; 404 across tenants. |
 | PATCH | `/users/:id` | `ORGANISATION_ADMIN`, `PLATFORM_ADMIN` | |
 | DELETE | `/users/:id` | `PLATFORM_ADMIN` | Soft delete (`deletedAt`). |
@@ -83,7 +93,7 @@ Role name abbreviations used below match the `UserRole` enum exactly:
 | Method | Path | Roles | Notes |
 |---|---|---|---|
 | POST | `/assessments` | AUTHORS | Resolves the named framework/version, flattens every question, bulk-creates one `AssessmentItem` per question. |
-| GET | `/assessments` | any authenticated | Organisation-scoped list. |
+| GET | `/assessments?organisationId=&page=&pageSize=` | any authenticated | Organisation-scoped list. **Paginated** — `PaginatedResponse<AssessmentSummary>`, default `pageSize` 20, capped at 100. |
 | GET | `/assessments/:id` | any authenticated | Includes `items[]` (see `AssessmentItemDetail`). |
 | PATCH | `/assessments/:id` | AUTHORS | Name/description/date only — item edits go through the item endpoint below. |
 | DELETE | `/assessments/:id` | ARCHIVERS | Soft delete. |
@@ -137,7 +147,7 @@ Roles on all three routes: `PLATFORM_ADMIN`, `ORGANISATION_ADMIN`, `CISO`,
 | Method | Path | Roles | Notes |
 |---|---|---|---|
 | POST | `/risks` | AUTHORS | `inherentRiskScore` always server-computed (`likelihood × impact`); `riskLevel` auto-suggested unless supplied. |
-| GET | `/risks?sortBy=score&organisationId=&riskLevel=&status=&assessmentItemId=` | any authenticated | Default sort: `inherentRiskScore` descending. |
+| GET | `/risks?sortBy=score&organisationId=&riskLevel=&status=&assessmentItemId=&page=&pageSize=` | any authenticated | Default sort: `inherentRiskScore` descending. **Paginated** — `PaginatedResponse<Risk>`, default `pageSize` 20, capped at 100. |
 | GET | `/risks/:id` | any authenticated | Includes linked control (subcategory code/question) and linked initiatives. |
 | PATCH | `/risks/:id` | AUTHORS | Recomputes score/level if likelihood/impact change. |
 | DELETE | `/risks/:id` | DELETERS | Hard-scoped soft delete. |
@@ -152,7 +162,7 @@ Roles on all three routes: `PLATFORM_ADMIN`, `ORGANISATION_ADMIN`, `CISO`,
 | Method | Path | Roles | Notes |
 |---|---|---|---|
 | POST | `/initiatives` | AUTHORS | Manual creation (in addition to `/roadmap/generate` above). |
-| GET | `/initiatives` | any authenticated | Organisation-scoped list — this is what the risk-detail page's initiative picker calls. |
+| GET | `/initiatives?organisationId=&status=&sortBy=&page=&pageSize=` | any authenticated | Organisation-scoped list. **Paginated** — `PaginatedResponse<RemediationInitiative>`, default `pageSize` 20, capped at 100. The risk-detail page's initiative picker calls this with `pageSize=100` (the max) to approximate "all of them" for a dropdown — a tenant with more than 100 initiatives will have some missing from that picker specifically, a known limitation. |
 | GET | `/initiatives/timeline` | any authenticated | Buckets every non-completed initiative into `next3Months`/`next6Months`/`next12Months`/`beyondOrUnscheduled` by `targetCompletionDate`. |
 | GET | `/initiatives/:id` | any authenticated | |
 | PATCH | `/initiatives/:id` | AUTHORS | Any of the five `status` values (`PLANNED`/`IN_PROGRESS`/`COMPLETED`/`BLOCKED`/`ON_HOLD`) — a plain field, not an audited state-machine like `Assessment.status`. |

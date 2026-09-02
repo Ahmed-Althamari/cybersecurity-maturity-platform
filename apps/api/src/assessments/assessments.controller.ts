@@ -34,8 +34,16 @@ export class AssessmentsController {
   }
 
   @Get()
-  async findAll(@Query('organisationId') organisationId: string | undefined, @CurrentUser() user: any) {
-    return this.assessmentsService.findAll(user.tenantId, organisationId);
+  async findAll(
+    @Query('organisationId') organisationId: string | undefined,
+    @Query('page') page: string | undefined,
+    @Query('pageSize') pageSize: string | undefined,
+    @CurrentUser() user: any,
+  ) {
+    return this.assessmentsService.findAll(user.tenantId, organisationId, {
+      page: Number(page),
+      pageSize: Number(pageSize),
+    });
   }
 
   @Get(':id')

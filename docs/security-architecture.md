@@ -321,6 +321,9 @@ elsewhere in this repo's docs:
    nothing uploads to it yet (see `docs/data-model.md`); the one real file
    upload path today (spreadsheet import) is size-capped and parsed by a
    library, not executed, but isn't run through any malware scanner.
-8. **No pagination on most list endpoints** — only `/audit-events` caps
-   its result set; every other list endpoint returns everything, which
-   will become a real scalability problem before it becomes a security one.
+8. ~~No pagination on most list endpoints~~ — **fixed**: `/users`,
+   `/assessments`, `/risks`, and `/initiatives` now all paginate
+   (`PaginatedResponse<T>`, default page size 20, capped at 100 — see
+   `docs/api-reference.md`). `/frameworks`, `/initiatives/timeline`, and
+   `/assessments/:id/history` remain deliberately unpaginated (small,
+   bounded, or bucketed-not-flat, respectively).

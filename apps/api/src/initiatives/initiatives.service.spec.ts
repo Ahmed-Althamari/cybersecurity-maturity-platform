@@ -27,6 +27,7 @@ describe('InitiativesService', () => {
     remediationInitiative: {
       create: jest.Mock;
       findMany: jest.Mock;
+      count: jest.Mock;
       findFirst: jest.Mock;
       update: jest.Mock;
     };
@@ -42,6 +43,7 @@ describe('InitiativesService', () => {
       remediationInitiative: {
         create: jest.fn(),
         findMany: jest.fn(),
+        count: jest.fn().mockResolvedValue(0),
         findFirst: jest.fn(),
         update: jest.fn(),
       },
@@ -86,6 +88,15 @@ describe('InitiativesService', () => {
           orderBy: { priority: 'asc' },
         }),
       );
+    });
+
+    it('findAll returns a paginated response', async () => {
+      prisma.remediationInitiative.count.mockResolvedValueOnce(7);
+      prisma.remediationInitiative.findMany.mockResolvedValueOnce([{ id: 'i1' }]);
+
+      const result = await service.findAll('tenant-a', {}, { page: 1, pageSize: 5 });
+
+      expect(result).toEqual({ data: [{ id: 'i1' }], total: 7, page: 1, pageSize: 5, totalPages: 2 });
     });
 
     it('never returns an initiative from another tenant', async () => {

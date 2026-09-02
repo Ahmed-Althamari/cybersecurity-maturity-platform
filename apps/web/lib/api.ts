@@ -2,6 +2,7 @@ import type { AuditEventSummary } from '@cmmp/shared';
 import type { ExecutiveDashboard } from '@cmmp/shared';
 import type { IntegrationSettingsStatus } from '@cmmp/shared';
 import type { MaturityHeatmap } from '@cmmp/shared';
+import type { PaginatedResponse } from '@cmmp/shared';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
 
@@ -252,7 +253,8 @@ export interface ImportResult {
 export type ColumnMapping = Record<string, string>;
 
 export const api = {
-  listAssessments: (token: string) => apiFetch<AssessmentSummary[]>(token, '/assessments'),
+  listAssessments: (token: string, page = 1, pageSize = 20) =>
+    apiFetch<PaginatedResponse<AssessmentSummary>>(token, `/assessments?page=${page}&pageSize=${pageSize}`),
 
   listFrameworks: (token: string) => apiFetch<FrameworkSummary[]>(token, '/frameworks'),
 
@@ -317,11 +319,22 @@ export const api = {
   getMaturityHeatmap: (token: string, assessmentId: string) =>
     apiFetch<MaturityHeatmap>(token, `/assessments/${assessmentId}/dashboard/heatmap`),
 
-  listRisks: (token: string) => apiFetch<RiskDetail[]>(token, '/risks?sortBy=score'),
+  listRisks: (token: string, page = 1, pageSize = 20) =>
+    apiFetch<PaginatedResponse<RiskDetail>>(token, `/risks?sortBy=score&page=${page}&pageSize=${pageSize}`),
 
   getRoadmapTimeline: (token: string) => apiFetch<InitiativeTimeline>(token, '/initiatives/timeline'),
 
-  listInitiatives: (token: string) => apiFetch<InitiativeDetail[]>(token, '/initiatives?sortBy=priority'),
+  // Powers the risk-detail page's initiative *picker* -- a dropdown wants
+  // "all of them", not one page, so this requests the largest page the API
+  // allows (100) rather than exposing page params to callers. A tenant with
+  // more than 100 initiatives will have some missing from the picker; a
+  // known, documented limitation (see docs/api-reference.md) rather than
+  // building a searchable/paginated picker for what's still a small-scale
+  // feature today.
+  listInitiatives: (token: string) =>
+    apiFetch<PaginatedResponse<InitiativeDetail>>(token, '/initiatives?sortBy=priority&pageSize=100').then(
+      (result) => result.data,
+    ),
 
   generateRoadmap: (token: string, assessmentId: string) =>
     apiFetch<InitiativeDetail[]>(token, `/assessments/${assessmentId}/roadmap/generate`, {

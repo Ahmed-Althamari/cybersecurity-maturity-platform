@@ -13,6 +13,7 @@ describe('UsersService', () => {
       user: {
         findFirst: jest.fn(),
         findMany: jest.fn(),
+        count: jest.fn().mockResolvedValue(0),
         create: jest.fn(),
         update: jest.fn(),
       },
@@ -50,6 +51,25 @@ describe('UsersService', () => {
       expect(prisma.user.findMany).toHaveBeenCalledWith(
         expect.objectContaining({ where: { tenantId: 'tenant-a', deletedAt: null } }),
       );
+      expect(prisma.user.count).toHaveBeenCalledWith({ where: { tenantId: 'tenant-a', deletedAt: null } });
+    });
+  });
+
+  describe('findAll pagination', () => {
+    it('returns a PaginatedResponse shape, capping page size and computing totalPages', async () => {
+      prisma.user.count.mockResolvedValueOnce(45);
+      prisma.user.findMany.mockResolvedValueOnce([{ id: 'u1' }, { id: 'u2' }]);
+
+      const result = await usersService.findAll('tenant-a', { page: 2, pageSize: 20 });
+
+      expect(result).toEqual({
+        data: [{ id: 'u1' }, { id: 'u2' }],
+        total: 45,
+        page: 2,
+        pageSize: 20,
+        totalPages: 3,
+      });
+      expect(prisma.user.findMany).toHaveBeenCalledWith(expect.objectContaining({ skip: 20, take: 20 }));
     });
   });
 

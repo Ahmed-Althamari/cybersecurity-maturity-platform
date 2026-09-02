@@ -1,8 +1,10 @@
 import { scoreToMaturityLevel, type GapAnalysisEntry } from '@cmmp/scoring-engine';
 import { MaturityLevel, RiskLevel } from '@cmmp/shared';
+import type { PaginatedResponse } from '@cmmp/shared';
 import { Injectable, NotFoundException } from '@nestjs/common';
 
 import { AssessmentsService } from '../assessments/assessments.service';
+import { type PaginationInput, resolvePagination, toPaginatedResponse } from '../common/pagination';
 import { PrismaService } from '../prisma/prisma.service';
 import { ScoringService } from '../scoring/scoring.service';
 
@@ -70,17 +72,39 @@ export class InitiativesService {
     });
   }
 
-  async findAll(tenantId: string, filters: FindAllInitiativesFilters = {}) {
-    return this.prisma.remediationInitiative.findMany({
+  private buildInitiativesQuery(tenantId: string, filters: FindAllInitiativesFilters) {
+    return {
       where: {
         tenantId,
         deletedAt: null,
         organisationId: filters.organisationId,
         status: filters.status,
       },
-      include: initiativeInclude,
-      orderBy: filters.sortBy === 'createdAt' ? { createdAt: 'desc' } : { priority: 'asc' },
-    });
+      orderBy:
+        filters.sortBy === 'createdAt'
+          ? ({ createdAt: 'desc' } as const)
+          : ({ priority: 'asc' } as const),
+    };
+  }
+
+  async findAll(
+    tenantId: string,
+    filters: FindAllInitiativesFilters = {},
+    paginationInput: PaginationInput = {},
+  ): Promise<PaginatedResponse<unknown>> {
+    const pagination = resolvePagination(paginationInput);
+    const { where, orderBy } = this.buildInitiativesQuery(tenantId, filters);
+    const [total, data] = await Promise.all([
+      this.prisma.remediationInitiative.count({ where }),
+      this.prisma.remediationInitiative.findMany({
+        where,
+        include: initiativeInclude,
+        orderBy,
+        skip: pagination.skip,
+        take: pagination.take,
+      }),
+    ]);
+    return toPaginatedResponse(data, total, pagination);
   }
 
   async findOne(tenantId: string, id: string) {
@@ -131,9 +155,16 @@ export class InitiativesService {
     return this.findOne(tenantId, initiativeId);
   }
 
-  /** Buckets an organisation's initiatives by how far out their target completion date is -- the roadmap's 3/6/12 month timeline view. */
+  /**
+   * Buckets an organisation's initiatives by how far out their target
+   * completion date is -- the roadmap's 3/6/12 month timeline view.
+   * Deliberately queries the database directly (not through the paginated
+   * findAll() above) -- a timeline needs every initiative to bucket
+   * correctly, not just one page of them.
+   */
   async getTimeline(tenantId: string, organisationId?: string): Promise<InitiativeTimeline> {
-    const initiatives = await this.findAll(tenantId, { organisationId });
+    const { where, orderBy } = this.buildInitiativesQuery(tenantId, { organisationId });
+    const initiatives = await this.prisma.remediationInitiative.findMany({ where, include: initiativeInclude, orderBy });
     const now = Date.now();
 
     const timeline: InitiativeTimeline = {

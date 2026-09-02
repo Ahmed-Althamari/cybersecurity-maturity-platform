@@ -1,6 +1,8 @@
+import type { PaginatedResponse } from '@cmmp/shared';
 import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import * as bcrypt from 'bcryptjs';
 
+import { type PaginationInput, resolvePagination, toPaginatedResponse } from '../common/pagination';
 import { PrismaService } from '../prisma/prisma.service';
 
 import { CreateUserDto } from './dto/create-user.dto';
@@ -46,11 +48,20 @@ export class UsersService {
     });
   }
 
-  async findAll(tenantId: string) {
-    return this.prisma.user.findMany({
-      where: { tenantId, deletedAt: null },
-      select: userSummarySelect,
-    });
+  async findAll(tenantId: string, paginationInput: PaginationInput = {}): Promise<PaginatedResponse<unknown>> {
+    const pagination = resolvePagination(paginationInput);
+    const where = { tenantId, deletedAt: null };
+    const [total, data] = await Promise.all([
+      this.prisma.user.count({ where }),
+      this.prisma.user.findMany({
+        where,
+        select: userSummarySelect,
+        orderBy: { createdAt: 'desc' },
+        skip: pagination.skip,
+        take: pagination.take,
+      }),
+    ]);
+    return toPaginatedResponse(data, total, pagination);
   }
 
   async findOne(id: string, tenantId: string) {

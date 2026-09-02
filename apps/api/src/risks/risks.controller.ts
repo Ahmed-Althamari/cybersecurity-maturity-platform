@@ -40,15 +40,15 @@ export class RisksController {
     @Query('status') status: string | undefined,
     @Query('assessmentItemId') assessmentItemId: string | undefined,
     @Query('sortBy') sortBy: 'score' | 'createdAt' | undefined,
+    @Query('page') page: string | undefined,
+    @Query('pageSize') pageSize: string | undefined,
     @CurrentUser() user: any,
   ) {
-    return this.risksService.findAll(user.tenantId, {
-      organisationId,
-      riskLevel,
-      status,
-      assessmentItemId,
-      sortBy,
-    });
+    return this.risksService.findAll(
+      user.tenantId,
+      { organisationId, riskLevel, status, assessmentItemId, sortBy },
+      { page: Number(page), pageSize: Number(pageSize) },
+    );
   }
 
   @Get(':id')

@@ -135,13 +135,14 @@ describe('Tenant isolation, authorization & security (integration)', () => {
     const tokenB = await login(tenantBEmail, tenantBPassword);
     const resB = await fetch(`${baseUrl}/risks`, { headers: { Authorization: `Bearer ${tokenB}` } });
     expect(resB.status).toBe(200);
-    const risksB: Array<{ id: string }> = await resB.json();
+    // GET /risks returns a PaginatedResponse<Risk> ({ data, total, page, ... }) -- see docs/api-reference.md.
+    const { data: risksB }: { data: Array<{ id: string }> } = await resB.json();
     expect(risksB.some((r) => r.id === riskBId)).toBe(true);
 
     const tokenA = await login('ciso@example.local', demoPassword);
     const resA = await fetch(`${baseUrl}/risks`, { headers: { Authorization: `Bearer ${tokenA}` } });
     expect(resA.status).toBe(200);
-    const risksA: Array<{ id: string }> = await resA.json();
+    const { data: risksA }: { data: Array<{ id: string }> } = await resA.json();
     expect(risksA.some((r) => r.id === riskBId)).toBe(false);
   });
 
