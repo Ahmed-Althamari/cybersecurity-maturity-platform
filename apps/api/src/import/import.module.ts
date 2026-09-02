@@ -2,13 +2,14 @@ import { Module } from '@nestjs/common';
 
 import { AssessmentsModule } from '../assessments/assessments.module';
 import { PrismaModule } from '../prisma/prisma.module';
+import { SettingsModule } from '../settings/settings.module';
 
 import { AiMappingService } from './ai-mapping.service';
 import { ImportController } from './import.controller';
 import { ImportService } from './import.service';
 
 @Module({
-  imports: [PrismaModule, AssessmentsModule],
+  imports: [PrismaModule, AssessmentsModule, SettingsModule],
   providers: [ImportService, AiMappingService],
   controllers: [ImportController],
 })

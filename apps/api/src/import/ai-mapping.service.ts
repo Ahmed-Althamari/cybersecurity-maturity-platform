@@ -1,7 +1,8 @@
 import Anthropic from '@anthropic-ai/sdk';
 import type { ColumnMapping } from '@cmmp/import-engine';
 import { Injectable, Logger } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
+
+import { SettingsService } from '../settings/settings.service';
 
 const MODEL = 'claude-opus-5';
 const MAX_SAMPLE_ROWS = 5;
@@ -25,12 +26,8 @@ const SUGGEST_MAPPING_TOOL_NAME = 'suggest_mapping';
 @Injectable()
 export class AiMappingService {
   private readonly logger = new Logger('AiMappingService');
-  private readonly client: Anthropic | null;
 
-  constructor(config: ConfigService) {
-    const apiKey = config.get<string>('ANTHROPIC_API_KEY');
-    this.client = apiKey ? new Anthropic({ apiKey }) : null;
-  }
+  constructor(private settingsService: SettingsService) {}
 
   /**
    * @param targetFields every field the caller is willing to accept a
@@ -45,12 +42,23 @@ export class AiMappingService {
     sampleRows: Record<string, unknown>[],
     targetFields: readonly string[],
   ): Promise<ColumnMapping | null> {
-    if (!this.client || headers.length === 0 || targetFields.length === 0) {
+    if (headers.length === 0 || targetFields.length === 0) {
       return null;
     }
 
+    // Resolved fresh on every call (database-stored key, falling back to
+    // the environment variable -- see SettingsService) rather than cached
+    // at construction time, so a PLATFORM_ADMIN saving a new key through
+    // the settings UI takes effect on the very next import with no API
+    // restart needed.
+    const apiKey = await this.settingsService.getAnthropicApiKey();
+    if (!apiKey) {
+      return null;
+    }
+    const client = new Anthropic({ apiKey });
+
     try {
-      const response = await this.client.messages.create({
+      const response = await client.messages.create({
         model: MODEL,
         max_tokens: 1024,
         output_config: { effort: 'low' },

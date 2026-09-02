@@ -744,6 +744,25 @@ model DashboardConfiguration {
 }
 
 // ============================================================================
+// PLATFORM SETTINGS
+// ============================================================================
+
+model PlatformSetting {
+  key String @id // e.g. "ANTHROPIC_API_KEY"
+
+  // AES-256-GCM ciphertext ("iv.authTag.ciphertext", base64 -- see
+  // @cmmp/security's encrypt()/decrypt()) under SETTINGS_ENCRYPTION_KEY.
+  // Never plaintext -- this table holds live secrets, not preferences.
+  // Who changed it and when is already captured by the generic AuditEvent
+  // interceptor (every PUT/DELETE on SettingsController is logged), so no
+  // separate updatedBy column duplicates that here.
+  value     String
+  updatedAt DateTime @updatedAt
+
+  @@map("platform_settings")
+}
+
+// ============================================================================
 // DATA IMPORT
 // ============================================================================
 

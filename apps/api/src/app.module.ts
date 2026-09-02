@@ -11,6 +11,7 @@ import { ImportModule } from './import/import.module';
 import { InitiativesModule } from './initiatives/initiatives.module';
 import { PrismaModule } from './prisma/prisma.module';
 import { RisksModule } from './risks/risks.module';
+import { SettingsModule } from './settings/settings.module';
 import { UsersModule } from './users/users.module';
 
 @Module({
@@ -24,6 +25,7 @@ import { UsersModule } from './users/users.module';
     AuditModule,
     AuthModule,
     UsersModule,
+    SettingsModule,
     FrameworkModule,
     AssessmentsModule,
     ImportModule,

@@ -174,6 +174,21 @@ audit log. See `docs/security-architecture.md`.
 | GET | `/audit-events?userId=&action=&resource=&resourceId=&correlationId=&from=&to=&page=&pageSize=` | Paginated, capped at 200/page. |
 | GET | `/audit-events/summary?sinceDays=30` | `totalEvents`, zero-filled `byAction` counts for every `AuditAction`, `byResource` counts, 20 most recent events. |
 
+## Settings (`/settings`)
+
+Roles on all three routes: `PLATFORM_ADMIN` only — these configure a
+shared, installation-wide integration credential, not a per-tenant
+preference. Every response is `IntegrationSettingsStatus` — booleans/enums
+only; **none of these endpoints ever returns the key itself**, on a read
+or right after a write. See `docs/security-architecture.md`'s "Runtime-
+configurable secrets" section for the full encryption-at-rest design.
+
+| Method | Path | Notes |
+|---|---|---|
+| GET | `/settings/integrations` | `{ anthropicApiKeyConfigured, anthropicApiKeySource: 'database'\|'environment'\|'none' }`. |
+| PUT | `/settings/integrations/anthropic-api-key` | Body `{ apiKey: string }`. Encrypts (AES-256-GCM, `@cmmp/security`) and upserts into `PlatformSetting`; takes effect on the very next call `AiMappingService` makes, no API restart. 400 if the value looks too short to be real; 500 (with a clear message, not a stack trace) if `SETTINGS_ENCRYPTION_KEY` itself isn't configured or is malformed. |
+| DELETE | `/settings/integrations/anthropic-api-key` | Removes the stored key (idempotent). Falls back to the `ANTHROPIC_API_KEY` environment variable, if set, exactly as if none had ever been saved. |
+
 ## Health (`/health`) — no guard, excluded from `/api/v1` prefix
 
 | Method | Path | Notes |

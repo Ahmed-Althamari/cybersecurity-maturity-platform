@@ -1,5 +1,6 @@
 import type { AuditEventSummary } from '@cmmp/shared';
 import type { ExecutiveDashboard } from '@cmmp/shared';
+import type { IntegrationSettingsStatus } from '@cmmp/shared';
 import type { MaturityHeatmap } from '@cmmp/shared';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
@@ -335,6 +336,23 @@ export const api = {
     }),
 
   getAuditSummary: (token: string) => apiFetch<AuditEventSummary>(token, '/audit-events/summary'),
+
+  // PLATFORM_ADMIN only. Status only -- the API never returns the key
+  // itself, on any of these three calls; write-only from the UI's
+  // perspective by design.
+  getIntegrationSettings: (token: string) =>
+    apiFetch<IntegrationSettingsStatus>(token, '/settings/integrations'),
+
+  setAnthropicApiKey: (token: string, apiKey: string) =>
+    apiFetch<IntegrationSettingsStatus>(token, '/settings/integrations/anthropic-api-key', {
+      method: 'PUT',
+      body: JSON.stringify({ apiKey }),
+    }),
+
+  clearAnthropicApiKey: (token: string) =>
+    apiFetch<IntegrationSettingsStatus>(token, '/settings/integrations/anthropic-api-key', {
+      method: 'DELETE',
+    }),
 
   getRisk: (token: string, riskId: string) => apiFetch<RiskDetail>(token, `/risks/${riskId}`),
 

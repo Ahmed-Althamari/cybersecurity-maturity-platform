@@ -35,6 +35,11 @@ services:
       # file/variable is absent -- never commit a real secret to this file.
       JWT_SECRET: ${JWT_SECRET:-dev-jwt-secret-change-in-production-min-32-chars}
       CORS_ORIGIN: http://localhost:3000
+      # Both optional -- unset means "that feature is off" (AI-assisted
+      # import mapping unavailable / settings-UI key storage unavailable),
+      # not an error. See .env.example.
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      SETTINGS_ENCRYPTION_KEY: ${SETTINGS_ENCRYPTION_KEY:-}
     ports:
       - "3001:3001"
     # Applies pending Prisma migrations before every start -- safe to run on

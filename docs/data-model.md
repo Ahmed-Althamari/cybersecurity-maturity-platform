@@ -237,6 +237,25 @@ ImportJob (1) ──── (N) ImportRecord
   `GET /assessments/:id/dashboard*` family) is a fixed, code-defined set of
   widgets today, not user-configurable.
 
+### Platform Settings
+
+- `PlatformSetting` — a plain key/value table (`key` is itself the primary
+  key), added specifically so a `PLATFORM_ADMIN` can set the Anthropic API
+  key that powers `AiMappingService`'s column-mapping suggestion
+  (`docs/excel-import-guide.md`) live, from `/admin/settings`, instead of
+  only via an environment variable requiring a redeploy. `value` is always
+  AES-256-GCM ciphertext (`@cmmp/security`), never plaintext — this is the
+  one table in the schema that exists specifically to hold live secrets,
+  not application data or preferences. No `updatedById` column: who
+  changed a setting and when is already captured by the generic
+  `AuditEvent` interceptor (every `PUT`/`DELETE` on `SettingsController` is
+  logged like any other mutating request), so duplicating that here would
+  be redundant. Platform-wide, not tenant-scoped — there is exactly one
+  row per setting key across the whole installation, matching how the
+  environment variable it can override behaves today. See
+  `docs/security-architecture.md`'s "Runtime-configurable secrets" for the
+  full encryption design.
+
 ## Full entity-relationship diagram
 
 ```mermaid

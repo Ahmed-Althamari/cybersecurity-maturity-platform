@@ -22,6 +22,7 @@
     "@cmmp/framework-engine": "*",
     "@cmmp/import-engine": "*",
     "@cmmp/scoring-engine": "*",
+    "@cmmp/security": "*",
     "@cmmp/shared": "*",
     "@nestjs/common": "^10.2.8",
     "@nestjs/config": "^3.1.1",

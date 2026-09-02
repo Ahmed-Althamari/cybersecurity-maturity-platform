@@ -378,6 +378,22 @@ export interface AuthSession {
 }
 
 // ============================================================================
+// PLATFORM SETTINGS (write-only integration secrets -- see PlatformSetting)
+// ============================================================================
+
+/** Where a configured integration's credential is actually coming from right now. */
+export type IntegrationCredentialSource = "database" | "environment" | "none";
+
+/**
+ * Status only -- deliberately carries no key/secret material. A settings
+ * endpoint may return this; it must never return the credential itself.
+ */
+export interface IntegrationSettingsStatus {
+  anthropicApiKeyConfigured: boolean;
+  anthropicApiKeySource: IntegrationCredentialSource;
+}
+
+// ============================================================================
 // PAGINATION SCHEMA
 // ============================================================================
 

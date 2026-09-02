@@ -19,3 +19,4 @@ records what was decided and why, not a claim that it's 100% built out.
 | [0008](0008-multi-tenant-architecture.md) | Multi-tenant architecture | Accepted |
 | [0009](0009-nextauth-authentication.md) | NextAuth.js authentication | Accepted |
 | [0010](0010-github-devsecops-pipeline.md) | GitHub DevSecOps pipeline | Accepted |
+| [0011](0011-runtime-configurable-encrypted-settings.md) | Runtime-configurable encrypted settings | Accepted |

@@ -62,6 +62,11 @@ export default function AssessmentsPage() {
               <Link href="/audit">
                 <Button variant="outline">Audit Log</Button>
               </Link>
+              {session.user.roles.includes('PLATFORM_ADMIN') && (
+                <Link href="/admin/settings">
+                  <Button variant="outline">Settings</Button>
+                </Link>
+              )}
               <Button variant="outline" onClick={() => signOut({ callbackUrl: '/auth/signin' })}>
                 Sign Out
               </Button>

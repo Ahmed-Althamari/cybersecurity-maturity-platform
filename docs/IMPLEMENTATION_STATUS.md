@@ -1298,10 +1298,94 @@ practical value a fresh, correctly-styled chart already gets for free).
   suggestion against a live Claude API call (no `ANTHROPIC_API_KEY` is
   configured in this sandbox -- the graceful-fallback path was verified
   instead, which is the one path that matters when the feature is
-  disabled); an "import all tabs at once" mode; remembering a column
-  mapping between import sessions; parsing or recreating a workbook's own
-  embedded charts (see the rationale above for why a generated chart was
-  chosen instead).
+  disabled -- **update: a real network round-trip to the live Anthropic
+  API was exercised in the very next pass, see below**); an "import all
+  tabs at once" mode; remembering a column mapping between import
+  sessions; parsing or recreating a workbook's own embedded charts (see
+  the rationale above for why a generated chart was chosen instead).
+
+### Post-Phase-17: Runtime-Configurable Encrypted Settings (Anthropic API Key)
+User follow-up questions after the multi-sheet/AI-mapping pass: "is there
+UI for the configuration where the user can add the API key" (no --
+`ANTHROPIC_API_KEY` was env-var-only) and whether a secondary AI provider
+was available. Resolved (per the user's explicit choice, after presenting
+the tradeoffs) as: build a `PLATFORM_ADMIN`-only settings page to manage
+the Anthropic key live, encrypted at rest, write-only from the UI's
+perspective -- a secondary provider/model fallback was scoped out as a
+separate, not-yet-requested piece of work.
+
+- [x] **`@cmmp/security`'s first real implementation** -- this package was
+      an empty Phase-1 scaffold (`export {};`) until now. Added
+      `encrypt()`/`decrypt()`/`generateEncryptionKey()`
+      (`src/encryption/aes-gcm.ts`): AES-256-GCM, a fresh random IV per
+      encryption (never reused under the same key), a single `.`-joined
+      base64 payload (`iv.authTag.ciphertext`) safe to store in one string
+      column, and both a wrong key and a tampered ciphertext failing
+      closed via GCM's own authentication tag check (no separate integrity
+      check needed). 10 new tests.
+- [x] **`PlatformSetting` model** (`docs/data-model.md`) -- a plain
+      key/value table (migration `20260902062451_add_platform_settings`,
+      generated and applied against the real local Postgres, per this
+      project's established practice), holding AES-256-GCM ciphertext,
+      never plaintext. No `updatedById` column -- the existing
+      `AuditEvent` interceptor already captures who changed a setting and
+      when, for free, on every mutating request.
+- [x] **`SettingsService`/`SettingsController`** (`apps/api/src/settings/`)
+      -- `GET`/`PUT`/`DELETE /settings/integrations(/anthropic-api-key)`,
+      `PLATFORM_ADMIN` only, `@Roles()` applied per-method from the start
+      (the Phase-13 AuditController lesson, not re-learned the hard way).
+      Every response is `IntegrationSettingsStatus` (booleans/enums) --
+      the key itself is never serialized into any HTTP response, on a
+      read or immediately after the write that just set it. A database-
+      stored value takes priority over the `ANTHROPIC_API_KEY` environment
+      variable when both are set; a decrypt failure (e.g. a rotated
+      `SETTINGS_ENCRYPTION_KEY`) is treated as "not configured" (falls
+      back to the env var) rather than thrown, matching this whole
+      feature's existing fail-soft philosophy.
+- [x] **`AiMappingService` now resolves its key fresh on every call**
+      (via `SettingsService`) instead of caching a client built once at
+      construction time -- a key saved through the settings UI takes
+      effect on the very next import, with no API restart.
+- [x] **Settings page** (`apps/web/pages/admin/settings.tsx`) -- a status
+      badge (`Configured (saved here)` / `Configured (server environment
+      variable)` / `Not configured`), a password-type input that's never
+      pre-filled and is cleared immediately after a successful save, and
+      a "Clear Stored Key" button shown only when a database value
+      actually exists to clear. A friendly permission message (matching
+      the Audit page's existing pattern) on a 403, both from a direct
+      URL visit and from the nav link only rendering for
+      `PLATFORM_ADMIN` (`session.user.roles.includes('PLATFORM_ADMIN')`)
+      in the first place.
+- [x] Tests: 10 new tests in `packages/security` (round trip, random-IV
+      non-determinism, hex-vs-base64 key acceptance, empty-string
+      round trip, wrong-key-length rejection, wrong-decryption-key
+      failure, tampered-ciphertext failure, malformed-payload failure);
+      16 new tests in `apps/api` (`settings.service.spec.ts`: status
+      reporting per source, the full encrypt-then-decrypt round trip
+      through real `@cmmp/security` code -- not mocked -- trimming,
+      too-short rejection, missing/malformed-encryption-key errors, the
+      decrypt-failure-falls-back-to-env-var path, clear;
+      `settings.controller.spec.ts`: the same per-handler `@Roles()`
+      metadata regression test `AuditController`'s spec established) --
+      **143 tests total in `apps/api`, up from 127**.
+- [x] Live-verified end-to-end in a real browser against the real stack:
+      confirmed a non-`PLATFORM_ADMIN` (CISO) sees no Settings nav link
+      and gets a friendly permission message on a direct visit to
+      `/admin/settings`; confirmed a `PLATFORM_ADMIN` sees the link,
+      starts at "Not configured," saves a key (status flips to
+      "Configured (saved here)," input clears immediately), and --
+      critically -- **that the key is still never returned even after a
+      full page reload** (proving the write-only contract holds against a
+      fresh load, not just the same in-memory React state); cleared the
+      key back to "Not configured." Then, going one step further than the
+      previous pass could: saved a real (but intentionally invalid) key
+      through the live settings UI and triggered a real import column-
+      mapping-suggestion call -- the API log shows a genuine round trip to
+      Anthropic's real servers (`401 {"type":"authentication_error",
+      "message":"API key is invalid."}`), proving the full chain -- decrypt
+      the database-stored key, construct a real `Anthropic` client, make a
+      real network call -- actually works end-to-end, not just up to the
+      point a mock would have stopped.
 
 ## Known Issues 🐛
 

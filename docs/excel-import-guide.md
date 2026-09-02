@@ -190,9 +190,13 @@ each still-unmapped field.
 
 This is an **enhancement, never a dependency**:
 
-- Requires `ANTHROPIC_API_KEY` to be set server-side (see
-  `docs/security-architecture.md`'s pattern for secrets). Unset ->
-  the endpoint returns `{ mapping: {} }` immediately, no API call made.
+- Requires an Anthropic API key configured server-side -- either the
+  `ANTHROPIC_API_KEY` environment variable, or a value a `PLATFORM_ADMIN`
+  saved live through **Settings** in the app (`/admin/settings`,
+  encrypted at rest -- see `docs/security-architecture.md`'s "Runtime-
+  configurable secrets"), which takes priority when both are set. Neither
+  configured -> the endpoint returns `{ mapping: {} }` immediately, no API
+  call made.
 - A network error, a malformed response, or any other failure is caught
   and logged; the endpoint still returns `{ mapping: {} }` rather than an
   error — the import flow is never blocked by an AI-suggestion failure.

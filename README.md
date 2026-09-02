@@ -387,7 +387,7 @@ Comprehensive documentation available in `/docs`:
 - `deployment-guide.md` - Docker/Compose & GHCR publish guide
 - `devsecops-pipeline.md` - What every CI/security workflow actually does
 - `threat-model.md` - STRIDE analysis with a ranked priority list
-- `adr/` - Architecture Decision Records (0001-0010)
+- `adr/` - Architecture Decision Records (0001-0011)
 - `IMPLEMENTATION_STATUS.md` - Phase-by-phase build log & progress tracker
 
 ## CI/CD Pipeline

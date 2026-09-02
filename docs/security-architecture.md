@@ -229,6 +229,47 @@ middleware that injects a tenant filter automatically):
   Docker build context, so a real `.env` file's contents can't end up
   baked into an image layer via a stray `COPY . .`.
 
+### Runtime-configurable secrets (`PlatformSetting`)
+
+One secret — the `ANTHROPIC_API_KEY` that powers `AiMappingService`'s
+column-mapping suggestion (`docs/excel-import-guide.md`) — can *also* be
+set live by a `PLATFORM_ADMIN` through `/admin/settings` in the app
+(`docs/api-reference.md`'s `/settings` routes), rather than only via an
+environment variable requiring a redeploy. This is a second, database-
+backed secrets path alongside the env-var one above, so its design is
+worth stating explicitly:
+
+- **Encrypted at rest, never plaintext in the database.** `PlatformSetting.value`
+  stores AES-256-GCM ciphertext (`@cmmp/security`'s `encrypt()`/`decrypt()`
+  — this package's first real implementation, previously an empty Phase-1
+  scaffold) under a separate `SETTINGS_ENCRYPTION_KEY` environment
+  variable — itself still a plain env var, since something has to anchor
+  the chain and turning *that* into a database-stored value too would just
+  move the problem in a circle. Losing or rotating `SETTINGS_ENCRYPTION_KEY`
+  makes a previously-saved value undecryptable; `SettingsService` treats
+  that as "not configured" (falls back to the env var, if any) rather than
+  throwing, consistent with this feature being a pure enhancement
+  everywhere else.
+- **Write-only from the UI's perspective.** `GET`/`PUT`/`DELETE
+  /settings/integrations/anthropic-api-key` all return only
+  `IntegrationSettingsStatus` (a boolean + an enum) — never the key, not
+  even right after the `PUT` that just set it. The settings page never
+  pre-fills the input with a real value; there is nothing to leak even if
+  the response were somehow logged.
+- **`PLATFORM_ADMIN` only, `@Roles()` on every handler method** — the same
+  per-method pattern the Audit Events fix (above) established, applied
+  here from the start rather than learned the hard way a second time.
+- **Takes effect immediately.** `AiMappingService` resolves the key fresh
+  on every call (database value first, environment variable fallback) —
+  it does not cache a client or a key at construction time, so a saved
+  change is live for the very next import with no API restart.
+- **The write path itself is audited** — `PUT`/`DELETE` are ordinary
+  mutating requests, so the global `AuditInterceptor` logs who changed the
+  integration setting and when, the same as every other resource — see
+  "Audit logging" above. The logged `newValue` is the response body
+  (`IntegrationSettingsStatus`), never the request body, so the key is
+  never at risk of ending up in the audit trail either.
+
 ## Container & pipeline security
 
 - Both runtime images run as a dedicated non-root user, on a pinned
