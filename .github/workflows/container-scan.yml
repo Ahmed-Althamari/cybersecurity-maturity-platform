@@ -44,7 +44,14 @@ jobs:
           cache-to: type=gha,mode=max,scope=${{ matrix.image }}
 
       - name: Scan image (Trivy)
-        uses: aquasecurity/trivy-action@0.28.0
+        # Pinned to a commit SHA, not a mutable version tag, per GHSA-69fq-xp46-6x23:
+        # a March 2026 supply-chain compromise force-pushed 76 of 77 trivy-action
+        # version tags (everything below 0.35.0) to malware-injected commits. This
+        # SHA is tag 0.35.0, the first version GitHub's immutable-releases
+        # protection covers (confirmed unaffected by the hijack) -- see the
+        # Dependabot alert this fixed (dependabot/alerts) for the incident this
+        # was caught by.
+        uses: aquasecurity/trivy-action@57a97c7e7821a5776cebc9bb87c984fa69cba8f1 # 0.35.0
         with:
           image-ref: cmmp-${{ matrix.image }}:ci
           format: sarif

@@ -2372,6 +2372,20 @@ Flip back to uploading if GHAS gets enabled. `codeql.yml` also needed
 each action's own docs suggested — both confirmed by real 403s on this
 repo's Actions runs, not guessed.
 
+**[Fixed] Critical: `aquasecurity/trivy-action@0.28.0` was a real, live
+supply-chain risk**, not a theoretical audit finding — Dependabot flagged
+it (CVSS v4 9.4, CVE-2026-33634 / GHSA-69fq-xp46-6x23) within minutes of
+this branch reaching GitHub. In March 2026 a threat actor used compromised
+maintainer credentials to force-push 76 of 77 `trivy-action` version tags
+(everything below 0.35.0, including 0.28.0) to commits injecting a
+credential-stealing infostealer into `entrypoint.sh` — it dumps runner
+process memory and sweeps the filesystem for cloud/SSH/DB credentials
+before the actual Trivy scan ever runs. `container-scan.yml` now pins
+`aquasecurity/trivy-action` to 0.35.0's commit SHA (the first version
+covered by GitHub's immutable-releases protection, confirmed unaffected)
+rather than a mutable tag, per the advisory's own recommendation. No
+other Actions-ecosystem dependency was flagged.
+
 **Branch protection on `main` is not configured** — confirmed (twice: both
 classic branch protection and the newer rulesets API) that GitHub requires
 GitHub Pro or a public repo to protect a branch on a private
