@@ -102,11 +102,29 @@ need to change shape, just gain rotation.
   now calls a shared `signOutAndRevoke()` (`apps/web/lib/auth.ts`) that
   calls `POST /auth/logout` first (best-effort — a failed call still lets
   the user sign out client-side) and then NextAuth's `signOut()`.
-- **Still open**: no password-change-triggered revocation (there is no
-  password-change endpoint yet, so this doesn't currently apply to
-  anything real); a stolen token used *before* logout catches up with it
-  remains valid for that window — inherent to any blacklist-based scheme,
-  not specific to this implementation.
+- **Password-change-triggered revocation.** `POST /auth/change-password`
+  verifies the caller's current password, then stamps
+  `User.passwordChangedAt = now()` rather than writing individual
+  `RevokedToken` rows — there's no per-session token table to enumerate
+  every outstanding token for a user, so instead `JwtStrategy.validate()`
+  rejects *any* token whose issue time predates that stamp, for every
+  request going forward. A fresh token is minted and returned in the same
+  response so the caller's own session survives the change; every other
+  outstanding token (another device, a stolen/leaked one) does not.
+- **Millisecond precision, deliberately not the standard `iat` claim.**
+  `iat` is 1-second resolution, which isn't fine enough to correctly order
+  a token issued in the same wall-clock second as a password change — this
+  was caught as a real, intermittent integration-test failure (not a
+  theoretical concern) before the fix. `JwtPayload` carries its own
+  `issuedAtMs` claim, set explicitly at sign time (login, refresh, and
+  change-password), and `JwtStrategy` compares that against
+  `passwordChangedAt` (also millisecond-precision) instead.
+- **Still open**: a stolen token used *before* logout or a password change
+  catches up with it remains valid for that window — inherent to any
+  blacklist-based scheme, not specific to this implementation. No frontend
+  UI was built for this endpoint this pass (see
+  `docs/IMPLEMENTATION_STATUS.md`) — it's reachable today only via the API
+  directly.
 
 ## CSRF
 

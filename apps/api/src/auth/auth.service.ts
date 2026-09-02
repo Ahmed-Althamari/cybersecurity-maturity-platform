@@ -8,7 +8,11 @@ import * as bcrypt from 'bcryptjs';
 import { AuditService } from '../audit/audit.service';
 import { PrismaService } from '../prisma/prisma.service';
 
+import { ChangePasswordDto } from './dto/change-password.dto';
 import { LoginDto } from './dto/login.dto';
+import type { AuthenticatedUser } from './types/authenticated-user';
+
+const SALT_ROUNDS = 12;
 
 export interface JwtPayload {
   sub: string;
@@ -21,6 +25,18 @@ export interface JwtPayload {
   // Unique per issued token -- the revocation list (RevokedToken) key.
   // See JwtStrategy.validate() for where this is actually enforced.
   jti: string;
+  // Millisecond-precision issue time, set explicitly at sign time here --
+  // deliberately *not* the standard `iat` claim, which @nestjs/jwt derives
+  // itself at second precision. JwtStrategy compares this against the
+  // user's passwordChangedAt (also millisecond-precision) to decide
+  // whether a token predates their last password change; `iat`'s 1-second
+  // resolution isn't fine enough to make that call correctly for a token
+  // issued in the same wall-clock second as the change (confirmed by a
+  // real, intermittent integration-test failure under fast/parallel
+  // execution before this field existed). Optional only so existing call
+  // sites/tests that don't care about password-change revocation (e.g.
+  // logout's already-narrower payload) don't need to fabricate one.
+  issuedAtMs?: number;
 }
 
 // What's actually available on a verified/decoded token (request.user, or
@@ -75,6 +91,7 @@ export class AuthService {
       role: roles[0] ?? 'READ_ONLY_VIEWER',
       roles,
       jti: randomUUID(),
+      issuedAtMs: Date.now(),
     };
 
     await this.auditService.log({
@@ -137,8 +154,60 @@ export class AuthService {
     // valid until its own 24h expiry too (see docs/threat-model.md).
     await this.revokeToken(jti, rest.tenantId, rest.sub, new Date(exp * 1000));
 
-    const newToken = this.jwtService.sign({ ...rest, jti: randomUUID() });
+    const newToken = this.jwtService.sign({ ...rest, jti: randomUUID(), issuedAtMs: Date.now() });
     return { access_token: newToken };
+  }
+
+  async changePassword(user: AuthenticatedUser, dto: ChangePasswordDto, context: RequestContext = {}) {
+    const record = await this.prisma.user.findFirst({
+      where: { id: user.sub, tenantId: user.tenantId, isActive: true, deletedAt: null },
+    });
+    if (!record || !record.passwordHash) {
+      throw new UnauthorizedException('Current password is incorrect');
+    }
+
+    const currentPasswordValid = await bcrypt.compare(dto.currentPassword, record.passwordHash);
+    if (!currentPasswordValid) {
+      throw new UnauthorizedException('Current password is incorrect');
+    }
+
+    const newPasswordHash = await bcrypt.hash(dto.newPassword, SALT_ROUNDS);
+    await this.prisma.user.update({
+      where: { id: record.id },
+      data: { passwordHash: newPasswordHash, passwordChangedAt: new Date() },
+    });
+
+    await this.auditService.log({
+      tenantId: user.tenantId,
+      userId: user.sub,
+      action: AuditAction.UPDATE,
+      resource: 'Auth',
+      resourceId: user.sub,
+      description: `${user.email} changed their password`,
+      ipAddress: context.ipAddress,
+      userAgent: context.userAgent,
+    });
+
+    // Every token issued before the passwordChangedAt write above --
+    // including the one used to make this very request -- is now rejected
+    // by JwtStrategy's passwordChangedAt check (see that file), so a fresh
+    // one is minted here for the caller. Any other outstanding token (a
+    // stolen/leaked one, a session on another device) is now dead: this is
+    // what "changing your password logs out every other session" means in
+    // a stateless-JWT system with no per-session token table to enumerate.
+    const newToken = this.jwtService.sign({
+      sub: user.sub,
+      email: user.email,
+      name: user.name,
+      tenantId: user.tenantId,
+      organisationId: user.organisationId,
+      role: user.role,
+      roles: user.roles,
+      jti: randomUUID(),
+      issuedAtMs: Date.now(),
+    });
+
+    return { access_token: newToken, message: 'Password changed successfully' };
   }
 
   private async revokeToken(jti: string, tenantId: string, userId: string, expiresAt: Date) {

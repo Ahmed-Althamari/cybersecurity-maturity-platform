@@ -36,6 +36,7 @@ describe('@ExecutiveDashboardAccessible() wiring', () => {
     expect(isAccessible(AuthController.prototype.logout)).toBe(true);
     expect(isAccessible(AuthController.prototype.refresh)).toBe(true);
     expect(isAccessible(AuthController.prototype.getCurrentUser)).toBe(true);
+    expect(isAccessible(AuthController.prototype.changePassword)).toBe(true);
     expect(isAccessible(AuthController.prototype.login)).toBe(false);
   });
 });

@@ -140,15 +140,20 @@ model User {
   organisationId String?
   organisation   Organisation? @relation(fields: [organisationId], references: [id])
 
-  email         String
-  name          String
-  passwordHash  String?
-  isActive      Boolean   @default(true)
-  emailVerified DateTime?
-  lastLogin     DateTime?
-  createdAt     DateTime  @default(now())
-  updatedAt     DateTime  @updatedAt
-  deletedAt     DateTime?
+  email             String
+  name              String
+  passwordHash      String?
+  isActive          Boolean   @default(true)
+  emailVerified     DateTime?
+  lastLogin         DateTime?
+  // Every JWT with an `iat` before this timestamp is treated as revoked
+  // (see JwtStrategy.validate()) -- set on a successful POST
+  // /auth/change-password so changing your password logs out every other
+  // outstanding session, not just the one that changed it.
+  passwordChangedAt DateTime?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+  deletedAt         DateTime?
 
   // Relations
   auditEvents        AuditEvent[]

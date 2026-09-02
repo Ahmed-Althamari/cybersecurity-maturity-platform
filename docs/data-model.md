@@ -57,6 +57,12 @@ User (1) ──── (N) UserRoleAssignment
 
 - `User.passwordHash` is nullable (room for a future non-password auth
   method) and `bcryptjs`-hashed when present (see `apps/api/src/auth`).
+- `User.passwordChangedAt` (nullable `DateTime`) is stamped by
+  `POST /auth/change-password` and otherwise left untouched. It isn't a
+  general "last modified" audit field — it's read by exactly one place
+  (`JwtStrategy.validate()`) to reject any JWT issued before that moment,
+  which is how a password change revokes every other outstanding token
+  for that user without a separate per-session token table to enumerate.
 - `User` has **no single `role` column in the schema** — role is entirely
   represented via `UserRoleAssignment`, a join-style table allowing a user
   to hold *multiple* roles, optionally scoped to a specific

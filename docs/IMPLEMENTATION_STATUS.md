@@ -2099,6 +2099,75 @@ from the picker, with no way to reach them at all.
   action (linking a remediation initiative to a risk), that's judged an
   acceptable trade-off rather than justifying a new UI dependency.
 
+### Post-Phase-17: Password-Change Endpoint + Revocation Hook
+The last documented gap in the token-revocation feature (Post-Phase-17,
+above): "no password-change-triggered revocation (there is no
+password-change endpoint yet)." There was genuinely no way for a user to
+change their own password at all -- `POST /users` and `PATCH /users/:id`
+are admin-only account management, not a self-service credential change.
+
+- [x] `POST /auth/change-password` (`ChangePasswordDto`:
+      `currentPassword`, `newPassword` min 12 chars -- same floor as
+      `CreateUserDto`). Verifies the current password against the stored
+      bcrypt hash before doing anything else; `401` on mismatch, `400` on
+      a too-short new password, nothing written to the row in either case.
+- [x] `User.passwordChangedAt` (new nullable `DateTime` column, migration
+      `20260902123858_add_password_changed_at`) is stamped on a successful
+      change. There's no per-session token table to enumerate and revoke
+      individually (this is a stateless-JWT system, deliberately, per
+      `docs/architecture.md`), so instead `JwtStrategy.validate()` rejects
+      *any* token whose issue time predates that stamp -- covering every
+      outstanding session for that user, not just the one used to make
+      the change. A fresh token is minted and returned in the same
+      response so the caller's own session survives.
+- [x] Fixed a real precision bug caught by this work, not a hypothetical
+      one: comparing the standard `iat` claim (1-second resolution)
+      against `passwordChangedAt` (millisecond resolution) intermittently
+      let a same-second token through revocation -- confirmed as an
+      actual, non-deterministic integration-test failure under the full
+      suite's faster back-to-back execution before the fix (a solo run of
+      the new spec passed every time; the full suite's tighter timing
+      surfaced it). Fixed by adding a custom `issuedAtMs` claim, set
+      explicitly (not derived) at every sign site -- `login()`,
+      `refreshToken()`, and `changePassword()` -- and comparing that
+      against `passwordChangedAt` at full millisecond precision instead
+      of floor-to-the-second `iat`. Confirmed fixed by 4 consecutive full
+      `test:integration` runs, all green, after being red under the exact
+      same conditions before.
+- [x] `@ExecutiveDashboardAccessible()` applied, matching every other
+      session-lifecycle route (`logout`/`refresh`/`me`) -- an
+      `EXECUTIVE_VIEWER`-only user can still change their own password;
+      the new `executive-dashboard-accessible.wiring.spec.ts` regression
+      case would catch a future refactor that quietly dropped it.
+- [x] Tests: 5 new `AuthService` unit cases (wrong current password
+      rejected without touching the row; unresolvable user rejected;
+      hash + `passwordChangedAt` persisted correctly; audit event logged;
+      fresh token has a new `jti`), 5 new `JwtStrategy` cases covering the
+      `issuedAtMs`/`passwordChangedAt` comparison's actual boundaries
+      (no `passwordChangedAt` set; issued before/after/in the exact same
+      millisecond; no `issuedAtMs` claim at all), and a new
+      `change-password.integration-spec.ts` (3 tests) against the real
+      running app and real Postgres, using its own throwaway
+      tenant/org/user rather than the shared seeded demo tenant since
+      this suite mutates a password -- 193 unit tests / 24 suites and 25
+      integration tests / 8 suites, all green.
+- [x] Live-verified twice: once via the integration suite above, and
+      separately by hand against a real running `dist/main.js` server and
+      a scratch user inserted directly via `psql` -- logged in twice
+      (two outstanding tokens), changed the password with the first,
+      confirmed *both* tokens now 401 on `/auth/me`, confirmed the fresh
+      token from the response still works, confirmed the old password no
+      longer logs in and the new one does. Scratch user and its rows
+      deleted afterward.
+- **Not built this pass**: no frontend UI. There's no account/profile
+  settings page in this app at all yet (`/admin/settings` is
+  `PLATFORM_ADMIN`-only Anthropic-key management, not a general user
+  settings page), and wiring a password-change form into NextAuth's
+  credentials-based session flow (issuing the new backend token without
+  forcing a full re-login client-side) is a distinct, larger UI task the
+  original gap didn't ask for. The endpoint is real, tested, and
+  live-verified end-to-end; it's just not reachable from the web app yet.
+
 ## Known Issues 🐛
 
 - ~~Root `.eslintrc.json` references missing ESLint plugins~~ — fixed in

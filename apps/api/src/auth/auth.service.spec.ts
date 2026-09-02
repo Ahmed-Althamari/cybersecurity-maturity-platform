@@ -184,4 +184,79 @@ describe('AuthService', () => {
 
     expect(prisma.revokedToken.upsert).not.toHaveBeenCalled();
   });
+
+  describe('changePassword', () => {
+    const callingUser = {
+      sub: 'user-1',
+      email: 'ciso@example.local',
+      name: 'CISO',
+      tenantId: 'tenant-1',
+      organisationId: 'org-1',
+      role: 'CISO',
+      roles: ['CISO'],
+      jti: 'old-jti',
+      exp: Math.floor(Date.now() / 1000) + 3600,
+    };
+
+    it('rejects an incorrect current password without touching the row', async () => {
+      await expect(
+        authService.changePassword(callingUser, {
+          currentPassword: 'wrong-password',
+          newPassword: 'BrandNewPassword123!',
+        }),
+      ).rejects.toThrow(UnauthorizedException);
+      expect(prisma.user.update).not.toHaveBeenCalled();
+    });
+
+    it('rejects a user that no longer resolves (deleted/deactivated/wrong tenant)', async () => {
+      prisma.user.findFirst.mockResolvedValueOnce(null);
+      await expect(
+        authService.changePassword(callingUser, {
+          currentPassword: 'CorrectHorseBattery1!',
+          newPassword: 'BrandNewPassword123!',
+        }),
+      ).rejects.toThrow(UnauthorizedException);
+      expect(prisma.user.update).not.toHaveBeenCalled();
+    });
+
+    it('hashes and persists the new password, and stamps passwordChangedAt', async () => {
+      await authService.changePassword(callingUser, {
+        currentPassword: 'CorrectHorseBattery1!',
+        newPassword: 'BrandNewPassword123!',
+      });
+
+      expect(prisma.user.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: 'user-1' },
+          data: expect.objectContaining({ passwordChangedAt: expect.any(Date) }),
+        }),
+      );
+      const newHash = prisma.user.update.mock.calls[0][0].data.passwordHash;
+      expect(newHash).not.toBe(undefined);
+      await expect(bcrypt.compare('BrandNewPassword123!', newHash)).resolves.toBe(true);
+    });
+
+    it('logs an audit event for the password change', async () => {
+      await authService.changePassword(callingUser, {
+        currentPassword: 'CorrectHorseBattery1!',
+        newPassword: 'BrandNewPassword123!',
+      });
+
+      expect(auditService.log).toHaveBeenCalledWith(
+        expect.objectContaining({ action: 'UPDATE', tenantId: 'tenant-1', userId: 'user-1' }),
+      );
+    });
+
+    it('returns a fresh access token with a new jti, distinct from the one used to call it', async () => {
+      const result = await authService.changePassword(callingUser, {
+        currentPassword: 'CorrectHorseBattery1!',
+        newPassword: 'BrandNewPassword123!',
+      });
+
+      expect(result.access_token).toBeDefined();
+      const payload = await authService.validateToken(result.access_token);
+      expect(payload.sub).toBe('user-1');
+      expect(payload.jti).not.toBe('old-jti');
+    });
+  });
 });

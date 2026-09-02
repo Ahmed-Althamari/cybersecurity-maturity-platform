@@ -3,9 +3,12 @@ import { ThrottlerGuard } from '@nestjs/throttler';
 import type { Request } from 'express';
 
 import { AuthService } from './auth.service';
+import { CurrentUser } from './decorators/current-user.decorator';
 import { ExecutiveDashboardAccessible } from './decorators/executive-dashboard-accessible.decorator';
+import { ChangePasswordDto } from './dto/change-password.dto';
 import { LoginDto } from './dto/login.dto';
 import { JwtAuthGuard } from './guards/jwt-auth.guard';
+import type { AuthenticatedUser } from './types/authenticated-user';
 
 @Controller('auth')
 export class AuthController {
@@ -50,6 +53,20 @@ export class AuthController {
       throw new Error('No token provided');
     }
     return this.authService.refreshToken(token);
+  }
+
+  @Post('change-password')
+  @UseGuards(JwtAuthGuard)
+  @ExecutiveDashboardAccessible()
+  async changePassword(
+    @Body() dto: ChangePasswordDto,
+    @CurrentUser() user: AuthenticatedUser,
+    @Req() req: Request,
+  ) {
+    return this.authService.changePassword(user, dto, {
+      ipAddress: req.ip,
+      userAgent: req.headers['user-agent'],
+    });
   }
 
   @Get('me')
