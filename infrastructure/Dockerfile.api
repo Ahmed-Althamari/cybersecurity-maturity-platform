@@ -30,6 +30,13 @@ RUN npm run build
 FROM node:20-alpine AS runner
 WORKDIR /app
 ENV NODE_ENV=production
+# Prisma's query engine binary dynamically links against libssl, which
+# Alpine doesn't ship by default -- without this the container starts,
+# immediately fails with a PrismaClientInitializationError, and exits 1
+# before ever binding to a port (confirmed on a real `docker compose up`
+# run in CI: cmmp-api exited (1) within ~1.5s of starting, too fast for
+# anything but this).
+RUN apk add --no-cache openssl
 RUN addgroup -S cmmp && adduser -S cmmp -G cmmp
 
 # A monorepo's built app can't be copied in isolation the way a standalone

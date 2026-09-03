@@ -58,14 +58,22 @@ export default function RiskDetailPage() {
 
   // Debounce the search box so every keystroke doesn't fire a request --
   // resets to page 1 since a new search invalidates the old result set's
-  // page count.
+  // page count. Guarded on the trimmed value actually changing: this effect
+  // also runs on mount (and after its own debounced update lands), and
+  // without the guard that stale mount-time timer fires ~300ms later and
+  // resets the page back to 1 even if the user had already paged forward
+  // in the meantime.
   useEffect(() => {
+    const trimmed = initiativeSearchInput.trim();
+    if (trimmed === initiativeSearch) {
+      return;
+    }
     const handle = setTimeout(() => {
-      setInitiativeSearch(initiativeSearchInput.trim());
+      setInitiativeSearch(trimmed);
       setInitiativePage(1);
     }, 300);
     return () => clearTimeout(handle);
-  }, [initiativeSearchInput]);
+  }, [initiativeSearchInput, initiativeSearch]);
 
   useEffect(() => {
     if (sessionStatus !== 'authenticated') return;

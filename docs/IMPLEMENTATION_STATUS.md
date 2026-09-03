@@ -2428,11 +2428,15 @@ conflict on its merits rather than wholesale-favoring either side:
   Actions runs: `actions: read` on CodeQL, `pull-requests: read` on
   Gitleaks, and `upload: never` + artifact archival instead of
   `upload-sarif` on both CodeQL and Trivy (the GHAS-paywall finding above).
-- A few genuine small-scale combinations rather than one-side-wins: e.g.
-  `RolesGuard` ended up using the proceed branch's Reflector-based metadata
-  lookup (fixing a real bug the `main`-side version still had) together
-  with `main`'s multi-role authorization check (a correctness improvement
-  `main` had that `proceed` didn't).
+- `RolesGuard`: first attempt combined `main`'s constructor-injected
+  `Reflector` with `proceed`'s multi-role check — this broke
+  `roles.guard.spec.ts` (`proceed`'s own test, untouched by the merge),
+  which instantiates the guard with zero constructor args and mocks
+  `Reflect.getMetadata` directly. Reverted to `proceed`'s actual tested
+  `Reflect.getMetadata` implementation, keeping its multi-role check. Caught
+  only because the full suite was re-run after the merge, not assumed to
+  pass — went from "187 passed, 1 suite failed" to "193 tests passed, 24
+  suites passed" after the fix.
 - `package-lock.json` was regenerated from scratch post-merge rather than
   hand-resolved (not realistic to merge a ~20k-line generated file by hand).
 
@@ -2442,6 +2446,47 @@ branch was verified before it merged. `claude/proceed-bo89gm`'s own CI/
 Docker work was never run against a real Actions runner either (see Next
 Steps #9) — so this merge is the first time either session's full pipeline
 gets a real end-to-end check. Expect to find and fix something.
+
+### PR #20 first real-run failures (2026-09-02/04)
+
+As predicted above, the merged pipeline's first real run (PR #20,
+`merge/proceed-into-main` → `main`) surfaced four genuine bugs that no
+local run had ever exercised, none of them merge-conflict artifacts — all
+root-caused against actual GitHub Actions logs (`gh run view --log`) and
+fixed:
+
+- **`db:seed` failing in `integration-tests`/`e2e-tests`**:
+  `Cannot find module '.../@cmmp/framework-engine/dist/index.js'`.
+  `prisma/seed.ts` imports the built `dist/` output of `@cmmp/framework-engine`,
+  but neither job ever ran `npm run build` before seeding — only
+  `lint-and-typecheck`, `unit-tests`, and `build` happened to. Fixed by
+  adding `npm run build` to both jobs, between `db:generate` and
+  `db:migrate`.
+- **`Unit Tests` failing on `risk-detail-initiative-picker.test.tsx`**: a
+  real bug in [id].tsx's search-debounce effect (`apps/web/pages/risks/[id].tsx`),
+  not a flaky test. The debounce `useEffect` (deps: `[initiativeSearchInput]`)
+  runs on mount like every effect, scheduling a 300ms timer that
+  unconditionally resets `initiativePage` to 1 when it fires — even though
+  the search term never changed. In the "advances to the next page" test
+  (and, rarely, for a real user), clicking Next within that first 300ms
+  window advances the page, then the stale mount-time timer fires anyway and
+  silently resets it back to page 1, firing a spurious third API call for
+  page 1 instead of the expected page 2. Fixed by guarding the effect on the
+  trimmed input actually differing from the current committed search value
+  before scheduling the timer.
+- **`ZAP Baseline Scan` failing at "Start the stack"**: `cmmp-api` exited
+  (1) roughly 1.5 seconds after starting — too fast to be anything but an
+  immediate crash, not an app-level bug. Root cause: Prisma's query engine
+  binary dynamically links `libssl`, which `node:20-alpine` doesn't ship by
+  default; without it the engine fails to load and the process exits before
+  binding to a port. This is Prisma's own documented Alpine requirement —
+  never hit before because this was the first real `docker compose up` of
+  the merged stack. Fixed by adding `RUN apk add --no-cache openssl` to
+  `infrastructure/Dockerfile.api`'s runner stage (matches Prisma's official
+  Docker guidance; the builder stage doesn't need it since `prisma generate`
+  never loads the engine binary, only `migrate`/queries do).
+- **`Security Gate` failing**: purely downstream of the three failures
+  above (it aggregates every other job's result) — no separate fix needed.
 
 ## Next Steps
 
