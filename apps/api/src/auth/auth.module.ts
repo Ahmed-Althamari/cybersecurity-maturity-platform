@@ -7,6 +7,7 @@ import { PrismaModule } from '../prisma/prisma.module';
 import { AuthController } from './auth.controller';
 import { AuthService } from './auth.service';
 import { resolveJwtSecret } from './jwt-secret';
+import { RevokedTokenCleanupService } from './revoked-token-cleanup.service';
 import { JwtStrategy } from './strategies/jwt.strategy';
 
 @Module({
@@ -18,7 +19,7 @@ import { JwtStrategy } from './strategies/jwt.strategy';
     }),
     PrismaModule,
   ],
-  providers: [AuthService, JwtStrategy],
+  providers: [AuthService, JwtStrategy, RevokedTokenCleanupService],
   controllers: [AuthController],
   exports: [AuthService, JwtModule],
 })

@@ -200,10 +200,9 @@ different session's token, since each login mints its own `jti`.
 `POST /auth/refresh` mints a new token (its own fresh `jti`) **and**
 revokes the token it was called with, via the same mechanism — so a
 leaked pre-refresh token can't go on being used indefinitely just
-because its holder refreshes regularly. Revoked rows have no pruning
-job; they accumulate past their own `expiresAt` with no correctness
-impact (an expired token is rejected on expiry alone regardless) but a
-real operational one at scale.
+because its holder refreshes regularly. `RevokedTokenCleanupService`
+(`@nestjs/schedule`, hourly) deletes revoked rows once their own
+`expiresAt` has passed, so the table doesn't grow without bound.
 
 ### Tenant isolation
 

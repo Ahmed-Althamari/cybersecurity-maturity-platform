@@ -1636,6 +1636,50 @@ ecosystem).
   `.prisma/client`), `npm run test:e2e` (36/36), `npm run lint` clean,
   plus the live upload verification above.
 
+### Pruning expired RevokedToken rows
+Closes the last of the smaller, well-scoped items left in Next Steps
+after the priority list itself was cleared above: nothing deleted a
+`RevokedToken` row once its own `expiresAt` had passed, so the table
+would grow without bound (harmless correctness-wise — an expired token
+is rejected on expiry alone regardless — but a real operational
+concern at scale, and explicitly named as such in
+`docs/security-architecture.md`'s Gaps list until now).
+- Added `@nestjs/schedule` (`^6.1.3` — the latest release still
+  supporting this repo's pinned NestJS 10.x via peer deps; the current
+  major, `12.x`, requires NestJS 12) as a new direct dependency of
+  `@cmmp/api`. Checked it doesn't introduce any new `npm audit`
+  findings of its own (it doesn't — confirmed via a real re-run, not
+  assumed) and that the lockfile diff is limited to its own dependency
+  tree.
+- New `RevokedTokenCleanupService` (`apps/api/src/auth/`),
+  `@Cron(CronExpression.EVERY_HOUR)`, deletes rows where
+  `expiresAt < now`. Registered as a provider in `AuthModule`
+  (revocation is that module's own concern); `ScheduleModule.forRoot()`
+  added once, globally, to `AppModule` — required for any module's
+  `@Cron()` to actually fire, not just this one.
+- New `revoked-token-cleanup.service.spec.ts` (2 tests: deletes with
+  the correct `expiresAt < now` filter, handles the zero-expired case
+  without erroring).
+- Verified live against the real database rather than trusting the
+  mocked unit test alone: inserted one already-expired and one
+  future-dated `RevokedToken` row directly via `psql`, ran the exact
+  same `PrismaService`/`RevokedTokenCleanupService` the app uses
+  end-to-end via a throwaway script (not the mocked mode the unit test
+  uses), confirmed precisely the expired row was deleted and the
+  future-dated one survived untouched.
+- Also confirmed the full e2e suite (which boots and closes a real
+  `AppModule` — now including a registered cron job — five times
+  across five spec files) doesn't hang or leak an open handle on
+  `app.close()`; `@nestjs/schedule` tears its registered jobs down on
+  module destroy.
+- Docs updated in the same pass: `docs/security-architecture.md` (new
+  Controls-table row, the corresponding Gaps-list bullet removed),
+  `docs/architecture.md`'s Token revocation subsection, this file's own
+  Next Steps list.
+- Full verification: `npx turbo run type-check test build` (27/27, unit
+  tests 119/119), `npm run test:e2e` (42/42), `npm run lint` clean,
+  plus the live pruning verification above.
+
 ## Next Steps
 
 What's left, roughly in priority order. Every item from
@@ -1706,9 +1750,6 @@ punt on the rest pending dedicated major-version-bump work):
    own scoped PR with real testing afterward (a browser pass for
    Next.js, the full test suite plus manual verification for NestJS) —
    not something to do blind in an autonomous pass.
-10. No pruning job exists for `RevokedToken` rows past their own
-    `expiresAt` — no correctness impact today, but a real operational
-    one once the table has accumulated enough history at scale.
 
 ## Contact & Questions
 

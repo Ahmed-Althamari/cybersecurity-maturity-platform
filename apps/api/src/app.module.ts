@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { APP_GUARD } from '@nestjs/core';
+import { ScheduleModule } from '@nestjs/schedule';
 import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
 
 import { AssessmentsModule } from './assessments/assessments.module';
@@ -31,6 +32,9 @@ import { UsersModule } from './users/users.module';
         limit: Number(process.env.RATE_LIMIT_MAX_REQUESTS) || 100,
       },
     ]),
+    // Registered once, globally, so any module's @Cron() decorator works — currently only
+    // AuthModule's RevokedTokenCleanupService uses it.
+    ScheduleModule.forRoot(),
     PrismaModule,
     HealthModule,
     AuditModule,
