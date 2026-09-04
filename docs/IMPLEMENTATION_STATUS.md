@@ -4,8 +4,8 @@ Last Updated: 2026-09-04
 
 ## Overall Progress
 
-**Phase**: 6 / 17
-**Completion**: ~35%
+**Phase**: 7 / 17
+**Completion**: ~41%
 
 ## Completed ✅
 
@@ -190,6 +190,65 @@ Last Updated: 2026-09-04
       `completionPercentage`), submitted it, confirmed the history entry,
       and confirmed editing after submit 409s
 
+### Phase 7: Scoring Engine
+- [x] `@cmmp/scoring-engine` package (per master prompt §33: "standalone
+      scoring service... reusable functions and unit tests", not folded
+      into React components or into the Assessment Engine's write path)
+- [x] Maturity level definitions — `maturityLevelToScore`/
+      `scoreToMaturityLevel` map `@cmmp/shared`'s `MaturityLevel` enum
+      to/from a 0-5 numeric scale (NOT_APPLICABLE = 0, excluded from
+      averages rather than scored as a zero)
+- [x] Item scoring calculation — `scoreItems` is a weighted average over a
+      flat list of scored responses; NOT_APPLICABLE items are dropped from
+      the denominator entirely (a not-applicable control shouldn't drag
+      the average toward zero, and its target doesn't matter either)
+- [x] Category/Function/Framework aggregation — `scoreFramework` walks a
+      `@cmmp/framework-engine` `FrameworkDefinition` tree and scores every
+      node (subcategory, category, function) plus a framework-wide
+      `overall`, all as direct weighted averages of the items beneath that
+      node (not an average-of-averages, so precision doesn't erode going
+      up the tree)
+- [x] Organisation-wide scoring — `combineScores` weight-averages
+      already-computed `MaturityScore`s (e.g. per-assessment) into one,
+      for whenever an organisation has more than one active assessment
+- [x] Weighted scoring — every `ScoredItem` carries its own `weight`;
+      both `scoreItems` and `combineScores` use it directly rather than
+      treating all inputs as equal
+- [x] Gap analysis — `analyzeGaps` flattens a scored tree into a
+      prioritised, sorted list (largest gap first), optionally filtered to
+      one tree depth or above a minimum gap; nodes with no applicable
+      items or already at/past target are dropped rather than shown as a
+      "0 gap"
+- [x] Trend — `computeTrend` compares the two most recent scored points
+      (e.g. from `AssessmentHistory` versions) and reports direction +
+      change, skipping points with no recorded score
+- [x] Unit tests (`levels.spec.ts`, `aggregate.spec.ts`,
+      `framework-score.spec.ts`, `gaps.spec.ts`, `trend.spec.ts` — 26
+      tests)
+- [x] Wired into `AssessmentsService`: `GET /assessments/:id/results`
+      (overall + per-function/category/subcategory scores) and
+      `GET /assessments/:id/gaps` (prioritised gap list, `depth`/`limit`/
+      `minGap` query params), per master prompt §32's API design.
+      `POST /assessments/:id/submit` now computes the overall score at
+      submit time and persists it onto `Assessment.currentMaturity`/
+      `targetMaturity`/`maturityGap` (and into the `AssessmentHistory`
+      snapshot) — closing the gap Phase 6 deliberately left open ("those
+      numbers are Phase 7's job")
+- [x] Unit tests for the new service methods (tenant-scoped, missing-
+      template rejection, correct overall/per-function scores, gap list)
+      plus updated `submit()` tests covering the persisted-score and
+      nothing-applicable-so-null-scores cases (21 tests total in
+      `assessments.service.spec.ts`, up from 17)
+- [x] Verified end-to-end against the live PostgreSQL instance: `results`
+      on the seeded 106-item assessment reproduced the master prompt's own
+      example per-function numbers (Govern ~2.2, Identify ~3.1, Protect
+      ~2.8, Detect ~2.4, Respond ~2.1, Recover ~1.9) to within the
+      precision lost by discretizing to `MaturityLevel` enum steps;
+      `gaps?depth=0` and `?depth=2` both returned correctly prioritised
+      lists; created a fresh 2-item assessment, submitted it, and
+      confirmed `currentMaturity`/`targetMaturity`/`maturityGap` were
+      computed exactly right (3 / 4.5 / 1.5) and carried into history
+
 ## Known Issues 🐛
 
 - Root `.eslintrc.json` references `eslint-plugin-security`,
@@ -206,15 +265,6 @@ Last Updated: 2026-09-04
   binary; `packages/database`'s own `build` script only runs `tsc`.
 
 ## Not Started ⭕
-
-### Phase 7: Scoring Engine
-- [ ] Maturity level definitions
-- [ ] Item scoring calculation
-- [ ] Category aggregation
-- [ ] Function aggregation
-- [ ] Organization-wide scoring
-- [ ] Gap analysis
-- [ ] Weighted scoring (future)
 
 ### Phase 8: Excel Import Engine
 - [ ] Excel/CSV parser
@@ -455,19 +505,18 @@ they've been observed passing on an actual PR.
 
 ## Next Steps
 
-1. **Begin Phase 7**: Scoring Engine — a standalone `@cmmp/scoring-engine`
-   package (per master prompt §33, "Do not put scoring calculations
-   directly inside React components... create reusable functions and unit
-   tests") that computes item → category → function → framework →
-   organisation maturity, weighted maturity, gap, and trend from the
-   `AssessmentItem` rows Phase 6 now lets you write. The seed script's own
-   weighted-average/gap logic (`FUNCTION_MATURITY_PROFILE`,
-   `riskLevelFromGap` in `seed.ts`) is a reasonable starting point to lift
-   out as real, tested logic rather than one-off seed math. Once it exists,
-   wire `Assessment.currentMaturity`/`targetMaturity`/`maturityGap` to be
-   computed by it (on submit, and/or via a `GET /assessments/:id/results`
-   endpoint per master prompt §32) instead of staying null for
-   API-created assessments as they do today.
+1. **Begin Phase 8**: Excel Import Engine — `@cmmp/import-engine` (currently
+   an empty placeholder) needs an Excel/CSV parser, column-mapping,
+   validation (including formula-injection prevention — untrusted
+   spreadsheet cells must never be evaluated as formulas), and a bulk
+   import path that ends up producing the same `AssessmentItem` rows
+   `POST /assessments/:id/items` does — reuse `AssessmentsService`'s
+   existing per-item validation (question belongs to the assessment's
+   framework) rather than duplicating it, and use `@cmmp/scoring-engine`'s
+   types to sanity-check imported maturity levels. `exceljs` is already a
+   dependency of `packages/reporting`; the Phase 3 notes flagged
+   `packages/reporting`'s `exceljs` advisory as "revisit when import-engine
+   is actually built" — this is that point.
 2. Before relying on the seeded NIST CSF 2.0 data for anything
    compliance-facing, diff `packages/database/prisma/fixtures/nist-csf-2.0.json`
    against the official NIST CSWP 29 publication — it was reproduced from
@@ -475,8 +524,9 @@ they've been observed passing on an actual PR.
    Phase 5 notes above)
 3. Wire the Next.js frontend to the new `/api/v1/auth/login`,
    `/api/v1/users`, `/api/v1/frameworks`, and `/api/v1/assessments`
-   endpoints (login page, session/token storage, a framework navigation
-   view, an assessment-taking flow)
+   (including `/results` and `/gaps`) endpoints (login page, session/token
+   storage, a framework navigation view, an assessment-taking flow, a
+   results/gap-analysis view)
 4. Fix the repo-wide ESLint plugin gap (see Known Issues)
 
 ## Contact & Questions

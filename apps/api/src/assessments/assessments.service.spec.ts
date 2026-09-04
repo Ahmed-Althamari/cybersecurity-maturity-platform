@@ -6,6 +6,32 @@ import { AssessmentsService } from './assessments.service';
 
 type MockModel = Record<string, jest.Mock>;
 
+const scoreableFramework = {
+  slug: 'test-fw',
+  name: 'Test Framework',
+  version: '1.0',
+  frameWorkType: 'TEST',
+  description: null,
+  isActive: true,
+  functions: [
+    {
+      code: 'GV',
+      name: 'Govern',
+      description: null,
+      displayOrder: 0,
+      categories: [
+        {
+          code: 'GV.RM',
+          name: 'Risk Management',
+          description: null,
+          displayOrder: 0,
+          subcategories: [{ code: 'GV.RM-01', name: 'Objective one', description: null, displayOrder: 0 }],
+        },
+      ],
+    },
+  ],
+};
+
 describe('AssessmentsService', () => {
   let service: AssessmentsService;
   let prisma: {
@@ -25,7 +51,7 @@ describe('AssessmentsService', () => {
       assessmentTemplate: { findFirst: jest.fn(), create: jest.fn() },
       assessment: { create: jest.fn(), findMany: jest.fn(), findFirst: jest.fn(), update: jest.fn() },
       assessmentQuestion: { findFirst: jest.fn(), count: jest.fn() },
-      assessmentItem: { upsert: jest.fn(), count: jest.fn() },
+      assessmentItem: { upsert: jest.fn(), count: jest.fn(), findMany: jest.fn() },
       assessmentHistory: { findFirst: jest.fn(), create: jest.fn() },
     };
 
@@ -197,13 +223,22 @@ describe('AssessmentsService', () => {
       await expect(service.submit('a1', 'tenant-a', 'user-1')).rejects.toThrow(ConflictException);
     });
 
-    it('marks the assessment SUBMITTED and appends a versioned history entry', async () => {
-      prisma.assessment.findFirst.mockResolvedValueOnce({ id: 'a1', status: 'IN_PROGRESS', items: [{ id: 'i1' }] });
+    it('marks the assessment SUBMITTED, computes overall scores, and appends a versioned history entry', async () => {
+      prisma.assessment.findFirst.mockResolvedValueOnce({
+        id: 'a1',
+        status: 'IN_PROGRESS',
+        items: [{ id: 'i1' }],
+        template: { frameworkId: 'fw-a' },
+      });
+      prisma.framework.findFirst.mockResolvedValueOnce(scoreableFramework);
+      prisma.assessmentItem.findMany.mockResolvedValueOnce([
+        { currentMaturity: 'DEVELOPING', targetMaturity: 'MANAGED', weight: 1, question: { subcategory: { code: 'GV.RM-01' } } },
+      ]);
       prisma.assessment.update.mockResolvedValueOnce({
         id: 'a1',
         status: 'SUBMITTED',
-        currentMaturity: 2.5,
-        targetMaturity: 4.0,
+        currentMaturity: 2,
+        targetMaturity: 4,
       });
       prisma.assessmentHistory.findFirst.mockResolvedValueOnce({ version: 2 });
       prisma.assessmentHistory.create.mockResolvedValueOnce({});
@@ -211,15 +246,48 @@ describe('AssessmentsService', () => {
       await service.submit('a1', 'tenant-a', 'user-1');
 
       expect(prisma.assessment.update).toHaveBeenCalledWith(
-        expect.objectContaining({ data: expect.objectContaining({ status: 'SUBMITTED' }) }),
+        expect.objectContaining({
+          data: expect.objectContaining({ status: 'SUBMITTED', currentMaturity: 2, targetMaturity: 4, maturityGap: 2 }),
+        }),
       );
       expect(prisma.assessmentHistory.create).toHaveBeenCalledWith(
         expect.objectContaining({ data: expect.objectContaining({ assessmentId: 'a1', version: 3, status: 'SUBMITTED' }) }),
       );
     });
 
+    it('persists null scores when nothing scored is applicable', async () => {
+      prisma.assessment.findFirst.mockResolvedValueOnce({
+        id: 'a1',
+        status: 'IN_PROGRESS',
+        items: [{ id: 'i1' }],
+        template: { frameworkId: 'fw-a' },
+      });
+      prisma.framework.findFirst.mockResolvedValueOnce(scoreableFramework);
+      prisma.assessmentItem.findMany.mockResolvedValueOnce([
+        { currentMaturity: 'NOT_APPLICABLE', targetMaturity: 'MANAGED', weight: 1, question: { subcategory: { code: 'GV.RM-01' } } },
+      ]);
+      prisma.assessment.update.mockResolvedValueOnce({ id: 'a1', status: 'SUBMITTED' });
+      prisma.assessmentHistory.findFirst.mockResolvedValueOnce(null);
+      prisma.assessmentHistory.create.mockResolvedValueOnce({});
+
+      await service.submit('a1', 'tenant-a', 'user-1');
+
+      expect(prisma.assessment.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({ currentMaturity: null, targetMaturity: null, maturityGap: null }),
+        }),
+      );
+    });
+
     it('starts history versioning at 1 when none exists yet', async () => {
-      prisma.assessment.findFirst.mockResolvedValueOnce({ id: 'a1', status: 'IN_PROGRESS', items: [{ id: 'i1' }] });
+      prisma.assessment.findFirst.mockResolvedValueOnce({
+        id: 'a1',
+        status: 'IN_PROGRESS',
+        items: [{ id: 'i1' }],
+        template: { frameworkId: 'fw-a' },
+      });
+      prisma.framework.findFirst.mockResolvedValueOnce(scoreableFramework);
+      prisma.assessmentItem.findMany.mockResolvedValueOnce([]);
       prisma.assessment.update.mockResolvedValueOnce({ id: 'a1', status: 'SUBMITTED' });
       prisma.assessmentHistory.findFirst.mockResolvedValueOnce(null);
       prisma.assessmentHistory.create.mockResolvedValueOnce({});
@@ -229,6 +297,47 @@ describe('AssessmentsService', () => {
       expect(prisma.assessmentHistory.create).toHaveBeenCalledWith(
         expect.objectContaining({ data: expect.objectContaining({ version: 1 }) }),
       );
+    });
+  });
+
+  describe('getResults', () => {
+    it('rejects an assessment with no template', async () => {
+      prisma.assessment.findFirst.mockResolvedValueOnce({ id: 'a1', template: null });
+
+      await expect(service.getResults('a1', 'tenant-a')).rejects.toThrow(ConflictException);
+    });
+
+    it('returns the overall and per-function scores', async () => {
+      prisma.assessment.findFirst.mockResolvedValueOnce({
+        id: 'a1',
+        status: 'IN_PROGRESS',
+        completionPercentage: 50,
+        template: { frameworkId: 'fw-a' },
+      });
+      prisma.framework.findFirst.mockResolvedValueOnce(scoreableFramework);
+      prisma.assessmentItem.findMany.mockResolvedValueOnce([
+        { currentMaturity: 'OPTIMISED', targetMaturity: 'OPTIMISED', weight: 1, question: { subcategory: { code: 'GV.RM-01' } } },
+      ]);
+
+      const results = await service.getResults('a1', 'tenant-a');
+
+      expect(results.overall.current).toBe(5);
+      expect(results.functions[0].code).toBe('GV');
+      expect(results.completionPercentage).toBe(50);
+    });
+  });
+
+  describe('getGaps', () => {
+    it('returns a prioritised list of gaps from the scored tree', async () => {
+      prisma.assessment.findFirst.mockResolvedValueOnce({ id: 'a1', template: { frameworkId: 'fw-a' } });
+      prisma.framework.findFirst.mockResolvedValueOnce(scoreableFramework);
+      prisma.assessmentItem.findMany.mockResolvedValueOnce([
+        { currentMaturity: 'INITIAL', targetMaturity: 'MANAGED', weight: 1, question: { subcategory: { code: 'GV.RM-01' } } },
+      ]);
+
+      const gaps = await service.getGaps('a1', 'tenant-a', { depth: 2 });
+
+      expect(gaps).toEqual([expect.objectContaining({ code: 'GV.RM-01', gap: 3 })]);
     });
   });
 });

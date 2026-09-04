@@ -65,6 +65,26 @@ export class AssessmentsController {
     return this.assessmentsService.history(id, user.tenantId);
   }
 
+  @Get(':id/results')
+  async getResults(@Param('id') id: string, @CurrentUser() user: RequestUser) {
+    return this.assessmentsService.getResults(id, user.tenantId);
+  }
+
+  @Get(':id/gaps')
+  async getGaps(
+    @Param('id') id: string,
+    @CurrentUser() user: RequestUser,
+    @Query('depth') depth?: string,
+    @Query('limit') limit?: string,
+    @Query('minGap') minGap?: string,
+  ) {
+    return this.assessmentsService.getGaps(id, user.tenantId, {
+      depth: depth !== undefined ? Number(depth) : undefined,
+      limit: limit !== undefined ? Number(limit) : undefined,
+      minGap: minGap !== undefined ? Number(minGap) : undefined,
+    });
+  }
+
   @Post(':id/items')
   @UseGuards(RolesGuard)
   @Roles(...ASSESSMENT_WRITE_ROLES)

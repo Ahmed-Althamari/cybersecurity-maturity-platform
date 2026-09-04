@@ -1,3 +1,6 @@
+import { frameworkTreeInclude, toFrameworkDefinition } from '@cmmp/database';
+import { analyzeGaps, scoreFramework, type AnalyzeGapsOptions, type ScoredItem } from '@cmmp/scoring-engine';
+import { MaturityLevel as SharedMaturityLevel } from '@cmmp/shared';
 import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 
 import { PrismaService } from '../prisma/prisma.service';
@@ -5,6 +8,20 @@ import { PrismaService } from '../prisma/prisma.service';
 import { CreateAssessmentDto } from './dto/create-assessment.dto';
 import { UpdateAssessmentDto } from './dto/update-assessment.dto';
 import { UpsertAssessmentItemDto } from './dto/upsert-assessment-item.dto';
+
+/**
+ * Prisma generates its own `$Enums.MaturityLevel` (from the schema) which
+ * is nominally distinct from `@cmmp/shared`'s hand-written `MaturityLevel`
+ * even though every member matches — this converts between them instead of
+ * a blind type cast.
+ */
+function toSharedMaturityLevel(level: string): SharedMaturityLevel {
+  const value = SharedMaturityLevel[level as keyof typeof SharedMaturityLevel];
+  if (!value) {
+    throw new Error(`Unknown maturity level: ${level}`);
+  }
+  return value;
+}
 
 const EDITABLE_STATUSES = ['DRAFT', 'IN_PROGRESS'];
 
@@ -211,9 +228,18 @@ export class AssessmentsService {
       throw new BadRequestException('Cannot submit an assessment with no recorded responses');
     }
 
+    const { overall } = await this.scoreAssessment(assessment);
+    const hasScore = overall.applicableCount > 0;
+
     const updated = await this.prisma.assessment.update({
       where: { id },
-      data: { status: 'SUBMITTED', updatedById: userId },
+      data: {
+        status: 'SUBMITTED',
+        updatedById: userId,
+        currentMaturity: hasScore ? overall.current : null,
+        targetMaturity: hasScore ? overall.target : null,
+        maturityGap: hasScore ? overall.gap : null,
+      },
     });
 
     const lastVersion = await this.prisma.assessmentHistory.findFirst({
@@ -233,5 +259,59 @@ export class AssessmentsService {
     });
 
     return updated;
+  }
+
+  /**
+   * Scores an assessment's responses against its own framework, via
+   * `@cmmp/scoring-engine` — kept as its own standalone step (master
+   * prompt §33) rather than folded into the response-recording path in
+   * `upsertItem`.
+   */
+  private async scoreAssessment(assessment: { id: string; template: { frameworkId: string } | null }) {
+    if (!assessment.template) {
+      throw new ConflictException('Assessment has no framework template to score against');
+    }
+
+    const framework = await this.prisma.framework.findFirst({
+      where: { id: assessment.template.frameworkId },
+      include: frameworkTreeInclude,
+    });
+    if (!framework) {
+      throw new NotFoundException("Assessment's framework not found");
+    }
+    const definition = toFrameworkDefinition(framework);
+
+    const items = await this.prisma.assessmentItem.findMany({
+      where: { assessmentId: assessment.id },
+      include: { question: { include: { subcategory: { select: { code: true } } } } },
+    });
+
+    const scoredItems: ScoredItem[] = items.map((item) => ({
+      subcategoryCode: item.question.subcategory.code,
+      currentMaturity: toSharedMaturityLevel(item.currentMaturity),
+      targetMaturity: toSharedMaturityLevel(item.targetMaturity),
+      weight: item.weight,
+    }));
+
+    return scoreFramework(definition, scoredItems);
+  }
+
+  async getResults(id: string, tenantId: string) {
+    const assessment = await this.findOrThrow(id, tenantId);
+    const { overall, functions } = await this.scoreAssessment(assessment);
+
+    return {
+      assessmentId: assessment.id,
+      status: assessment.status,
+      completionPercentage: assessment.completionPercentage,
+      overall,
+      functions,
+    };
+  }
+
+  async getGaps(id: string, tenantId: string, options: AnalyzeGapsOptions = {}) {
+    const assessment = await this.findOrThrow(id, tenantId);
+    const { functions } = await this.scoreAssessment(assessment);
+    return analyzeGaps(functions, options);
   }
 }
