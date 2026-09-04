@@ -1436,11 +1436,73 @@ holder refreshed.
   type-check test build` (27/27), unit tests (117/117), `npm run
   test:e2e` (22/22), `npm run lint` clean.
 
+### Extending the tenant-isolation e2e pattern to Assessment, Framework, and User
+Fifth item from `docs/security-architecture.md`'s priority list.
+`apps/api/test/tenant-isolation.e2e-spec.ts` had exactly one resource
+under dedicated cross-tenant e2e test — `Risk` — even though the same
+validated-tenant-scope pattern is structurally consistent across every
+service. Structural consistency isn't the same claim as "independently
+verified," so this closes that gap for the three resources named in
+the priority list.
+- Restructured the file around one shared tenant-A/tenant-B pair
+  (`beforeAll` logs in exactly twice, once per tenant) with nested
+  `describe` blocks per resource — `Risk` (existing 5 tests, unchanged
+  behavior), plus new `Assessment` (5 tests), `Framework` (4 tests),
+  and `User` (5 tests) blocks, 19 new/kept tests total (14 net new).
+  Reusing one login pair across every resource, rather than a fresh
+  login per resource block, keeps the whole file's login count at 2 —
+  comfortably under the real 5/60s `POST /auth/login` throttle from
+  the rate-limiting hardening work above, without needing a second
+  spec file the way `token-revocation.e2e-spec.ts` did.
+- `tenantB`'s fixture role changed from `ORGANISATION_ADMIN` to
+  `PLATFORM_ADMIN` — the tightest role gate exercised anywhere in the
+  file is `User`'s `DELETE /users/:id` (`PLATFORM_ADMIN` only, stricter
+  than `Risk`/`Assessment`'s delete gates which both also accept
+  `ORGANISATION_ADMIN`). `PLATFORM_ADMIN` clears every role gate in the
+  file, so a cross-tenant assertion always reaches the tenant check in
+  the service layer instead of getting turned away earlier by an
+  unrelated 403 from a role gate that isn't what's being tested.
+- Assessment's fixture creates a `Framework` row directly via Prisma
+  (bypassing the API, same reasoning as `createTestTenant` bypassing
+  the API for Tenant/Organisation/User) — `POST /assessments` only
+  needs a real `Framework` id to attach a default `AssessmentTemplate`
+  to, not the full function/category/subcategory tree.
+- **A real gap found and fixed in `test/support/fixtures.ts`'s own
+  `cleanupTestTenant` while wiring this up**: it never deleted
+  `Assessment`/`AssessmentTemplate` rows, because no test had created
+  either before now. `assessments_organisationId_fkey` and
+  `assessments_createdById_fkey`/`updatedById_fkey` are all `ON DELETE
+  RESTRICT`, and `assessment_templates_frameworkId_fkey` is also `ON
+  DELETE RESTRICT` — so the very first e2e run that created a real
+  Assessment against a test tenant would have left `afterAll`'s
+  `prisma.tenant.delete()` failing with an FK-constraint violation
+  (Framework's own `tenants` FK is `ON DELETE CASCADE`, but that
+  cascade can never fire while a still-referencing `AssessmentTemplate`
+  blocks it). Fixed by explicitly deleting `Assessment` rows (which
+  cascades `AssessmentItem`/`AssessmentHistory`/`Evidence` for free,
+  since those *are* `ON DELETE CASCADE` from `Assessment`) and
+  `AssessmentTemplate` rows scoped to the tenant's own frameworks,
+  before the existing `User`/`Organisation`/`Tenant` deletes.
+- Verified live via `psql` after a full e2e run: zero orphaned rows —
+  no leftover `tenants`/`frameworks` matching the `e2e-%` slug pattern
+  this file's fixtures use, and no leftover `assessments` named `Tenant
+  A Assessment`/`Hijacked`, confirming the extended cleanup actually
+  works rather than merely not erroring.
+- Docs updated in the same pass: `docs/security-architecture.md`
+  (Tampering STRIDE row corrected — `RemediationInitiative` was never
+  actually covered by a dedicated e2e test despite an earlier draft of
+  this document implying it was; Priority Order list struck through as
+  done), this file's own Next Steps list.
+- Full verification re-run after this change: `npx turbo run
+  type-check test build` (27/27), `npm run test:e2e` (36/36, up from
+  22 — the file went from 5 tests to 19), `npm run lint` clean.
+
 ## Next Steps
 
 What's left, roughly in priority order (Docker verification, rate
-limiting, the JWT_SECRET fail-closed fix, and token revocation on
-logout + refresh were the top four; all four are now done above):
+limiting, the JWT_SECRET fail-closed fix, token revocation on logout +
+refresh, and extending the tenant-isolation e2e pattern were the top
+five; all five are now done above):
 
 1. **Actually build and run Phase 15's Docker images.** `docker compose
    build && docker compose up` somewhere with a working daemon (this
@@ -1488,15 +1550,16 @@ logout + refresh were the top four; all four are now done above):
 8. Triage the 72 existing Dependabot advisories GitHub surfaces on every
    push (1 critical, 25 high, 37 moderate, 9 low) — noted several times
    across this session but never actually investigated
-9. Extend the dedicated tenant-isolation e2e pattern
-   (`apps/api/test/tenant-isolation.e2e-spec.ts`) to `Assessment`,
-   `Framework`, and `User` explicitly — today only `Risk` has a
-   cross-tenant e2e test; the isolation *pattern* is structurally
-   consistent across every service, but that consistency itself isn't
-   independently e2e-verified per resource yet
-10. No pruning job exists for `RevokedToken` rows past their own
-    `expiresAt` — no correctness impact today, but a real operational
-    one once the table has accumulated enough history at scale.
+9. No pruning job exists for `RevokedToken` rows past their own
+   `expiresAt` — no correctness impact today, but a real operational
+   one once the table has accumulated enough history at scale.
+10. `RemediationInitiative` is now the one resource left without its
+    own dedicated cross-tenant e2e test in
+    `apps/api/test/tenant-isolation.e2e-spec.ts` (Risk, Assessment,
+    Framework, and User all have one as of the Post-Phase-17 Hardening
+    section above) — the isolation *pattern* is structurally consistent
+    with every other service, but that consistency itself isn't
+    independently e2e-verified for this one resource yet.
 
 ## Contact & Questions
 

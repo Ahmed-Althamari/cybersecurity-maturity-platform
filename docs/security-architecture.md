@@ -70,7 +70,7 @@ doesn't exist).
 
 | Threat | Mitigation | Residual risk |
 |---|---|---|
-| A user modifying another tenant's data by guessing/enumerating IDs | Every query scoped server-side to the caller's `tenantId` — verified live via `tenant-isolation.e2e-spec.ts` | None identified for the resources this session built (Risk, RemediationInitiative). Not independently re-verified for `Assessment`/`Framework`/`User` in this same e2e style — the *pattern* is consistent across services, but only Risk and RemediationInitiative have a dedicated cross-tenant e2e test. |
+| A user modifying another tenant's data by guessing/enumerating IDs | Every query scoped server-side to the caller's `tenantId` — verified live via `tenant-isolation.e2e-spec.ts`, which now covers `Risk`, `Assessment`, `Framework`, and `User` each with their own dedicated cross-tenant test (read/list/update/delete, or the applicable subset per resource) | None identified for the resources with a dedicated e2e test. `RemediationInitiative` still relies on the pattern being structurally consistent with the others (same validated-tenant-scope service pattern throughout) rather than its own dedicated cross-tenant e2e test. |
 | A client sending computed fields it shouldn't control (e.g. `riskLevel`, `inherentRiskScore`) | Both are always recomputed server-side from `likelihood`/`impact`; `ValidationPipe({ whitelist: true })` strips unrecognised fields from the DTO before the service ever sees them | None identified. |
 | Formula/CSV injection via a malicious spreadsheet upload | `sanitizeCellValue()` neutralises any formula-looking cell before storage | Covered. |
 | Man-in-the-middle on API traffic | None at the application layer — TLS is a deployment-time concern | No TLS termination configured anywhere in this repo (Docker Compose, CI). Must be added at the reverse-proxy/load-balancer layer in any real deployment. |
@@ -144,6 +144,8 @@ stays visible:
    right after minting the replacement, rather than leaving the old one
    valid alongside the new one; `apps/api/test/token-revocation.e2e-spec.ts`.
 5. **Triage the 72 open Dependabot advisories.**
-6. **Extend the tenant-isolation e2e pattern** to `Assessment`,
-   `Framework`, and `User` explicitly, rather than relying on the
-   pattern being structurally consistent across services.
+6. ~~Extend the tenant-isolation e2e pattern~~ — done: `Assessment`,
+   `Framework`, and `User` now each have their own cross-tenant e2e
+   coverage in `apps/api/test/tenant-isolation.e2e-spec.ts` (nested
+   `describe` blocks reusing one tenant-A/tenant-B pair rather than
+   logging in separately per resource), not just `Risk`.

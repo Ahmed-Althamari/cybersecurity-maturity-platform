@@ -42,11 +42,21 @@ export async function createTestTenant(prisma: PrismaService, options: { role: s
   return { tenantId: tenant.id, organisationId: organisation.id, userId: user.id, email: user.email };
 }
 
-/** Tears down everything created by createTestTenant. Explicit per-table deletes rather than relying on cascade — AuditEvent -> User is onDelete: Restrict, so audit rows must go first regardless. */
+/**
+ * Tears down everything created by createTestTenant. Explicit per-table deletes rather than relying
+ * on cascade — several relations are `ON DELETE RESTRICT`, not `CASCADE`, so those rows must go
+ * first regardless: AuditEvent -> User, Assessment -> Organisation/User, and AssessmentTemplate ->
+ * Framework (which in turn blocks Framework's own `ON DELETE CASCADE` from `tenants` from ever
+ * firing while a template still references it). Assessment's own children (AssessmentItem,
+ * AssessmentHistory, Evidence) *are* `ON DELETE CASCADE` from Assessment, so deleting Assessment
+ * rows here is enough to take those with it.
+ */
 export async function cleanupTestTenant(prisma: PrismaService, tenantId: string): Promise<void> {
   await prisma.auditEvent.deleteMany({ where: { tenantId } });
   await prisma.risk.deleteMany({ where: { tenantId } });
   await prisma.remediationInitiative.deleteMany({ where: { tenantId } });
+  await prisma.assessment.deleteMany({ where: { tenantId } });
+  await prisma.assessmentTemplate.deleteMany({ where: { framework: { tenantId } } });
   await prisma.userRoleAssignment.deleteMany({ where: { tenantId } });
   await prisma.user.deleteMany({ where: { tenantId } });
   await prisma.organisation.deleteMany({ where: { tenantId } });
