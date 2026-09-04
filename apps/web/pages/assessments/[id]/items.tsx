@@ -37,12 +37,22 @@ export default function AssessmentItemsPage({
       </Head>
       <div className="min-h-screen bg-gradient-to-b from-slate-900 to-slate-800">
         <div className="container mx-auto px-4 py-8">
-          <div className="mb-8">
-            <Link href="/assessments" className="text-slate-400 hover:text-white text-sm">
-              ← Assessments
-            </Link>
-            <h1 className="text-3xl font-bold text-white mt-1">{assessmentName}</h1>
-            <p className="text-slate-400 text-sm mt-1">Status: {status}</p>
+          <div className="mb-8 flex items-start justify-between">
+            <div>
+              <Link href="/assessments" className="text-slate-400 hover:text-white text-sm">
+                ← Assessments
+              </Link>
+              <h1 className="text-3xl font-bold text-white mt-1">{assessmentName}</h1>
+              <p className="text-slate-400 text-sm mt-1">Status: {status}</p>
+            </div>
+            {editable && (
+              <Link
+                href={`/assessments/${assessmentId}/import`}
+                className="bg-slate-700 hover:bg-slate-600 text-white text-sm font-medium py-2 px-4 rounded-md transition-colors"
+              >
+                Import from Excel/CSV
+              </Link>
+            )}
           </div>
 
           {errorMessage && <div className="bg-red-950/40 border border-red-800 text-red-300 rounded-lg p-4 mb-6">{errorMessage}</div>}

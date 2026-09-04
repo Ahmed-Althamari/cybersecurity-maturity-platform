@@ -1890,6 +1890,61 @@ enforcement either way, this just avoids showing a button that would
   `npm run test:e2e` (42/42), `npm run lint` clean, plus the live
   browser CRUD verification above.
 
+### Frontend: Excel import wizard UI
+Fourth and last of the Phase 10 frontend follow-ups. New
+`/assessments/[id]/import` page, reachable via an "Import from
+Excel/CSV" button on the assessment items page (only shown while the
+assessment is still editable).
+- **Honest about what the API actually supports, not a fictitious
+  multi-step wizard**: `POST /assessments/:id/import` runs the real
+  import immediately on upload — there is no dry-run/preview mode and
+  no way to pass a manual `columnMapping` override (the DTO only
+  auto-maps). Master prompt §14's wizard steps (upload → select
+  worksheet → map columns → validate → preview → import) would need
+  backend changes this session didn't make. Rather than fake a preview
+  screen that doesn't reflect reality, the UI says so directly ("the
+  import runs immediately on upload rather than showing a preview
+  first") and instead has two honest steps: choose a file, then see
+  the real result. This was the explicit trade-off named when this
+  task was scoped, resolved by shipping the auto-mapping-only path
+  rather than adding the backend work.
+- New `apps/web/lib/api.ts`: `apiFetchFormData` — a second low-level
+  fetch helper alongside `apiFetch`, needed because `apiFetch`
+  unconditionally sets `Content-Type: application/json` whenever a
+  body is present, which would have corrupted a multipart upload (a
+  browser's `fetch()` needs to set its own `Content-Type` with the
+  `boundary=...` it generates for a `FormData` body; forcing JSON here
+  would mean `FileInterceptor` never sees a real file field). Also adds
+  `importAssessmentFile` and the `ImportResult` type.
+- Results screen shows the exact response shape `AssessmentsService.importFile`
+  already returns (total/imported/valid/warning/invalid/duplicate
+  counts, unmapped columns) plus a client-side "Download error report"
+  button — the API already returns the full CSV content inline in the
+  JSON response (`errorReportCsv`), so this is a plain `Blob`/`<a
+  download>` in the browser, no extra endpoint needed.
+- Verified live via a real signed-in Playwright browser session against
+  a real fresh `DRAFT` assessment: uploaded a deliberately mixed CSV (2
+  clean rows, 1 duplicate `Control_ID`, 1 unmatched `Control_ID`),
+  confirmed the results screen showed exactly `4` total / `2` imported
+  / `3` valid / `0` warnings / `1` invalid / `1` duplicate — matching
+  hand-verified expectations, not just "some numbers appeared" — and
+  confirmed the unmapped-columns list correctly named every canonical
+  column this test file didn't include. Also verified the error-report
+  download itself: triggered a real browser download, read the
+  downloaded file back, and confirmed its two rows correctly identified
+  the invalid row (unmatched `Control_ID`) and the duplicate row (with
+  a back-reference to the original row number) — not merely that a
+  download happened, but that its content was right. Test assessment
+  soft-deleted afterward.
+- Full verification: `npx turbo run type-check test build` (27/27),
+  `npm run test:e2e` (42/42), `npm run lint` clean, plus the live
+  browser verification above (upload → results → error-report download,
+  content checked at every step).
+
+This closes out every item from Next Steps' "Frontend follow-ups from
+Phase 10" bullet — all four (framework navigation, assessment-taking,
+risk register, Excel import wizard) are now built and live-verified.
+
 ## Next Steps
 
 What's left, roughly in priority order. Every item from
@@ -1916,21 +1971,22 @@ punt on the rest pending dedicated major-version-bump work):
    React Testing Library component tests and a persisted Playwright E2E
    suite (the dependency and a `test:e2e` script exist, scaffolded since
    Phase 1, but no spec file has ever been written).
-3. Remaining frontend follow-ups from Phase 10 (the framework
-   navigation view, the assessment-taking flow, and the risk register
-   view are all done — see Post-Phase-17 Feature Work above): the
-   Excel import wizard's upload/preview/column-mapping steps, and
-   extracting the dashboard components into `@cmmp/ui` if/when a
+3. All four Phase 10 frontend follow-ups (framework navigation,
+   assessment-taking, risk register, Excel import wizard) are now done
+   — see Post-Phase-17 Feature Work above. What's left from that same
+   area: extracting the dashboard components into `@cmmp/ui` if/when a
    second app or page needs them (not worth the abstraction for one
-   dashboard page yet). The assessment-taking flow also only covers
-   current/target maturity for now — the extended per-item metadata
-   fields (`rationale`/`evidence`/`owner*`/etc.) have no UI yet, noted
-   in that section's own writeup.
+   dashboard page yet); the assessment-taking flow only covers
+   current/target maturity, not the extended per-item metadata fields
+   (`rationale`/`evidence`/`owner*`/etc.), no UI yet; and item 4 below,
+   which the import wizard deliberately didn't solve.
 4. Wire `POST /assessments/:id/import`'s `columnMapping` override — the
    library (`ImportOptions.columnMapping`) already supports it, but the
    endpoint only auto-maps columns today; needs a way to accept a manual
    mapping as a form field or a preceding "preview" call, matching the
-   import wizard's step 3 in master prompt §14.
+   import wizard's step 3 in master prompt §14. The new import wizard UI
+   is explicit with users that this step doesn't exist yet rather than
+   pretending otherwise — see that section's own writeup.
 5. Before relying on the seeded NIST CSF 2.0 data for anything
    compliance-facing, diff `packages/database/prisma/fixtures/nist-csf-2.0.json`
    against the official NIST CSWP 29 publication — it was reproduced from

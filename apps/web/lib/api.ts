@@ -35,6 +35,26 @@ async function apiFetch<T>(path: string, accessToken: string, init?: RequestInit
   return response.json() as Promise<T>;
 }
 
+/**
+ * Separate from apiFetch on purpose: that helper always sets Content-Type: application/json
+ * whenever a body is present, which would corrupt a multipart upload — a browser's fetch() needs
+ * to set its own Content-Type (with the `boundary=...` it generates) when the body is a FormData,
+ * and an explicit JSON header here would make FileInterceptor never see a real file field.
+ */
+async function apiFetchFormData<T>(path: string, accessToken: string, formData: FormData): Promise<T> {
+  const response = await fetch(`${API_BASE_URL}${path}`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${accessToken}` },
+    body: formData,
+  });
+
+  if (!response.ok) {
+    const body = await response.json().catch(() => ({ message: response.statusText }));
+    throw new ApiError(response.status, body.message || `Request to ${path} failed with ${response.status}`);
+  }
+  return response.json() as Promise<T>;
+}
+
 // ============================================================================
 // TYPES — mirror apps/api's response shapes
 // ============================================================================
@@ -309,6 +329,30 @@ export function upsertAssessmentItem(accessToken: string, assessmentId: string, 
 
 export function submitAssessment(accessToken: string, assessmentId: string) {
   return apiFetch<AssessmentDetail>(`/assessments/${assessmentId}/submit`, accessToken, { method: 'POST' });
+}
+
+export interface ImportResult {
+  totalRows: number;
+  importedCount: number;
+  validCount: number;
+  warningCount: number;
+  invalidCount: number;
+  duplicateCount: number;
+  columnMapping: Record<string, string>;
+  unmappedColumns: string[];
+  errorReportCsv: string;
+}
+
+/**
+ * POST /assessments/:id/import runs the real import immediately — there's no separate preview/
+ * dry-run mode on the API today, and no way to pass a manual columnMapping override (the DTO
+ * only auto-maps). Documented as a known, deliberate gap rather than faked with a fictitious
+ * preview step client-side.
+ */
+export function importAssessmentFile(accessToken: string, assessmentId: string, file: File) {
+  const formData = new FormData();
+  formData.append('file', file);
+  return apiFetchFormData<ImportResult>(`/assessments/${assessmentId}/import`, accessToken, formData);
 }
 
 export function getDashboardMaturity(accessToken: string, organisationId: string, assessmentId?: string) {
