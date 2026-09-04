@@ -4,8 +4,8 @@ Last Updated: 2026-09-04
 
 ## Overall Progress
 
-**Phase**: 10 / 17
-**Completion**: ~59%
+**Phase**: 11 / 17
+**Completion**: ~65%
 
 ## Completed ✅
 
@@ -440,6 +440,64 @@ Last Updated: 2026-09-04
       sign-out actually invalidates the session (a follow-up visit to
       `/dashboard` redirects again rather than serving a cached page)
 
+### Phase 11: Risk Register
+- [x] Risk model — already existed from Phase 2; this phase is the first
+      thing besides the seed script that can create/update/delete `Risk`
+      rows
+- [x] Risk creation API (`RisksModule`, `apps/api/src/risks`) —
+      `POST /risks` validates the organisation (and, if given, the linked
+      `assessmentItemId`) belong to the caller's tenant the same way
+      `AssessmentsService` does; `inherentRiskScore` and `riskLevel` are
+      always computed server-side from `likelihood × impact` (never
+      trusted from the client) via a 5×5 matrix banded into `RiskLevel`
+- [x] Risk detail page (API side — `GET /risks/:id`) — includes the linked
+      `assessmentItem` (with its question and subcategory) plus
+      `initiatives`/`recommendations`, so the drill-down chain from master
+      prompt §24 (Risk → Remediation Initiative, Risk → Assessment
+      Question/Subcategory) is answerable from one call
+- [x] Risk-control mapping — a risk optionally links to the
+      `AssessmentItem` it originated from (already a schema relation);
+      creation/validation enforces that link stays within the same
+      tenant/organisation
+- [x] Risk prioritisation — `GET /risks?sort=priority` orders by
+      `inherentRiskScore` descending. Per master prompt §20 ("do not
+      permanently hard-code this formula"), the likelihood×impact→band
+      mapping lives in one clearly-named function
+      (`riskLevelFromScore`) rather than scattered inline, so swapping in
+      a configurable formula later doesn't mean hunting through the
+      service — but it's still a fixed function today, not yet
+      admin-configurable (that's real future work, not done here)
+- [x] Risk remediation tracking — read-side for now: `GET /risks/:id`
+      surfaces linked `initiatives`. A write-side "link this risk to that
+      initiative" endpoint is deliberately deferred to Phase 12, once
+      `RemediationInitiative` has its own creation API — linking makes
+      more sense as part of creating/editing an initiative (picking which
+      risks it addresses) than as a separate endpoint on `Risk` today
+- [x] `PATCH /risks/:id` recomputes `inherentRiskScore`/`riskLevel` only
+      when `likelihood`/`impact` actually changes (verified: a status-only
+      update leaves the score untouched); `residualRiskScore` stays an
+      explicit, user-set field (post-control effectiveness isn't something
+      a formula should guess) rather than auto-derived
+- [x] Role-gated writes — `RISK_WRITE_ROLES` (PLATFORM_ADMIN,
+      ORGANISATION_ADMIN, CISO, GRC_MANAGER, SECURITY_ARCHITECT) for
+      create/update, PLATFORM_ADMIN/ORGANISATION_ADMIN only for delete;
+      any authenticated role can read
+- [x] Unit tests (`risks.service.spec.ts` — 15 tests): tenant/org
+      isolation on create and read, the assessment-item cross-tenant
+      rejection, every likelihood×impact band via a parametrised test,
+      priority sorting, invalid-riskLevel-filter rejection, the
+      score-recompute-only-when-changed behaviour, and soft-delete
+- [x] Verified end-to-end against the live PostgreSQL instance: created a
+      risk linked to a real assessment item (confirmed the full drill-down
+      response), confirmed a bogus `assessmentItemId` 404s, updated
+      `impact` and watched `inherentRiskScore`/`riskLevel` recompute
+      (20/CRITICAL → 12/HIGH) while `residualRiskScore` was set
+      independently, confirmed `sort=priority` and `riskLevel` filtering,
+      confirmed an invalid `riskLevel` 400s, confirmed a non-privileged
+      role (ASSESSOR) gets 403 on create and CISO gets 403 on delete
+      (write roles and delete roles are deliberately different sets), and
+      confirmed the deleted risk 404s afterward
+
 ## Known Issues 🐛
 
 - Root `.eslintrc.json` references `eslint-plugin-security`,
@@ -463,14 +521,6 @@ Last Updated: 2026-09-04
   runtime, this is purely a type-declaration mismatch.
 
 ## Not Started ⭕
-
-### Phase 11: Risk Register
-- [ ] Risk model
-- [ ] Risk creation API
-- [ ] Risk detail page
-- [ ] Risk-control mapping
-- [ ] Risk prioritization
-- [ ] Risk remediation tracking
 
 ### Phase 12: Remediation Roadmap
 - [ ] Initiative model
@@ -688,11 +738,16 @@ they've been observed passing on an actual PR.
 
 ## Next Steps
 
-1. **Begin Phase 11**: Risk Register — a real `RisksService`/
-   `RisksController` (`POST /risks`, `PUT /risks/:id`, etc. per master
-   prompt §32) instead of `Risk` rows only ever being written by the seed
-   script; `GET /dashboard/risks` already exists to read them back. A risk
-   detail page and risk-control mapping UI follow once the API exists.
+1. **Begin Phase 12**: Remediation Roadmap — a real `RemediationInitiativesService`/
+   `Controller` (create/update/status transitions), matching Risk Register's
+   pattern; `GET /dashboard/roadmap` already reads and timeline-buckets
+   `RemediationInitiative` rows, but nothing besides the seed script
+   creates them yet. This is also where the risk↔initiative linking
+   endpoint deferred from Phase 11 belongs (attach risks when creating/
+   editing an initiative), and where master prompt §20's priority formula
+   ("Risk × Gap × Business Criticality × Weight", explicitly *not*
+   hard-coded) should actually get built as a real, swappable function —
+   Phase 11's `riskLevelFromScore` is the pattern to follow.
 2. **Multi-assessment rollup**: every `/dashboard/*` endpoint currently
    scopes to *one* assessment (the org's latest submitted one, or an
    explicit `assessmentId`) — a real "organisation-wide" score across
@@ -701,10 +756,11 @@ they've been observed passing on an actual PR.
    exists but isn't wired into the dashboard yet. Revisit if/when an org
    genuinely has more than one active assessment at a time.
 3. Frontend follow-ups from Phase 10: a framework navigation view, an
-   assessment-taking flow (`/assessments/:id/items`), the Excel import
-   wizard's upload/preview/column-mapping steps, and extracting the
-   dashboard components into `@cmmp/ui` if/when a second app or page needs
-   them (not worth the abstraction for one dashboard page yet)
+   assessment-taking flow (`/assessments/:id/items`), a risk register view
+   (`/risks` now has a real API), the Excel import wizard's upload/
+   preview/column-mapping steps, and extracting the dashboard components
+   into `@cmmp/ui` if/when a second app or page needs them (not worth the
+   abstraction for one dashboard page yet)
 4. Wire `POST /assessments/:id/import`'s `columnMapping` override — the
    library (`ImportOptions.columnMapping`) already supports it, but the
    endpoint only auto-maps columns today; needs a way to accept a manual

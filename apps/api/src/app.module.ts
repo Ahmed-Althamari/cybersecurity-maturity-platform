@@ -6,6 +6,7 @@ import { AuthModule } from './auth/auth.module';
 import { DashboardModule } from './dashboard/dashboard.module';
 import { FrameworksModule } from './frameworks/frameworks.module';
 import { PrismaModule } from './prisma/prisma.module';
+import { RisksModule } from './risks/risks.module';
 import { UsersModule } from './users/users.module';
 
 @Module({
@@ -20,6 +21,7 @@ import { UsersModule } from './users/users.module';
     FrameworksModule,
     AssessmentsModule,
     DashboardModule,
+    RisksModule,
   ],
   controllers: [],
   providers: [],
