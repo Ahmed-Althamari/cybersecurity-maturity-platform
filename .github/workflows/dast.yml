@@ -22,7 +22,17 @@ jobs:
         env:
           JWT_SECRET: dast-jwt-secret-not-for-production-min-32-chars
           NEXTAUTH_SECRET: dast-nextauth-secret-not-for-production-min-32-chars
-        run: docker compose up -d --build
+        # `up -d` runs detached, so a crashing container's own stdout/stderr
+        # is otherwise never captured before the job tears the stack down --
+        # dump every service's logs on failure so the real crash reason is
+        # visible instead of just "container cmmp-api exited (1)".
+        run: |
+          docker compose up -d --build || {
+            echo "::group::docker compose logs"
+            docker compose logs
+            echo "::endgroup::"
+            exit 1
+          }
 
       - name: Wait for the web app to be reachable
         run: |
