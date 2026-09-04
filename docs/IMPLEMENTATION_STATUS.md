@@ -1767,6 +1767,40 @@ since Phase 7 but was never wired into `DashboardService`.
   dashboard endpoints yet, a pre-existing gap not introduced here),
   `npm run lint` clean.
 
+### Frontend: framework navigation view
+First of the Phase 10 frontend follow-ups. Two new pages:
+`/frameworks` (a card grid over `GET /frameworks`, linking into each)
+and `/frameworks/[id]` (the function → category → subcategory tree via
+`GET /frameworks/:id/navigation`, rendered as nested, collapsible
+`<details>`/`<summary>` — native, keyboard-accessible, no client-side
+expand/collapse state to manage by hand). A "Frameworks" link was added
+to the dashboard header so it's actually reachable, not just a page
+that exists if you type the URL.
+- New `apps/web/lib/api.ts` calls: `getFramework` and
+  `getFrameworkNavigation`, plus the mirrored `NavigationNode` type.
+- New `apps/web/components/frameworks/NavigationTree.tsx` — recursive,
+  generic on tree depth (matches `buildFrameworkNavigation`'s own
+  framework-agnostic design from Phase 4; nothing here assumes NIST CSF
+  specifically).
+- **A real, if minor, UX bug caught only by looking at a live
+  screenshot, not by type-checking or a unit test**: the seed data
+  derives each subcategory's assessment-question text from its own
+  outcome statement, so `label` and `description` are often
+  word-for-word identical — the first render showed every leaf node's
+  sentence twice (once as the bold label, once again directly below in
+  muted gray). Fixed by only rendering `description` when it actually
+  differs from `label`; re-verified with a second screenshot after the
+  fix.
+- Verified live via a real signed-in Playwright browser session: signed
+  in, clicked through from the dashboard to `/frameworks`, confirmed
+  the real seeded NIST CSF 2.0 card renders, clicked into it, confirmed
+  all 6 functions and their categories render collapsed-by-default with
+  correct child counts, expanded a category and confirmed its real
+  subcategories (codes, labels, no more duplicated description text)
+  render correctly.
+- Full verification: `npx turbo run type-check build --filter=@cmmp/web`
+  clean, `npm run lint` clean, plus the live browser verification above.
+
 ## Next Steps
 
 What's left, roughly in priority order. Every item from
@@ -1793,7 +1827,8 @@ punt on the rest pending dedicated major-version-bump work):
    React Testing Library component tests and a persisted Playwright E2E
    suite (the dependency and a `test:e2e` script exist, scaffolded since
    Phase 1, but no spec file has ever been written).
-3. Frontend follow-ups from Phase 10: a framework navigation view, an
+3. Remaining frontend follow-ups from Phase 10 (the framework
+   navigation view is done — see Post-Phase-17 Feature Work above): an
    assessment-taking flow (`/assessments/:id/items`), a risk register view
    (`/risks` now has a real API), the Excel import wizard's upload/
    preview/column-mapping steps, and extracting the dashboard components

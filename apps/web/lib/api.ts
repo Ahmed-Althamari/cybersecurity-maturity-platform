@@ -152,12 +152,31 @@ export interface RoadmapStatus {
   buckets: Record<'IMMEDIATE' | 'SHORT_TERM' | 'MEDIUM_TERM' | 'STRATEGIC' | 'UNSCHEDULED', RoadmapInitiative[]>;
 }
 
+export interface NavigationNode {
+  id: string;
+  code: string;
+  label: string;
+  description?: string;
+  path: string;
+  depth: number;
+  children: NavigationNode[];
+}
+
 // ============================================================================
 // CALLS
 // ============================================================================
 
 export function listFrameworks(accessToken: string) {
   return apiFetch<FrameworkSummary[]>('/frameworks', accessToken);
+}
+
+/** The API's GET /frameworks/:id also returns the full nested function/category/subcategory tree, which this ignores — GET /frameworks/:id/navigation below is the shape actually built for browsing it. */
+export function getFramework(accessToken: string, id: string) {
+  return apiFetch<FrameworkSummary>(`/frameworks/${id}`, accessToken);
+}
+
+export function getFrameworkNavigation(accessToken: string, id: string) {
+  return apiFetch<NavigationNode[]>(`/frameworks/${id}/navigation`, accessToken);
 }
 
 export function listAssessments(accessToken: string, organisationId?: string) {

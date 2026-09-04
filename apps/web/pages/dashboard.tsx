@@ -1,5 +1,6 @@
 import type { GetServerSideProps } from 'next';
 import Head from 'next/head';
+import Link from 'next/link';
 import { signOut } from 'next-auth/react';
 import React from 'react';
 
@@ -46,12 +47,20 @@ export default function DashboardPage({ userEmail, overview, functions, gaps, re
               <h1 className="text-3xl font-bold text-white">Cybersecurity Maturity Dashboard</h1>
               <p className="text-slate-400 text-sm mt-1">{userEmail}</p>
             </div>
-            <button
-              onClick={() => signOut({ callbackUrl: '/' })}
-              className="bg-slate-700 hover:bg-slate-600 text-white text-sm font-medium py-2 px-4 rounded-md transition-colors"
-            >
-              Sign Out
-            </button>
+            <div className="flex items-center gap-2">
+              <Link
+                href="/frameworks"
+                className="bg-slate-700 hover:bg-slate-600 text-white text-sm font-medium py-2 px-4 rounded-md transition-colors"
+              >
+                Frameworks
+              </Link>
+              <button
+                onClick={() => signOut({ callbackUrl: '/' })}
+                className="bg-slate-700 hover:bg-slate-600 text-white text-sm font-medium py-2 px-4 rounded-md transition-colors"
+              >
+                Sign Out
+              </button>
+            </div>
           </div>
 
           {errorMessage && (
