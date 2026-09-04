@@ -42,6 +42,7 @@ describe('AssessmentsService', () => {
     assessmentQuestion: MockModel;
     assessmentItem: MockModel;
     assessmentHistory: MockModel;
+    $transaction: jest.Mock;
   };
 
   beforeEach(() => {
@@ -50,9 +51,10 @@ describe('AssessmentsService', () => {
       framework: { findFirst: jest.fn() },
       assessmentTemplate: { findFirst: jest.fn(), create: jest.fn() },
       assessment: { create: jest.fn(), findMany: jest.fn(), findFirst: jest.fn(), update: jest.fn() },
-      assessmentQuestion: { findFirst: jest.fn(), count: jest.fn() },
+      assessmentQuestion: { findFirst: jest.fn(), count: jest.fn(), findMany: jest.fn() },
       assessmentItem: { upsert: jest.fn(), count: jest.fn(), findMany: jest.fn() },
       assessmentHistory: { findFirst: jest.fn(), create: jest.fn() },
+      $transaction: jest.fn((operations: unknown[]) => Promise.all(operations)),
     };
 
     service = new AssessmentsService(prisma as unknown as PrismaService);
@@ -338,6 +340,103 @@ describe('AssessmentsService', () => {
       const gaps = await service.getGaps('a1', 'tenant-a', { depth: 2 });
 
       expect(gaps).toEqual([expect.objectContaining({ code: 'GV.RM-01', gap: 3 })]);
+    });
+  });
+
+  describe('importFile', () => {
+    function csvFile(content: string): Express.Multer.File {
+      const buffer = Buffer.from(content, 'utf-8');
+      return {
+        originalname: 'assessment.csv',
+        mimetype: 'text/csv',
+        size: buffer.length,
+        buffer,
+      } as Express.Multer.File;
+    }
+
+    const baseAssessment = { id: 'a1', status: 'DRAFT', template: { frameworkId: 'fw-a' } };
+
+    it('rejects once the assessment is no longer editable', async () => {
+      prisma.assessment.findFirst.mockResolvedValueOnce({ ...baseAssessment, status: 'SUBMITTED' });
+
+      await expect(service.importFile('a1', 'tenant-a', 'user-1', csvFile('Control_ID\nGV.RM-01'))).rejects.toThrow(
+        ConflictException,
+      );
+    });
+
+    it('rejects an oversized/invalid file before parsing', async () => {
+      prisma.assessment.findFirst.mockResolvedValueOnce(baseAssessment);
+      const file = csvFile('Control_ID\nGV.RM-01');
+      file.originalname = 'assessment.exe';
+
+      await expect(service.importFile('a1', 'tenant-a', 'user-1', file)).rejects.toThrow(BadRequestException);
+      expect(prisma.assessmentQuestion.findMany).not.toHaveBeenCalled();
+    });
+
+    it('imports rows whose Control_ID matches a real subcategory, and reports everything else', async () => {
+      prisma.assessment.findFirst.mockResolvedValueOnce(baseAssessment);
+      prisma.assessmentQuestion.findMany.mockResolvedValueOnce([{ id: 'question-1', subcategory: { code: 'GV.RM-01' } }]);
+      prisma.assessmentQuestion.count.mockResolvedValueOnce(1);
+      prisma.assessmentItem.count.mockResolvedValueOnce(1);
+
+      const csv = [
+        'Control_ID,Current_Maturity',
+        'GV.RM-01,DEVELOPING', // matches -> imported
+        'GV.UNKNOWN-99,DEVELOPING', // valid shape, but no matching subcategory
+        ',DEVELOPING', // invalid on its own (no Control_ID)
+      ].join('\n');
+
+      const result = await service.importFile('a1', 'tenant-a', 'user-1', csvFile(csv));
+
+      expect(result.importedCount).toBe(1);
+      expect(result.validCount).toBe(2);
+      expect(result.invalidCount).toBe(2); // the missing-Control_ID row + the unmatched-Control_ID row
+      expect(prisma.$transaction).toHaveBeenCalledTimes(1);
+      expect(prisma.assessment.update).toHaveBeenCalledWith(
+        expect.objectContaining({ data: expect.objectContaining({ status: 'IN_PROGRESS' }) }),
+      );
+      expect(result.errorReportCsv).toContain('GV.UNKNOWN-99');
+    });
+
+    it('does not touch the database when nothing in the file matches', async () => {
+      prisma.assessment.findFirst.mockResolvedValueOnce(baseAssessment);
+      prisma.assessmentQuestion.findMany.mockResolvedValueOnce([]);
+
+      const result = await service.importFile('a1', 'tenant-a', 'user-1', csvFile('Control_ID,Current_Maturity\nGV.UNKNOWN,DEVELOPING'));
+
+      expect(result.importedCount).toBe(0);
+      expect(prisma.$transaction).not.toHaveBeenCalled();
+      expect(prisma.assessment.update).not.toHaveBeenCalled();
+    });
+
+    it('still imports a row that only has a warning (e.g. a sanitised formula cell), not just clean valid rows', async () => {
+      prisma.assessment.findFirst.mockResolvedValueOnce(baseAssessment);
+      prisma.assessmentQuestion.findMany.mockResolvedValueOnce([{ id: 'question-1', subcategory: { code: 'GV.RM-01' } }]);
+      prisma.assessmentQuestion.count.mockResolvedValueOnce(1);
+      prisma.assessmentItem.count.mockResolvedValueOnce(1);
+
+      const csv = ['Control_ID,Current_Maturity,Comments', 'GV.RM-01,DEVELOPING,"=cmd|\'/c calc\'!A1"'].join('\n');
+
+      const result = await service.importFile('a1', 'tenant-a', 'user-1', csvFile(csv));
+
+      expect(result.importedCount).toBe(1);
+      expect(result.warningCount).toBe(1);
+      expect(prisma.$transaction).toHaveBeenCalledTimes(1);
+      const upsertCall = prisma.assessmentItem.upsert.mock.calls[0][0];
+      expect(upsertCall.create.currentMaturity).toBe('DEVELOPING');
+    });
+
+    it('moves a warning row that turns out unmatched into invalid, not double-counted as both', async () => {
+      prisma.assessment.findFirst.mockResolvedValueOnce(baseAssessment);
+      prisma.assessmentQuestion.findMany.mockResolvedValueOnce([]); // nothing matches
+
+      const csv = ['Control_ID,Comments', 'GV.UNKNOWN,"=cmd|\'/c calc\'!A1"'].join('\n');
+
+      const result = await service.importFile('a1', 'tenant-a', 'user-1', csvFile(csv));
+
+      expect(result.importedCount).toBe(0);
+      expect(result.warningCount).toBe(0);
+      expect(result.invalidCount).toBe(1);
     });
   });
 });

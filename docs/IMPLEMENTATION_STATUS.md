@@ -4,8 +4,8 @@ Last Updated: 2026-09-04
 
 ## Overall Progress
 
-**Phase**: 7 / 17
-**Completion**: ~41%
+**Phase**: 8 / 17
+**Completion**: ~47%
 
 ## Completed ✅
 
@@ -249,6 +249,78 @@ Last Updated: 2026-09-04
       confirmed `currentMaturity`/`targetMaturity`/`maturityGap` were
       computed exactly right (3 / 4.5 / 1.5) and carried into history
 
+### Phase 8: Excel Import Engine
+- [x] `@cmmp/import-engine` package: parses `.xlsx`/`.xls` (via `exceljs`)
+      and `.csv` (via `papaparse`) into a common `RawSheet` shape
+- [x] Column mapping — `autoMapColumns` matches a file's actual headers to
+      the master prompt §14 canonical columns (`Control_ID`,
+      `Current_Maturity`, etc.) by exact name or known alias,
+      case/spacing-insensitive; verified the prompt's own example
+      ("Current Score" auto-maps to `Current_Maturity`). A manual
+      `columnMapping` override is supported by the library
+      (`ImportOptions.columnMapping`) but not yet exposed as a request
+      parameter on `POST /assessments/:id/import` — see Next Steps.
+      **Not built**: the multi-step import *wizard UI* (upload → select
+      worksheet → map columns → validate → preview → import) is Next.js
+      frontend work, out of this backend-only phase's scope, same as every
+      other phase's UI has been deferred so far.
+- [x] Data validation — every cell is parsed and typed (`Current_Maturity`/
+      `Target_Maturity` accept either a level name or a 0-5 number via
+      `@cmmp/scoring-engine`'s `scoreToMaturityLevel`; `Risk`/`Status`
+      accept common synonyms like "In Progress"; `Business_Criticality`
+      must be an integer 1-5; an unparseable `Due_Date` is a warning, not
+      a hard failure). Every issue is collected, not just the first.
+- [x] Formula injection prevention (master prompt §40) — any cell starting
+      with `=`, `+`, `-`, `@`, or a tab/CR/LF (and not a plain number) is
+      neutralised with a leading `'` before it's ever stored, so it can't
+      execute when reopened in a spreadsheet or re-exported to CSV. A
+      formula *cell* read from an uploaded `.xlsx` is taken from its
+      computed `.result`, never its `.formula` text.
+- [x] File-level defenses — extension allowlist (`.xlsx`/`.xls`/`.csv`),
+      path-traversal-in-filename rejection, a 10MB size cap, and a
+      `MAX_ROWS` cutoff during parsing. Zip-bomb defense is honestly
+      limited to the size cap — `exceljs` doesn't expose a cheap
+      inspect-before-decompress API — noted as a known limitation rather
+      than silently assumed solved.
+- [x] Error reporting — every row is classified `valid`/`warning`/
+      `invalid`/`duplicate` (duplicate = a repeated `Control_ID`; an
+      already-`invalid` row that also happens to be a duplicate stays
+      `invalid`, not masked as merely a duplicate). `buildErrorReportCsv`
+      produces a downloadable CSV of every non-clean row and why, per
+      master prompt §14's "never silently discard bad data."
+- [x] Bulk import with transaction support — wired into
+      `AssessmentsService.importFile` (`POST /assessments/:id/import`,
+      multipart upload via `FileInterceptor` + in-memory `multer`
+      storage): resolves each importable row's `Control_ID` to a real
+      `AssessmentQuestion` in the assessment's own framework, writes every
+      matched row in one `$transaction`, and recomputes
+      `completionPercentage`/DRAFT→IN_PROGRESS the same way
+      `upsertItem` does (factored into a shared `recomputeCompletion`
+      helper). `valid` **and** `warning` rows are both imported — a
+      warning means "flagged, already handled" (e.g. a sanitised formula
+      cell), not "blocked"; only `invalid`/`duplicate` rows are held back.
+      A `Control_ID` that doesn't match any subcategory in this
+      assessment's framework is reported as invalid rather than imported
+      silently into the wrong place.
+- [x] Unit tests: 51 in `@cmmp/import-engine` (sanitisation, column
+      mapping, file guards, row validation, duplicate detection, a real
+      in-memory `.xlsx` round-trip via `exceljs` including the
+      formula-cell-uses-`.result` case, and full-pipeline integration
+      tests) plus 27 in `assessments.service.spec.ts` (up from 21) for
+      `importFile`'s DB-matching and transaction behaviour, including a
+      regression test for the valid-vs-warning double-counting bug found
+      and fixed during manual verification (see below)
+- [x] Verified end-to-end against the live PostgreSQL instance: uploaded a
+      CSV mixing a clean row, a formula-injection row, a duplicate, an
+      unmatched `Control_ID`, and a missing `Control_ID`, using the master
+      prompt's own "Current Score" alias — confirmed the response counts,
+      the downloadable error report content, and that the DB stores the
+      *neutralised* comment text (`'=cmd|'/c calc'!A1`), never the raw
+      formula. Also verified a real `.xlsx` upload and a rejected `.exe`
+      upload (400). Manual testing caught a real bug — warning rows
+      weren't being imported at all, only clean `valid` ones — fixed
+      before commit and locked in with new tests.
+
 ## Known Issues 🐛
 
 - Root `.eslintrc.json` references `eslint-plugin-security`,
@@ -263,16 +335,15 @@ Last Updated: 2026-09-04
   "invalid" by `npm ls`). Workaround in place: always run Prisma generate
   from the repo root (`npm run db:generate`), not via the workspace-local
   binary; `packages/database`'s own `build` script only runs `tsc`.
+- `exceljs@4.4.0` ships its own minimal ambient `Buffer` shim instead of
+  depending on `@types/node`, which no longer structurally matches modern
+  `@types/node`'s generic `Buffer extends Uint8Array<T>` shape. Worked
+  around with a narrow, commented `as never` cast at the one call site
+  (`packages/import-engine/src/parse-xlsx.ts`) rather than a project-wide
+  `typeRoots` change — a real Node `Buffer` satisfies both shapes at
+  runtime, this is purely a type-declaration mismatch.
 
 ## Not Started ⭕
-
-### Phase 8: Excel Import Engine
-- [ ] Excel/CSV parser
-- [ ] Column mapping UI
-- [ ] Data validation
-- [ ] Formula injection prevention
-- [ ] Error reporting
-- [ ] Bulk import with transaction support
 
 ### Phase 9: Dashboard APIs
 - [ ] Executive dashboard endpoint
@@ -463,10 +534,21 @@ per the finding-remediation scheme in the master prompt (section 73):
   reachable by an end user. Lower real-world risk than the Next.js findings.
   Fix requires `@nestjs/cli@12` (breaking relative to the `@nestjs/core@10`
   runtime this repo pins) and `turbo@2.10`.
-- **Dependency Issue — `exceljs`** (moderate, via nested `uuid`): `npm audit
-  fix --force` offers to *downgrade* to `exceljs@3.4.0` to resolve this,
-  which would be a backwards step, not a fix. No consuming code exists yet
-  (Phase 8 territory) — revisit when `import-engine` is actually built.
+- **Dependency Issue — `exceljs`** (moderate, via nested `uuid`; GHSA-w5hq-
+  g745-h8pq, "missing buffer bounds check in v3/v5/v6 when `buf` is
+  provided"): `npm audit fix --force` still only offers to *downgrade* to
+  `exceljs@3.4.0`, which would be a backwards step, not a fix. **Status
+  change as of Phase 8**: `@cmmp/import-engine` now genuinely parses
+  untrusted user-uploaded files with `exceljs` (`POST
+  /assessments/:id/import`), so this is no longer a dormant, unreached
+  dependency — it's live, security-relevant surface. Our own code never
+  calls the vulnerable `uuid` API (passing a pre-allocated `buf`); whether
+  `exceljs` does so internally when parsing an .xlsx hasn't been fully
+  audited here. Mitigated in the meantime by defense already in this
+  phase's file-guard (extension allowlist, 10MB size cap, `MAX_ROWS`
+  during parse) rather than by the dependency fix — worth a closer look
+  (or an `exceljs` major-version upgrade) before this ships with
+  untrusted uploads enabled in production.
 - **Resolved**: removed the `xlsx` (SheetJS) dependency from
   `packages/reporting` — it had an advisory with no available fix and
   nothing in the codebase imports it (`exceljs` already covers this need).
@@ -505,29 +587,34 @@ they've been observed passing on an actual PR.
 
 ## Next Steps
 
-1. **Begin Phase 8**: Excel Import Engine — `@cmmp/import-engine` (currently
-   an empty placeholder) needs an Excel/CSV parser, column-mapping,
-   validation (including formula-injection prevention — untrusted
-   spreadsheet cells must never be evaluated as formulas), and a bulk
-   import path that ends up producing the same `AssessmentItem` rows
-   `POST /assessments/:id/items` does — reuse `AssessmentsService`'s
-   existing per-item validation (question belongs to the assessment's
-   framework) rather than duplicating it, and use `@cmmp/scoring-engine`'s
-   types to sanity-check imported maturity levels. `exceljs` is already a
-   dependency of `packages/reporting`; the Phase 3 notes flagged
-   `packages/reporting`'s `exceljs` advisory as "revisit when import-engine
-   is actually built" — this is that point.
-2. Before relying on the seeded NIST CSF 2.0 data for anything
+1. **Begin Phase 9**: Dashboard APIs — executive/maturity/function/gap/risk/
+   roadmap summary endpoints, all of which can now be built as thin
+   wrappers over `@cmmp/scoring-engine` (`scoreFramework`, `analyzeGaps`,
+   `combineScores` for organisation-wide rollups) rather than new scoring
+   logic. `GET /assessments/:id/results` and `/gaps` (Phase 7) already
+   cover the per-assessment case; Phase 9 is mainly about an
+   organisation-wide view across multiple assessments and shaping the
+   response for the dashboard layouts in master prompt §21-23/§38.
+2. Wire `POST /assessments/:id/import`'s `columnMapping` override — the
+   library (`ImportOptions.columnMapping`) already supports it, but the
+   endpoint only auto-maps columns today; needs a way to accept a manual
+   mapping as a form field or a preceding "preview" call, matching the
+   import wizard's step 3 in master prompt §14.
+3. Look more closely at the `exceljs` → `uuid` advisory now that
+   `import-engine` genuinely parses untrusted uploads (see Known Issues) —
+   confirm whether `exceljs`'s internal `uuid` usage ever hits the
+   vulnerable buffer-bounds code path, or upgrade past it.
+4. Before relying on the seeded NIST CSF 2.0 data for anything
    compliance-facing, diff `packages/database/prisma/fixtures/nist-csf-2.0.json`
    against the official NIST CSWP 29 publication — it was reproduced from
    training-data knowledge, not transcribed from the source document (see
    Phase 5 notes above)
-3. Wire the Next.js frontend to the new `/api/v1/auth/login`,
+5. Wire the Next.js frontend to the new `/api/v1/auth/login`,
    `/api/v1/users`, `/api/v1/frameworks`, and `/api/v1/assessments`
-   (including `/results` and `/gaps`) endpoints (login page, session/token
-   storage, a framework navigation view, an assessment-taking flow, a
-   results/gap-analysis view)
-4. Fix the repo-wide ESLint plugin gap (see Known Issues)
+   (including `/results`, `/gaps`, and `/import`) endpoints (login page,
+   session/token storage, a framework navigation view, an assessment-
+   taking flow, a results/gap-analysis view, the Excel import wizard)
+6. Fix the repo-wide ESLint plugin gap (see Known Issues)
 
 ## Contact & Questions
 

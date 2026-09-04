@@ -1,4 +1,5 @@
 import { frameworkTreeInclude, toFrameworkDefinition } from '@cmmp/database';
+import { buildErrorReportCsv, importFromCsv, importFromXlsx, validateFileUpload, type ValidatedRow } from '@cmmp/import-engine';
 import { analyzeGaps, scoreFramework, type AnalyzeGapsOptions, type ScoredItem } from '@cmmp/scoring-engine';
 import { MaturityLevel as SharedMaturityLevel } from '@cmmp/shared';
 import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
@@ -198,8 +199,137 @@ export class AssessmentsService {
       },
     });
 
+    await this.recomputeCompletion(assessmentId, assessment.template.frameworkId, assessment.status, userId);
+
+    return item;
+  }
+
+  /**
+   * Bulk-imports assessment responses from an uploaded .xlsx/.xls/.csv
+   * file (master prompt §14). Every row is classified — valid, warning,
+   * invalid, or duplicate — and nothing is silently discarded: only
+   * `valid` rows whose `Control_ID` resolves to a real subcategory in
+   * this assessment's framework are written; everything else comes back
+   * in the response (plus a downloadable CSV error report) instead of
+   * disappearing.
+   */
+  async importFile(assessmentId: string, tenantId: string, userId: string, file: Express.Multer.File, worksheetName?: string) {
+    const assessment = await this.findOrThrow(assessmentId, tenantId);
+    if (!EDITABLE_STATUSES.includes(assessment.status)) {
+      throw new ConflictException(`Assessment cannot be edited while in '${assessment.status}' status`);
+    }
+    if (!assessment.template) {
+      throw new ConflictException('Assessment has no framework template to import responses against');
+    }
+
+    const fileIssues = validateFileUpload({ filename: file.originalname, mimetype: file.mimetype, size: file.size });
+    if (fileIssues.some((issue) => issue.severity === 'error')) {
+      throw new BadRequestException({ message: 'Invalid file upload', issues: fileIssues });
+    }
+
+    const isCsv = file.originalname.toLowerCase().endsWith('.csv');
+    const importResult = isCsv
+      ? importFromCsv(file.buffer.toString('utf-8'))
+      : (await importFromXlsx(file.buffer, worksheetName)).result;
+
+    // `warning` rows are importable — the flagged issue (e.g. a sanitised
+    // formula cell, an unparseable due date) has already been handled or
+    // is non-blocking; only `invalid` and `duplicate` rows are held back.
+    const importCandidates = [...importResult.valid, ...importResult.warnings];
+    const candidateCodes = importCandidates.map((row) => row.data.controlId).filter((code): code is string => Boolean(code));
+
+    const questions = await this.prisma.assessmentQuestion.findMany({
+      where: {
+        subcategory: { code: { in: candidateCodes }, category: { function: { frameworkId: assessment.template.frameworkId } } },
+      },
+      include: { subcategory: { select: { code: true } } },
+    });
+    const questionIdByCode = new Map(questions.map((question) => [question.subcategory.code, question.id]));
+
+    const imported: { row: ValidatedRow; questionId: string }[] = [];
+    const unmatched: ValidatedRow[] = [];
+    for (const row of importCandidates) {
+      const questionId = row.data.controlId ? questionIdByCode.get(row.data.controlId) : undefined;
+      if (questionId) {
+        imported.push({ row, questionId });
+      } else {
+        unmatched.push({
+          ...row,
+          status: 'invalid',
+          issues: [
+            ...row.issues,
+            { column: 'Control_ID', message: "Control_ID does not match any subcategory in this assessment's framework", severity: 'error' },
+          ],
+        });
+      }
+    }
+
+    if (imported.length > 0) {
+      await this.prisma.$transaction(
+        imported.map(({ row, questionId }) =>
+          this.prisma.assessmentItem.upsert({
+            where: { assessmentId_questionId: { assessmentId, questionId } },
+            create: {
+              assessmentId,
+              questionId,
+              currentMaturity: row.data.currentMaturity,
+              targetMaturity: row.data.targetMaturity,
+              weight: row.data.weight,
+              riskLevel: row.data.riskLevel,
+              businessCriticality: row.data.businessCriticality,
+              controlStatus: row.data.controlStatus,
+              evidence: row.data.evidence,
+              assessorComments: row.data.comments,
+              ownerName: row.data.owner,
+              remediationDueDate: row.data.dueDate ? new Date(row.data.dueDate) : undefined,
+            },
+            update: {
+              currentMaturity: row.data.currentMaturity,
+              targetMaturity: row.data.targetMaturity,
+              weight: row.data.weight,
+              riskLevel: row.data.riskLevel,
+              businessCriticality: row.data.businessCriticality,
+              controlStatus: row.data.controlStatus,
+              evidence: row.data.evidence,
+              assessorComments: row.data.comments,
+              ownerName: row.data.owner,
+              remediationDueDate: row.data.dueDate ? new Date(row.data.dueDate) : undefined,
+            },
+          }),
+        ),
+      );
+
+      await this.recomputeCompletion(assessmentId, assessment.template.frameworkId, assessment.status, userId);
+    }
+
+    // A row that started as `warning` (e.g. a sanitised formula cell) but
+    // turned out to have no matching subcategory moves to `invalid`
+    // entirely, rather than being reported under both buckets.
+    const unmatchedRowNumbers = new Set(unmatched.map((row) => row.rowNumber));
+    const stillWarnings = importResult.warnings.filter((row) => !unmatchedRowNumbers.has(row.rowNumber));
+
+    const rejected = {
+      ...importResult,
+      warnings: stillWarnings,
+      invalid: [...importResult.invalid, ...unmatched],
+    };
+
+    return {
+      totalRows: importResult.totalRows,
+      importedCount: imported.length,
+      validCount: importResult.valid.length,
+      warningCount: stillWarnings.length,
+      invalidCount: rejected.invalid.length,
+      duplicateCount: importResult.duplicates.length,
+      columnMapping: importResult.columnMapping,
+      unmappedColumns: importResult.unmappedColumns,
+      errorReportCsv: buildErrorReportCsv(rejected),
+    };
+  }
+
+  private async recomputeCompletion(assessmentId: string, frameworkId: string, currentStatus: string, userId: string) {
     const totalQuestions = await this.prisma.assessmentQuestion.count({
-      where: { subcategory: { category: { function: { frameworkId: assessment.template.frameworkId } } } },
+      where: { subcategory: { category: { function: { frameworkId } } } },
     });
     const answeredItems = await this.prisma.assessmentItem.count({ where: { assessmentId } });
     const completionPercentage = totalQuestions > 0 ? Math.round((answeredItems / totalQuestions) * 100) : 0;
@@ -207,13 +337,11 @@ export class AssessmentsService {
     await this.prisma.assessment.update({
       where: { id: assessmentId },
       data: {
-        status: assessment.status === 'DRAFT' ? 'IN_PROGRESS' : assessment.status,
+        status: currentStatus === 'DRAFT' ? 'IN_PROGRESS' : currentStatus,
         completionPercentage,
         updatedById: userId,
       },
     });
-
-    return item;
   }
 
   async submit(id: string, tenantId: string, userId: string) {

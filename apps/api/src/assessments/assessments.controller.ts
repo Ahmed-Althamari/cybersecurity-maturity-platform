@@ -1,5 +1,21 @@
+import { MAX_FILE_SIZE_BYTES } from '@cmmp/import-engine';
 import { UserRole } from '@cmmp/shared';
-import { Body, Controller, Get, Param, Patch, Post, Query, UseGuards, Delete } from '@nestjs/common';
+import {
+  BadRequestException,
+  Body,
+  Controller,
+  Delete,
+  Get,
+  Param,
+  Patch,
+  Post,
+  Query,
+  UploadedFile,
+  UseGuards,
+  UseInterceptors,
+} from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
+import { memoryStorage } from 'multer';
 
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { Roles } from '../auth/decorators/roles.decorator';
@@ -97,5 +113,26 @@ export class AssessmentsController {
   @Roles(...ASSESSMENT_WRITE_ROLES)
   async submit(@Param('id') id: string, @CurrentUser() user: RequestUser) {
     return this.assessmentsService.submit(id, user.tenantId, user.sub);
+  }
+
+  @Post(':id/import')
+  @UseGuards(RolesGuard)
+  @Roles(...ASSESSMENT_WRITE_ROLES)
+  @UseInterceptors(
+    FileInterceptor('file', {
+      storage: memoryStorage(),
+      limits: { fileSize: MAX_FILE_SIZE_BYTES },
+    }),
+  )
+  async importFile(
+    @Param('id') id: string,
+    @UploadedFile() file: Express.Multer.File,
+    @CurrentUser() user: RequestUser,
+    @Query('worksheet') worksheet?: string,
+  ) {
+    if (!file) {
+      throw new BadRequestException('No file uploaded (expected a multipart field named "file")');
+    }
+    return this.assessmentsService.importFile(id, user.tenantId, user.sub, file, worksheet);
   }
 }
