@@ -1,11 +1,11 @@
 # CMMP Implementation Status
 
-Last Updated: 2026-09-04 (Phase 13)
+Last Updated: 2026-09-04 (Phase 14)
 
 ## Overall Progress
 
-**Phase**: 13 / 17
-**Completion**: ~75%
+**Phase**: 14 / 17
+**Completion**: ~80%
 
 ## Completed ✅
 
@@ -650,6 +650,55 @@ Last Updated: 2026-09-04 (Phase 13)
       *new* controller's role gating — `RolesGuard` has no safety net for
       a class-level `@Roles()`, it just silently does nothing
 
+### Phase 14: Tests
+- [x] Unit tests (Jest) — already extensive from every prior phase
+      (service-level specs across `apps/api` plus every `packages/*`
+      engine); this phase's own addition is a real `apps/api/test/`
+      **e2e** suite, distinct from the unit specs living beside each
+      service
+- [x] API tests / Integration tests — `apps/api/test/*.e2e-spec.ts`
+      (Jest + `supertest`, `test:e2e` script, `test/jest-e2e.json`) boots
+      the *real* `AppModule` — real `PrismaService` against the live
+      Postgres instance, the real `JwtModule`, the real global
+      `AuditInterceptor` — behind `supertest`, so these exercise the
+      actual HTTP/guard/interceptor stack rather than mocked services.
+      `test/support/fixtures.ts` creates an isolated Tenant + Organisation
+      + User (+ role assignment) directly via Prisma per test file
+      (bypassing the API, which has no tenant-creation endpoint) and
+      tears everything down afterward — verified live that a run leaves
+      zero orphaned rows
+- [x] Tenant isolation tests — `tenant-isolation.e2e-spec.ts`: two
+      independent tenants, tenant A creates a Risk, and tenant B is
+      confirmed unable to read it directly (404), list it even when
+      explicitly querying tenant A's `organisationId` (empty array, not
+      an error), update it (404), or delete it (404) — while tenant A
+      itself can still read it
+- [x] Authorization tests — `authorization.e2e-spec.ts`: a
+      READ_ONLY_VIEWER is blocked (403) from creating a Risk and from
+      reading the audit log, a PLATFORM_ADMIN/AUDITOR can read the audit
+      log, and a CISO (write-role but not delete-role) can create but not
+      delete a Risk. Includes an explicit regression test for the Phase
+      13 class-vs-method `@Roles()` bug on `AuditController` — the exact
+      kind of thing no unit test caught, only live HTTP testing did
+- [x] Security tests — scoped narrowly here to what the above two suites
+      already cover (authz boundaries, tenant isolation); no dedicated
+      fuzzing/injection/SAST-style suite beyond that
+- [x] 17 e2e tests total, all passing against a live Postgres instance;
+      `npx turbo run type-check test build` is unaffected since `test:e2e`
+      is a separate script from `test` (matching the standard Nest
+      convention of keeping fast unit tests and slower, real-DB e2e tests
+      on different commands)
+- [ ] Component tests (React Testing Library) — **not** built; the
+      frontend has zero automated tests. This session's own frontend
+      verification (Phase 10) was manual Playwright screenshot checks,
+      not a persisted, repeatable suite
+- [ ] E2E tests (Playwright) — **not** built as an automated,
+      checked-in suite. Playwright was used interactively during Phase
+      10 to catch real rendering bugs (the radar chart's stray axis
+      line), but nothing from those sessions was saved as a spec file
+      that runs in CI or on demand — a real gap, honestly noted rather
+      than claimed as done
+
 ## Known Issues 🐛
 
 - Root `.eslintrc.json` references `eslint-plugin-security`,
@@ -683,16 +732,6 @@ Last Updated: 2026-09-04 (Phase 13)
   both in play.
 
 ## Not Started ⭕
-
-### Phase 14: Tests
-- [ ] Unit tests (Jest)
-- [ ] Component tests (React Testing Library)
-- [ ] API tests
-- [ ] Integration tests
-- [ ] E2E tests (Playwright)
-- [ ] Tenant isolation tests
-- [ ] Authorization tests
-- [ ] Security tests
 
 ### Phase 15: Docker
 - [ ] Docker image builds
@@ -885,49 +924,51 @@ they've been observed passing on an actual PR.
 
 ## Next Steps
 
-1. **Begin Phase 14**: Tests — the codebase has solid unit-test coverage
-   per-module (service-level Jest specs everywhere, 100+ tests across
-   `apps/api`), but nothing yet at the integration or E2E layer: no
-   `apps/api` e2e suite hitting a real (test) database through actual
-   HTTP requests, no frontend component tests, no Playwright E2E flows
-   through the browser, and no dedicated tenant-isolation/authorization
-   test suite that deliberately tries to cross tenant/org boundaries
-   across every resource type in one place (today that coverage is
-   spread thinly across each service's own spec file). Given how much
-   of this session's own bug-catching has come from live curl/Playwright
-   verification rather than the unit suites, formalizing that into a
-   real e2e suite (start Nest with `supertest` against a disposable test
-   DB) would catch the kind of thing unit tests miss — exactly like
-   Phase 13's own class-vs-method `@Roles()` bug, which no unit test
-   caught and only manual live testing did.
-2. **Multi-assessment rollup**: every `/dashboard/*` endpoint currently
+1. **Begin Phase 15**: Docker — a `Dockerfile` per app (`apps/api`,
+   `apps/web`), a `docker-compose.yml` wiring them to a Postgres service
+   (matching the `DATABASE_URL` shape already used locally), health
+   checks (`GET /api/v1` or a dedicated `/health` endpoint — doesn't
+   exist yet, worth adding), named volumes for Postgres data, and a
+   basic container security pass (non-root user, multi-stage build to
+   keep `node_modules`/build tooling out of the final image, no secrets
+   baked into layers). `apps/web`'s Next.js build already produces a
+   `.next` output suitable for a slim runtime image; `apps/api`'s Nest
+   build output (`dist/`) is likewise already container-ready — this
+   phase is packaging what already runs, not building new application
+   code.
+2. Phase 14 left two real gaps worth closing before or alongside Phase
+   16 (CI): frontend component tests (React Testing Library — currently
+   zero automated frontend tests) and a persisted Playwright E2E suite
+   (Playwright itself was used interactively in Phase 10 to catch a real
+   rendering bug, but nothing was saved as a runnable spec file).
+3. **Multi-assessment rollup**: every `/dashboard/*` endpoint currently
    scopes to *one* assessment (the org's latest submitted one, or an
    explicit `assessmentId`) — a real "organisation-wide" score across
    several concurrently-active assessments (different frameworks, business
    units) would need `@cmmp/scoring-engine`'s `combineScores`, which
    exists but isn't wired into the dashboard yet. Revisit if/when an org
    genuinely has more than one active assessment at a time.
-3. Frontend follow-ups from Phase 10: a framework navigation view, an
+4. Frontend follow-ups from Phase 10: a framework navigation view, an
    assessment-taking flow (`/assessments/:id/items`), a risk register view
    (`/risks` now has a real API), the Excel import wizard's upload/
    preview/column-mapping steps, and extracting the dashboard components
    into `@cmmp/ui` if/when a second app or page needs them (not worth the
    abstraction for one dashboard page yet)
-4. Wire `POST /assessments/:id/import`'s `columnMapping` override — the
+5. Wire `POST /assessments/:id/import`'s `columnMapping` override — the
    library (`ImportOptions.columnMapping`) already supports it, but the
    endpoint only auto-maps columns today; needs a way to accept a manual
    mapping as a form field or a preceding "preview" call, matching the
    import wizard's step 3 in master prompt §14.
-5. Look more closely at the `exceljs` → `uuid` advisory now that
+6. Look more closely at the `exceljs` → `uuid` advisory now that
    `import-engine` genuinely parses untrusted uploads (see Known Issues) —
    confirm whether `exceljs`'s internal `uuid` usage ever hits the
    vulnerable buffer-bounds code path, or upgrade past it.
-6. Before relying on the seeded NIST CSF 2.0 data for anything
+7. Before relying on the seeded NIST CSF 2.0 data for anything
    compliance-facing, diff `packages/database/prisma/fixtures/nist-csf-2.0.json`
    against the official NIST CSWP 29 publication — it was reproduced from
    training-data knowledge, not transcribed from the source document (see
    Phase 5 notes above)
-7. Fix the repo-wide ESLint plugin gap (see Known Issues)
+8. Fix the repo-wide ESLint plugin gap (see Known Issues)
 
 ## Contact & Questions
 
