@@ -1,11 +1,11 @@
 # CMMP Implementation Status
 
-Last Updated: 2026-08-31
+Last Updated: 2026-09-04
 
 ## Overall Progress
 
-**Phase**: 3 / 17
-**Completion**: ~20%
+**Phase**: 4 / 17
+**Completion**: ~24%
 
 ## Completed ✅
 
@@ -66,6 +66,45 @@ Last Updated: 2026-08-31
       sandbox (no Docker/Postgres). Verified instead via: `tsc --noEmit`,
       `nest build`, and Jest unit tests with a mocked `PrismaService`.
 
+### Phase 4: Framework Engine
+- [x] `@cmmp/framework-engine` package: framework-agnostic `FrameworkDefinition`
+      tree types (function → category → subcategory → question), separate
+      from `@cmmp/shared`'s flat, persistence-oriented interfaces
+- [x] Framework loader (`parseFrameworkDefinition` / `loadFrameworkFromJson`)
+      — accepts a raw object or JSON string, per master prompt §34
+      ("Framework definitions should be loadable from JSON or database
+      records")
+- [x] Framework validation — zod shape/type validation (code format,
+      kebab-case slug, required fields) plus a semantic pass for invariants
+      zod can't express on its own (duplicate sibling codes at every level
+      of the hierarchy); every issue is collected and reported in one pass,
+      not just the first
+- [x] Dynamic navigation tree generation (`buildFrameworkNavigation`) —
+      walks the generic function/category/subcategory shape recursively;
+      verified with an NIST-CSF-shaped and an unrelated ISO-27001-shaped
+      input to confirm there's no framework-specific branching (per master
+      prompt §34, "Avoid framework-specific if/else statements")
+- [x] `flattenFramework` — code-indexed lookup maps, groundwork for the
+      Phase 6/7 assessment and scoring engines
+- [x] Unit tests (`loader.spec.ts`, `navigation.spec.ts`,
+      `flatten.spec.ts` — 14 tests)
+- [x] Wired into the API: `FrameworksModule` (`apps/api/src/frameworks`) —
+      `GET /frameworks`, `GET /frameworks/:id`, `GET /frameworks/:id/navigation`
+      (tenant-scoped reads via Prisma's nested `include`, mapped into the
+      engine's shape) and `POST /frameworks/import` (validates a submitted
+      definition through the engine, then persists the whole tree as one
+      nested Prisma transaction; PLATFORM_ADMIN/ORGANISATION_ADMIN only)
+- [x] Unit tests: tenant isolation on `findAll`/`findOne`, navigation
+      built from a persisted tree, invalid-definition rejection short-circuits
+      before touching the database, duplicate slug/version mapped to 409
+      (`frameworks.service.spec.ts` — 6 tests)
+- [ ] "NIST CSF configuration structure" as a filled-in JSON config file is
+      Phase 5's work (loading the full NIST CSF 2.0 hierarchy through this
+      loader) — the seed script still creates the sample hierarchy directly
+      via Prisma calls rather than through `POST /frameworks/import`;
+      switching it over belongs with the Phase 5 data work so the two land
+      together
+
 ## Known Issues 🐛
 
 - Root `.eslintrc.json` references `eslint-plugin-security`,
@@ -82,13 +121,6 @@ Last Updated: 2026-08-31
   binary; `packages/database`'s own `build` script only runs `tsc`.
 
 ## Not Started ⭕
-
-### Phase 4: Framework Engine
-- [ ] Framework type definitions
-- [ ] Framework loader
-- [ ] NIST CSF configuration structure
-- [ ] Framework validation
-- [ ] Dynamic component generation
 
 ### Phase 5: NIST CSF Framework Data
 - [ ] NIST CSF 2.0 complete hierarchy
@@ -356,9 +388,12 @@ they've been observed passing on an actual PR.
 1. **Generate the first Prisma migration** once a Postgres instance is
    reachable (`docker compose up postgres`, then
    `npm run db:generate && cd packages/database && npx prisma migrate dev`)
-2. **Begin Phase 4**: Framework Engine — framework/function/category loader
-   that reads `Framework`/`Function`/`Category`/`Subcategory` from the DB
-   instead of hard-coding NIST CSF, per ADR-006
+2. **Begin Phase 5**: NIST CSF Framework Data — build the full NIST CSF 2.0
+   hierarchy (all 6 functions, ~22 categories, ~106 subcategories) as a JSON
+   config loadable through `@cmmp/framework-engine`'s
+   `parseFrameworkDefinition`, and switch the seed script to load it via
+   `POST /frameworks/import` (or the service directly) instead of the
+   hand-written Prisma calls it uses today
 3. Wire the Next.js frontend to the new `/api/v1/auth/login` and
    `/api/v1/users` endpoints (login page, session/token storage)
 4. Fix the repo-wide ESLint plugin gap (see Known Issues)
