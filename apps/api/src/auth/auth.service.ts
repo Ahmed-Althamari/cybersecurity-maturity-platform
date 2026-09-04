@@ -1,3 +1,5 @@
+import { randomUUID } from 'crypto';
+
 import { Injectable, UnauthorizedException } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import * as bcrypt from 'bcryptjs';
@@ -14,6 +16,8 @@ export interface JwtPayload {
   organisationId: string | null;
   role: string;
   roles: string[];
+  /** Unique per issued token — the only thing logout needs to revoke *this* token without touching any other session. */
+  jti: string;
 }
 
 @Injectable()
@@ -55,6 +59,7 @@ export class AuthService {
       organisationId: user.organisationId,
       role: roles[0] ?? 'READ_ONLY_VIEWER',
       roles,
+      jti: randomUUID(),
     };
 
     return {
@@ -79,10 +84,28 @@ export class AuthService {
     }
   }
 
-  async logout() {
-    // Token-based auth doesn't require server-side logout.
-    // A revocation list can be added here if immediate token invalidation is needed.
+  /**
+   * Revokes exactly the token being logged out of — every other session
+   * for this user (a different device, a different tab that hasn't
+   * logged out) keeps working, which is the expected behaviour for
+   * per-token logout rather than a global "sign out everywhere."
+   * `expiresAt` mirrors the token's own `exp` claim: once it passes, the
+   * token would be rejected on expiry alone, so the row is safe to prune
+   * after that point (no pruning job exists yet — see
+   * docs/security-architecture.md).
+   */
+  async logout(jti: string, expiresAt: Date) {
+    await this.prisma.revokedToken.upsert({
+      where: { jti },
+      create: { jti, expiresAt },
+      update: {},
+    });
     return { message: 'Logged out successfully' };
+  }
+
+  async isRevoked(jti: string): Promise<boolean> {
+    const revoked = await this.prisma.revokedToken.findUnique({ where: { jti } });
+    return revoked !== null;
   }
 
   async refreshToken(token: string) {
@@ -95,6 +118,7 @@ export class AuthService {
       organisationId: payload.organisationId,
       role: payload.role,
       roles: payload.roles,
+      jti: randomUUID(),
     };
     const newToken = this.jwtService.sign(rest);
     return { access_token: newToken };

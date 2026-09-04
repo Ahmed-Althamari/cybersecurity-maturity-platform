@@ -13,7 +13,7 @@ design.
 |---|---|---|
 | **Tenant isolation** | Every tenant-scoped service, `where: { tenantId, ... }` on every query, `tenantId` sourced from the JWT never a client value | `apps/api/test/tenant-isolation.e2e-spec.ts` — two real tenants, one creates a Risk, the other 404s/empty-lists it on every read/write path |
 | **RBAC** | `RolesGuard` + `@Roles(...)` on individual route handlers (not the controller class — see the Phase 13 bug below) | `apps/api/test/authorization.e2e-spec.ts` — role-by-role 403/200 assertions against a live server, including a regression test for the class-vs-method bug |
-| **Authentication** | JWT (`@nestjs/jwt`), bcrypt password hashing (12 salt rounds, `users.service.ts`), Passport JWT strategy validates every protected request | `auth.service.spec.ts` + `apps/api/test/auth.e2e-spec.ts` (real login/logout/refresh/me against a live server) |
+| **Authentication** | JWT (`@nestjs/jwt`), bcrypt password hashing (12 salt rounds, `users.service.ts`), Passport JWT strategy validates every protected request | `auth.service.spec.ts` + `apps/api/test/auth.e2e-spec.ts` (real login/me against a live server) — see the Token revocation row below for logout specifically |
 | **Audit logging** | Global `AuditInterceptor`, append-only `AuditEvent` rows, no update/delete method exists on `AuditService` | `audit.interceptor.spec.ts`, `audit.service.spec.ts`, live verification in Phase 13's own writeup |
 | **Credential redaction in audit trail** | `sanitizeForAudit()` replaces `password`/`token`/`secret`-shaped keys with `[REDACTED]` before a request body is ever persisted | `sanitize.spec.ts` + live: confirmed a real login/user-create audit row shows `[REDACTED]`, not the submitted password |
 | **Formula/CSV injection defense** | `@cmmp/import-engine`'s `sanitizeCellValue()` — a cell starting with `=`, `+`, `-`, `@`, or a control character gets prefixed with `'` before storage | `sanitize.spec.ts` in `import-engine`, plus a live end-to-end import test |
@@ -23,6 +23,7 @@ design.
 | **CORS** | Restricted to a single configured origin (`CORS_ORIGIN` env var, defaults to `http://localhost:3000`), not `*` | Manual inspection of `main.ts` |
 | **Soft delete** | `deletedAt` timestamp instead of hard `DELETE` across tenant-scoped resources — every read filters `deletedAt: null` | Consistent pattern, unit-tested per-resource (e.g. `risks.service.spec.ts`'s "soft-deletes rather than hard-deletes") |
 | **Rate limiting** | `@nestjs/throttler`, global `APP_GUARD`. App-wide default (100 req/15min/IP, configurable via `RATE_LIMIT_MAX_REQUESTS`/`RATE_LIMIT_WINDOW_MS`) plus a much tighter override on `POST /auth/login` specifically (5/min/IP via `@Throttle()`) — that's the one endpoint reachable with zero prior authentication, so it's the one that needs brute-force resistance rather than just general abuse protection. `GET /health` is exempted (`@SkipThrottle()`) since it's designed for frequent automated polling. `ENABLE_RATE_LIMITING` in `.env.example` is *not* wired as an on/off toggle — rate limiting is unconditionally on, a deliberate choice for a security product (opt-out is the wrong default here) | `apps/api/test/rate-limit.e2e-spec.ts` — 5 login attempts succeed (as 401s, wrong password), the 6th gets a real 429 with a `Retry-After` header even when the credentials on that 6th attempt are correct; `/health` confirmed still reachable after login's limit is exhausted |
+| **Token revocation on logout** | A `RevokedToken` table keyed by `jti` (a unique id added to every JWT at sign time). `POST /auth/logout` upserts a row for *that specific token's* `jti`; `JwtStrategy.validate()` checks it on every authenticated request and rejects with 401 if found. Per-token, not a global "sign out everywhere" — a different session for the same user (a different device, a different tab) is untouched. No pruning job exists for rows past their `expiresAt` yet (see Gaps) | `apps/api/test/token-revocation.e2e-spec.ts` — logs out one of two sessions and confirms the other still works, confirms the same token can't log out twice; `auth.service.spec.ts`/`jwt.strategy.spec.ts` unit-test the upsert and the revocation check directly |
 
 ## Security Gaps (Honestly, Not Implemented)
 
@@ -41,11 +42,15 @@ Declared somewhere (an env var, an earlier draft of `docs/architecture.md`,
   front of. Not a gap in the running system so much as a gap that
   doesn't apply until a real deployment target exists.
 - **MFA** — not implemented. Single-factor password login only.
-- **Session/token revocation** — `POST /auth/logout` is a no-op
-  (`auth.service.ts`: "Token-based auth doesn't require server-side
-  logout... A revocation list can be added here if immediate token
-  invalidation is needed"). A JWT issued before logout stays valid until
-  its 24h expiry regardless of a subsequent logout call.
+- **Refresh-token rotation** — `POST /auth/refresh` mints a new token
+  (with its own fresh `jti`) but never revokes the token it was called
+  with, unlike logout. A leaked token stays valid until its natural
+  24h expiry even after its holder refreshes.
+- **No pruning job for expired `RevokedToken` rows** — a row only needs
+  to exist until its `expiresAt` (after that the token would be
+  rejected on expiry alone regardless), but nothing deletes old rows —
+  the table grows without bound. Harmless correctness-wise, a real
+  operational concern at scale.
 - **Frontend security testing** — zero automated frontend tests (unit,
   component, or E2E) — see `docs/architecture.md`'s frontend section.
 
@@ -62,7 +67,7 @@ doesn't exist).
 |---|---|---|
 | Credential stuffing / password guessing against `POST /auth/login` | bcrypt (slow hash) makes offline cracking of a stolen hash expensive; `@nestjs/throttler` caps login at 5 attempts/minute/IP (see Security Controls above) | IP-based limiting is bypassable by an attacker rotating source IPs (a botnet, a proxy pool) — this stops casual/single-source brute force, not a distributed one. No account-level lockout exists as a second layer. |
 | Forged JWT | HMAC-signed (`@nestjs/jwt`), verified by `JwtStrategy` on every request; `resolveJwtSecret()` refuses to start in production if `JWT_SECRET` is unset rather than falling back to the value hard-coded in the public source tree | Outside production the fallback still applies (by design, so dev/CI don't need a configured secret) — a staging environment that forgets to set `NODE_ENV=production` would silently keep using it. |
-| Session fixation / token theft | Bearer token over HTTPS (in a real deployment — this sandbox runs plain HTTP locally) | No token binding to IP/user-agent; a stolen token works from anywhere until expiry. Standard JWT trade-off, not unique to this system, but worth naming. |
+| Session fixation / token theft | Bearer token over HTTPS (in a real deployment — this sandbox runs plain HTTP locally); a user who suspects theft can now log out to actually kill that specific token (previously a no-op) | No token binding to IP/user-agent, and revocation only helps if the legitimate user notices and logs out — an attacker who's quietly using a stolen token isn't detected or cut off automatically. Standard JWT trade-off, not unique to this system, but worth naming. |
 
 ### Tampering (modifying data or requests in transit/at rest)
 
@@ -116,28 +121,31 @@ doesn't exist).
 | A04 | Insecure Design | Tenant isolation and RBAC are structural (every service follows the same validated-scope pattern), not bolted on per-endpoint |
 | A05 | Security Misconfiguration | `JWT_SECRET` now fails closed in production (see Spoofing); the residual case is a non-production environment mislabeled as such |
 | A06 | Vulnerable & Outdated Components | Dependabot + `npm audit --audit-level=high` in CI (Phase 16); GitHub's own banner currently shows 72 open advisories (1 critical, 25 high, 37 moderate, 9 low) repo-wide, un-triaged as of this writing |
-| A07 | Identification & Authentication Failures | Login is now rate-limited (5/min/IP); no MFA and no session/token revocation on logout remain open — see Security Gaps above |
+| A07 | Identification & Authentication Failures | Login is now rate-limited (5/min/IP) and logout now really revokes the token; no MFA and no refresh-token rotation remain open — see Security Gaps above |
 | A08 | Software & Data Integrity Failures | `package-lock.json` committed (reproducible installs); no code-signing or SLSA-style provenance |
 | A09 | Security Logging & Monitoring Failures | Audit logging exists and is append-only; no alerting/monitoring layer on top of it (no SIEM integration, no anomaly detection) |
 | A10 | Server-Side Request Forgery | Not directly applicable — no endpoint accepts and fetches an arbitrary user-supplied URL |
 
 ## Priority Order for Closing Gaps
 
-If picking one thing at a time, in order of actual risk. The first two
-are done — struck rather than deleted, so the priority history stays
-visible:
+If picking one thing at a time, in order of actual risk. The first
+three are done — struck rather than deleted, so the priority history
+stays visible:
 
 1. ~~Rate limiting on `/auth/login`~~ — done (`@nestjs/throttler`,
    5/min/IP, `apps/api/test/rate-limit.e2e-spec.ts`).
 2. ~~Fail-closed on missing `JWT_SECRET`~~ — done
-   (`resolveJwtSecret()` in `auth.module.ts` throws in production when
-   unset; `auth.module.spec.ts`).
-3. **Token revocation on logout** — even a simple in-memory deny-list
-   for the remaining TTL would close the current no-op; a database-backed
-   revoked-token table is the more correct option (survives a restart,
-   works across multiple instances) but needs a `jti` claim added to the
-   JWT payload and a migration. Neither built yet.
-4. **Triage the 72 open Dependabot advisories.**
-5. **Extend the tenant-isolation e2e pattern** to `Assessment`,
+   (`resolveJwtSecret()` in `jwt-secret.ts` throws in production when
+   unset; `jwt-secret.spec.ts`).
+3. ~~Token revocation on logout~~ — done: a database-backed
+   `RevokedToken` table keyed by `jti` (survives a restart, works across
+   multiple instances, unlike an in-memory deny-list), checked in
+   `JwtStrategy.validate()` on every request;
+   `apps/api/test/token-revocation.e2e-spec.ts`.
+4. **Refresh-token rotation** — `POST /auth/refresh` should revoke the
+   token it was called with (reusing the same `RevokedToken` mechanism),
+   not just mint a new one alongside the still-valid old one.
+5. **Triage the 72 open Dependabot advisories.**
+6. **Extend the tenant-isolation e2e pattern** to `Assessment`,
    `Framework`, and `User` explicitly, rather than relying on the
    pattern being structurally consistent across services.

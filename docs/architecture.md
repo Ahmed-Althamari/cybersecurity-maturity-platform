@@ -171,7 +171,10 @@ actually exercise against a live database, not just asserted here.
   `User.passwordHash`, then signs a JWT (`@nestjs/jwt`,
   `JwtModule.register`) carrying `sub`, `email`, `tenantId`,
   `organisationId`, `role` (first assigned role, or `READ_ONLY_VIEWER` if
-  none), and `roles` (the full list). 24h expiry.
+  none), `roles` (the full list), and `jti` (a random id unique to this
+  one token — see Token revocation below). 24h expiry. Rate-limited to
+  5 attempts/minute/IP (`@nestjs/throttler`) — see
+  `docs/security-architecture.md`.
 - The API returns the token as `access_token` in the JSON body — there's
   no server-set cookie on the API side. `apps/web`'s NextAuth Credentials
   provider is what turns that into a session; the browser never talks to
@@ -179,10 +182,27 @@ actually exercise against a live database, not just asserted here.
 - `JwtAuthGuard` (Passport JWT strategy) verifies the token on every
   protected route; `RolesGuard` checks `roles` against a route's
   `@Roles(...)` metadata, as above.
-- `JWT_SECRET` has a hard-coded fallback
-  (`'your-secret-key-change-in-production'`) in `auth.module.ts` if the
-  env var isn't set — fine for this sandbox's local testing, a real
-  deployment must set `JWT_SECRET` (see `docs/DEPLOYMENT.md`).
+- `JWT_SECRET` falls back to a hard-coded value
+  (`'your-secret-key-change-in-production'`, `jwt-secret.ts`) if unset
+  — but **only** outside `NODE_ENV=production`, where the app instead
+  refuses to start. Fine for this sandbox's local testing; a real
+  deployment must set `JWT_SECRET` and `NODE_ENV=production` together
+  (see `docs/DEPLOYMENT.md`).
+
+### Token revocation
+
+`POST /auth/logout` isn't a no-op: it upserts a `RevokedToken` row keyed
+by the current token's `jti`, and `JwtStrategy.validate()` checks that
+table on every authenticated request, rejecting a revoked token with 401
+even though it hasn't naturally expired. This is per-token, not a global
+"sign out everywhere" — logging out of one device/tab never touches a
+different session's token, since each login mints its own `jti`.
+`POST /auth/refresh` mints a new token (its own fresh `jti`) but does
+**not** revoke the token it was called with — refresh-token rotation is
+a known, documented gap (`docs/security-architecture.md`). Revoked rows
+have no pruning job; they accumulate past their own `expiresAt` with no
+correctness impact (an expired token is rejected on expiry alone
+regardless) but a real operational one at scale.
 
 ### Tenant isolation
 

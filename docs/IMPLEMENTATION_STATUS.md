@@ -71,8 +71,13 @@ breadth of coverage, not "nothing left to do."
 - [ ] NextAuth.js configuration on the Next.js frontend (not started — the
       NestJS API issues its own JWTs for now; frontend session wiring is
       still open)
-- [ ] Token revocation / refresh-token rotation (current `refresh` endpoint
-      re-signs a valid token; no blacklist or rotation yet)
+- [x] Token revocation — done in the Post-Phase-17 Hardening section
+      below (`RevokedToken` table keyed by `jti`, checked on every
+      request in `JwtStrategy.validate()`). **Refresh-token rotation
+      specifically is still not done**: `POST /auth/refresh` mints a new
+      token with a fresh `jti` but never revokes the token it was called
+      with — the old token stays valid until it naturally expires, so a
+      leaked token isn't invalidated just because its holder refreshed.
 - [x] End-to-end verification against a live database — this environment had
       PostgreSQL 16 available; ran the real migration, seeded the database,
       started the API, and confirmed `POST /api/v1/auth/login` issues a
@@ -1298,11 +1303,104 @@ throw path isn't meaningfully possible here; the unit tests, which
 manipulate `process.env` directly and never go through Prisma's
 require chain, are the real verification for this one.
 
+### Token revocation on logout
+Third item from `docs/security-architecture.md`'s priority list.
+`POST /auth/logout` was previously a no-op — it returned success but
+never invalidated the token, so a leaked/stolen token stayed valid for
+its full 24h lifetime regardless of logging out. Fixed with a
+database-backed revocation list rather than adding Redis (removed as
+unused scaffolding in Phase 15 — reintroducing it just for this would
+be the same kind of speculative infrastructure this session has
+avoided elsewhere):
+- New `RevokedToken` model (`jti` unique, `expiresAt`, indexed on
+  `expiresAt` for future pruning) and migration
+  (`20260904203511_add_revoked_tokens`). No FK to `User` — a JWT
+  outlives nothing about the user record, and a revocation lookup only
+  ever needs the token's own `jti` claim.
+- `JwtPayload` gained a `jti` (via `crypto.randomUUID()`), minted fresh
+  on every `login()` and every `refreshToken()` call — each issued
+  token is independently revocable without touching any other session
+  for the same user.
+- `AuthService.logout(jti, expiresAt)` upserts a `RevokedToken` row;
+  `isRevoked(jti)` checks for one. `JwtStrategy.validate()` now calls
+  `isRevoked()` on every authenticated request and throws
+  `UnauthorizedException` for a revoked token, even though it hasn't
+  naturally expired. `AuthController.logout()` reads `jti`/`exp` off
+  the already-authenticated request (via a new `CurrentUser`-typed
+  `RequestUser.jti`/`.exp`) rather than re-parsing the token.
+- This is **per-token**, not global "sign out everywhere": logging out
+  of one device/tab never touches a different session's token, since
+  each login mints its own `jti`. Verified explicitly by test (see
+  below).
+- `resolveJwtSecret()` was extracted out of `auth.module.ts` into its
+  own `apps/api/src/auth/jwt-secret.ts` file (moving the spec file with
+  it, via `git mv`, to `jwt-secret.spec.ts`) — `JwtStrategy` now needs
+  the same secret `AuthModule` uses to sign tokens, and importing it
+  from `auth.module.ts` directly would have created a circular import
+  (`auth.module.ts` → `jwt.strategy.ts` → `auth.module.ts`). Caught and
+  avoided before writing code that would have hit the cycle, not fixed
+  after the fact.
+- New/extended tests: `auth.service.spec.ts` gained a "unique jti per
+  token, including across a refresh" test and a `logout`/`isRevoked`
+  block (3 tests); new `jwt.strategy.spec.ts` (3 tests: rejects a
+  revoked token, returns the correct request-user shape including
+  `jti`/`exp` for a non-revoked one, confirms `isRevoked` is called
+  with the token's own `jti`); new `apps/api/test/token-revocation.e2e-spec.ts`
+  (2 tests, split into its own file — see below for why) covering the
+  per-token-not-global behavior and that a token can't be used to log
+  out twice.
+- **A real NestJS testing limitation found and worked around while
+  writing the e2e tests**: the first attempt put the 2 new revocation
+  tests directly in `auth.e2e-spec.ts` and tried to bypass the rate
+  limiter (needed here since the test logs in several times) via
+  `.overrideGuard(ThrottlerGuard)`/`.overrideProvider(APP_GUARD)` on
+  `Test.createTestingModule()`. Neither actually took effect — traced
+  via direct instrumentation (a `let hit = false` flag inside the
+  override's `canActivate` that never flipped to `true` on a real
+  request) to a known `@nestjs/testing` limitation: overrides don't
+  reliably intercept a guard registered globally via
+  `{ provide: APP_GUARD, useClass: ... }`. The real throttle was firing
+  for real and silently failing unrelated assertions with
+  `expected 200, got 401`/`expected 201, got 401` because a login call
+  was returning a real `429` that went unnoticed until the raw response
+  body was logged. **Fix**: rather than fighting the guard, split the
+  revocation tests into their own spec file
+  (`token-revocation.e2e-spec.ts`), since every file using
+  `createTestApp()` gets its own fresh app instance and therefore its
+  own empty in-memory `ThrottlerStorage` — each file just needs to keep
+  its own total login-call count under the real 5/60s limit.
+  `test/support/app.ts`'s own comment now documents this limitation
+  honestly for whoever writes the next e2e file that needs multiple
+  logins.
+- Verified end-to-end against the live PostgreSQL instance: real
+  login → `GET /auth/me` 200 → `POST /auth/logout` → same token retried
+  on `GET /auth/me` → 401 → a second, independent session's token for
+  the same user still 200s → retrying `POST /auth/logout` with the
+  already-revoked token → 401. Confirmed via `psql` that real rows
+  land in `revoked_tokens`.
+- Docs updated in the same pass: `docs/architecture.md` (a new
+  "### Token revocation" subsection), `docs/security-architecture.md`
+  (Controls table, Security Gaps list, STRIDE Spoofing table, OWASP
+  A07 row, and the Priority Order list — struck through as done, with
+  refresh-token rotation added as the new next item), and this file's
+  own Phase 3 checklist item.
+- **Known, documented gap left open on purpose**: `POST /auth/refresh`
+  mints a new token (its own fresh `jti`) but does **not** revoke the
+  token it was called with — refresh-token rotation is real future
+  work, not silently assumed done here (see Next Steps). There is also
+  no pruning job for `RevokedToken` rows past their own `expiresAt` —
+  no correctness impact (an expired token is rejected on expiry alone
+  regardless) but a real operational one at scale.
+- Full verification re-run after this change: `npx turbo run
+  type-check test build` (27/27), unit tests (116/116), `npm run
+  test:e2e` (21/21) across two consecutive stable runs, `npm run lint`
+  clean.
+
 ## Next Steps
 
-What's left, roughly in priority order (Docker verification and rate
-limiting and the JWT_SECRET fail-closed fix were the top three; both are
-now done above):
+What's left, roughly in priority order (Docker verification, rate
+limiting, the JWT_SECRET fail-closed fix, and token revocation on
+logout were the top four; all four are now done above):
 
 1. **Actually build and run Phase 15's Docker images.** `docker compose
    build && docker compose up` somewhere with a working daemon (this
@@ -1316,16 +1414,14 @@ now done above):
    GitHub Actions runner (which does have a working daemon) — worth
    watching for that specifically, since it's the first real
    verification those Dockerfiles will get.
-2. **Implement real token revocation on logout** (currently a no-op) —
-   the last item from `docs/security-architecture.md`'s priority list.
-   No Redis exists in this system (removed as unused scaffolding in
-   Phase 15) and adding one just for this would be exactly the kind of
-   speculative infrastructure this session has avoided elsewhere — the
-   honest options are a small database-backed revoked-token table
-   (survives restarts, correct across multiple instances, needs a `jti`
-   claim added to the JWT payload and a migration) or an in-memory
-   deny-list (simpler, doesn't survive a restart or scale past one
-   instance). Neither is built yet.
+2. **Refresh-token rotation.** `POST /auth/refresh` mints a new token
+   (its own fresh `jti`) but doesn't revoke the token it was called
+   with — the old token stays valid until it naturally expires, so a
+   leaked token isn't invalidated just because its holder refreshed.
+   The new `RevokedToken` table from the logout work above makes this a
+   small follow-up (revoke the old `jti` inside `refreshToken()`) rather
+   than new infrastructure — the last open item from
+   `docs/security-architecture.md`'s priority list.
 3. Frontend test coverage — zero automated tests in `apps/web` today.
    React Testing Library component tests and a persisted Playwright E2E
    suite (the dependency and a `test:e2e` script exist, scaffolded since
@@ -1366,6 +1462,9 @@ now done above):
     cross-tenant e2e test; the isolation *pattern* is structurally
     consistent across every service, but that consistency itself isn't
     independently e2e-verified per resource yet
+11. No pruning job exists for `RevokedToken` rows past their own
+    `expiresAt` — no correctness impact today, but a real operational
+    one once the table has accumulated enough history at scale.
 
 ## Contact & Questions
 

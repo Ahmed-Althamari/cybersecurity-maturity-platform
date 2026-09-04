@@ -6,9 +6,10 @@ import type { Request } from 'express';
 import { AuditLog } from '../audit/decorators/audit-log.decorator';
 
 import { AuthService } from './auth.service';
+import { CurrentUser } from './decorators/current-user.decorator';
 import { LoginDto } from './dto/login.dto';
 import { JwtAuthGuard } from './guards/jwt-auth.guard';
-import type { AuthenticatedRequest } from './types/authenticated-request';
+import type { AuthenticatedRequest, RequestUser } from './types/authenticated-request';
 
 @ApiTags('Auth')
 @Controller('auth')
@@ -29,8 +30,9 @@ export class AuthController {
   @ApiBearerAuth()
   @UseGuards(JwtAuthGuard)
   @AuditLog('LOGOUT', 'User')
-  async logout() {
-    return this.authService.logout();
+  async logout(@CurrentUser() user: RequestUser) {
+    // exp is seconds-since-epoch (the JWT standard); Date wants milliseconds.
+    return this.authService.logout(user.jti, new Date(user.exp * 1000));
   }
 
   @Post('refresh')

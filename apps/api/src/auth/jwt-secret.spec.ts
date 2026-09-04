@@ -1,4 +1,4 @@
-import { resolveJwtSecret } from './auth.module';
+import { resolveJwtSecret } from './jwt-secret';
 
 describe('resolveJwtSecret', () => {
   const originalEnv = { ...process.env };
