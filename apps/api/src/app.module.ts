@@ -6,6 +6,7 @@ import { AuthModule } from './auth/auth.module';
 import { DashboardModule } from './dashboard/dashboard.module';
 import { FrameworksModule } from './frameworks/frameworks.module';
 import { PrismaModule } from './prisma/prisma.module';
+import { RemediationInitiativesModule } from './remediation-initiatives/remediation-initiatives.module';
 import { RisksModule } from './risks/risks.module';
 import { UsersModule } from './users/users.module';
 
@@ -22,6 +23,7 @@ import { UsersModule } from './users/users.module';
     AssessmentsModule,
     DashboardModule,
     RisksModule,
+    RemediationInitiativesModule,
   ],
   controllers: [],
   providers: [],

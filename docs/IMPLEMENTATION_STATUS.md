@@ -1,11 +1,11 @@
 # CMMP Implementation Status
 
-Last Updated: 2026-09-04
+Last Updated: 2026-09-04 (Phase 12)
 
 ## Overall Progress
 
-**Phase**: 11 / 17
-**Completion**: ~65%
+**Phase**: 12 / 17
+**Completion**: ~70%
 
 ## Completed ✅
 
@@ -498,6 +498,77 @@ Last Updated: 2026-09-04
       (write roles and delete roles are deliberately different sets), and
       confirmed the deleted risk 404s afterward
 
+### Phase 12: Remediation Roadmap
+- [x] `RemediationInitiative` model — already existed from Phase 2; this
+      phase is the first thing besides the seed script that can create/
+      read/update/delete rows through a real API
+      (`RemediationInitiativesModule`, `apps/api/src/remediation-initiatives`)
+- [x] Initiative CRUD — `POST/GET/PATCH/DELETE /remediation-initiatives`,
+      following the same shape as `RisksService`: the target organisation
+      is validated against the caller's tenant up front, `riskIds` (if
+      given) are validated as belonging to that same org before linking,
+      and delete is a soft-delete (`deletedAt`)
+- [x] Risk↔initiative linking — the write-side endpoint deferred from
+      Phase 11 (`POST/DELETE /remediation-initiatives/:id/risks/:riskId`),
+      validating the risk belongs to the initiative's organisation before
+      connecting/disconnecting the Prisma relation
+- [x] Prioritisation algorithm — master prompt §20's
+      "Priority Score = Risk × Gap × Business Criticality × Weight, do
+      not permanently hard-code this formula" is `computePriority()`, one
+      exported, independently unit-tested function (raw score banded into
+      1–5), following the same isolate-the-formula pattern as Phase 11's
+      `riskLevelFromScore`. `GET /remediation-initiatives?sort=priority`
+      orders by it
+- [x] Auto-generation from gaps — `POST /remediation-initiatives/generate`
+      calls `AssessmentsService.getGaps()` (Phase 7) at subcategory depth,
+      creates one `PLANNED` initiative per open gap with priority computed
+      from the *real* backing `AssessmentItem`'s stored `riskLevel`,
+      `businessCriticality`, and `weight` (never left at a placeholder
+      default), and skips any subcategory that already has a non-terminal
+      initiative tracking it — `securityCapability` doubles as that dedup
+      key since the schema has no dedicated gap FK on the model. Defaults
+      to the organisation's latest `SUBMITTED` assessment when no
+      `assessmentId` is given, matching the dashboard's own resolution
+      rule
+- [x] Status tracking — `status` is a free-form field validated against a
+      fixed set (`PLANNED`, `IN_PROGRESS`, `COMPLETED`, `BLOCKED`,
+      `ON_HOLD`) at the DTO layer; setting `status: COMPLETED` without an
+      explicit `actualCompletionDate` stamps "now" server-side, but an
+      explicit date always takes precedence
+- [x] Role-gated writes — reuses the same role set as Risk Register
+      (PLATFORM_ADMIN, ORGANISATION_ADMIN, CISO, GRC_MANAGER,
+      SECURITY_ARCHITECT) for create/update/link/unlink/generate,
+      PLATFORM_ADMIN/ORGANISATION_ADMIN only for delete; any authenticated
+      role can read
+- [x] Unit tests (`remediation-initiatives.service.spec.ts` — 23 tests):
+      `computePriority`'s banding thresholds via a parametrised test,
+      tenant/org isolation and riskIds cross-org rejection on create,
+      priority sorting, the COMPLETED auto-date-stamp behaviour (and that
+      an explicit date wins, and that a non-terminal status leaves it
+      alone), soft-delete, link/unlink risk (including the cross-org
+      404), and `generateFromGaps`'s no-submitted-assessment 404,
+      existing-non-terminal-initiative skip, real-assessment-item priority
+      computation, and the no-backing-item default-values fallback
+- [x] Timeline views (3/6/12 month) and a roadmap UI page are **not**
+      built — Phase 12 here is API-only, matching the backend-first
+      discipline of Phases 4–9 (Phase 10 was the one dedicated frontend
+      phase so far). `startDate`/`targetCompletionDate`/
+      `actualCompletionDate` are all real persisted fields, so a timeline
+      view is a pure frontend read against existing data whenever that
+      phase is picked up — noted honestly rather than silently dropped
+- [x] Verified end-to-end against the live PostgreSQL instance (freshly
+      reseeded): created an initiative, linked and unlinked a real risk,
+      confirmed linking a foreign/nonexistent risk 404s, set `status` to
+      `COMPLETED` and confirmed `actualCompletionDate` auto-stamped,
+      confirmed VIEWER gets 403 on create and delete while CISO (a write
+      role but not a delete role) also gets 403 on delete, confirmed
+      PLATFORM_ADMIN's delete soft-deletes (subsequent `GET` 404s), and
+      ran `POST /remediation-initiatives/generate` twice against the
+      seeded assessment — the first run created 3 new `PLANNED`
+      initiatives (one per top open gap, real computed priorities), the
+      second run created 0 (correctly deduped against the initiatives
+      the first run had just created)
+
 ## Known Issues 🐛
 
 - Root `.eslintrc.json` references `eslint-plugin-security`,
@@ -519,16 +590,18 @@ Last Updated: 2026-09-04
   (`packages/import-engine/src/parse-xlsx.ts`) rather than a project-wide
   `typeRoots` change — a real Node `Buffer` satisfies both shapes at
   runtime, this is purely a type-declaration mismatch.
+- `prisma/seed.ts`'s own gap-derived `RemediationInitiative` rows (created
+  directly, not through `generateFromGaps`) leave `securityCapability`
+  `null`. `generateFromGaps`'s dedup check keys off `securityCapability`,
+  so re-running it after a fresh seed does **not** recognise those seeded
+  rows as already covering a gap and will create a second, API-created
+  initiative for the same subcategory. Not a correctness bug in the new
+  code — the dedup key does exactly what it says — but worth fixing by
+  either having the seed script set `securityCapability` too, or accepting
+  the duplication as expected when seed data and the real generator are
+  both in play.
 
 ## Not Started ⭕
-
-### Phase 12: Remediation Roadmap
-- [ ] Initiative model
-- [ ] Auto-generation from gaps
-- [ ] Prioritization algorithm
-- [ ] Timeline views (3, 6, 12 month)
-- [ ] Roadmap UI
-- [ ] Status tracking
 
 ### Phase 13: Audit Logging
 - [ ] Audit event model
@@ -738,16 +811,17 @@ they've been observed passing on an actual PR.
 
 ## Next Steps
 
-1. **Begin Phase 12**: Remediation Roadmap — a real `RemediationInitiativesService`/
-   `Controller` (create/update/status transitions), matching Risk Register's
-   pattern; `GET /dashboard/roadmap` already reads and timeline-buckets
-   `RemediationInitiative` rows, but nothing besides the seed script
-   creates them yet. This is also where the risk↔initiative linking
-   endpoint deferred from Phase 11 belongs (attach risks when creating/
-   editing an initiative), and where master prompt §20's priority formula
-   ("Risk × Gap × Business Criticality × Weight", explicitly *not*
-   hard-coded) should actually get built as a real, swappable function —
-   Phase 11's `riskLevelFromScore` is the pattern to follow.
+1. **Begin Phase 13**: Audit Logging — an immutable `AuditEvent` model plus
+   a NestJS interceptor/middleware that records who did what to which
+   tenant-scoped resource (create/update/delete across Assessments, Risks,
+   RemediationInitiatives at minimum), an append-only write path (no
+   update/delete on audit rows themselves), a query API scoped by
+   tenant/org/actor/date-range, and eventually a dashboard view. This is
+   the first phase that cuts across every existing module rather than
+   adding a new one, so worth deciding up front whether it's a single
+   `@Injectable()` interceptor registered globally (simplest, catches
+   everything uniformly) versus explicit calls inside each service
+   (more control over what's logged, more places to remember to add it).
 2. **Multi-assessment rollup**: every `/dashboard/*` endpoint currently
    scopes to *one* assessment (the org's latest submitted one, or an
    explicit `assessmentId`) — a real "organisation-wide" score across
