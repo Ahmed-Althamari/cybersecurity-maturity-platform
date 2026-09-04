@@ -1200,21 +1200,29 @@ scheme in the master prompt (section 73):
   runtime-NestJS findings above. Fix requires `@nestjs/cli@12` (breaking
   relative to the `@nestjs/core@10` runtime this repo pins) and
   `turbo@2.10`.
-- **Dependency Issue — `exceljs`** (moderate, via nested `uuid`; GHSA-w5hq-
-  g745-h8pq, "missing buffer bounds check in v3/v5/v6 when `buf` is
-  provided"): `npm audit fix --force` still only offers to *downgrade* to
-  `exceljs@3.4.0`, which would be a backwards step, not a fix. **Status
-  change as of Phase 8**: `@cmmp/import-engine` now genuinely parses
-  untrusted user-uploaded files with `exceljs` (`POST
-  /assessments/:id/import`), so this is no longer a dormant, unreached
-  dependency — it's live, security-relevant surface. Our own code never
-  calls the vulnerable `uuid` API (passing a pre-allocated `buf`); whether
-  `exceljs` does so internally when parsing an .xlsx hasn't been fully
-  audited here. Mitigated in the meantime by defense already in this
-  phase's file-guard (extension allowlist, 10MB size cap, `MAX_ROWS`
-  during parse) rather than by the dependency fix — worth a closer look
-  (or an `exceljs` major-version upgrade) before this ships with
-  untrusted uploads enabled in production.
+- **Dependency Issue — `exceljs`, downgraded to informational — confirmed
+  unreachable** (moderate finding via nested `uuid`; GHSA-w5hq-g745-h8pq,
+  "missing buffer bounds check in v3/v5/v6 when `buf` is provided"):
+  `npm audit fix --force` still only offers to *downgrade* to
+  `exceljs@3.4.0`, which would be a backwards step, not a fix — so this
+  was actually investigated instead, not left as an open question.
+  Traced every call site: `exceljs@4.4.0` has exactly one place that
+  calls into `uuid` at all
+  (`node_modules/exceljs/lib/xlsx/xform/sheet/cf-ext/cf-rule-ext-xform.js`,
+  the conditional-formatting-extension *writer*), and it calls `uuidv4()`
+  with **zero arguments** — the advisory is specific to `v3`/`v5`/`v6`
+  when a caller supplies its own pre-allocated `buf`; `v4` isn't even the
+  affected function, and no `buf` is ever passed here regardless.
+  Doubly moot for this repo specifically: `@cmmp/import-engine`
+  (`parse-xlsx.ts`) only ever calls `workbook.xlsx.load(...)` to read an
+  uploaded file — it never calls any `exceljs` write path, so that one
+  call site isn't reachable through this codebase's own usage even in
+  principle. **Confirmed via direct source inspection, not inferred** —
+  this is the closer look Next Steps previously asked for. Genuinely
+  safe to leave un-upgraded; the file-guard defenses (extension
+  allowlist, 10MB size cap, `MAX_ROWS` during parse) remain in place
+  regardless, as general hardening rather than because of this specific
+  advisory.
 - **Resolved**: removed the `xlsx` (SheetJS) dependency from
   `packages/reporting` — it had an advisory with no available fix and
   nothing in the codebase imports it (`exceljs` already covers this need).
@@ -1724,16 +1732,12 @@ punt on the rest pending dedicated major-version-bump work):
    endpoint only auto-maps columns today; needs a way to accept a manual
    mapping as a form field or a preceding "preview" call, matching the
    import wizard's step 3 in master prompt §14.
-6. Look more closely at the `exceljs` → `uuid` advisory now that
-   `import-engine` genuinely parses untrusted uploads (see Known Issues) —
-   confirm whether `exceljs`'s internal `uuid` usage ever hits the
-   vulnerable buffer-bounds code path, or upgrade past it.
-7. Before relying on the seeded NIST CSF 2.0 data for anything
+6. Before relying on the seeded NIST CSF 2.0 data for anything
    compliance-facing, diff `packages/database/prisma/fixtures/nist-csf-2.0.json`
    against the official NIST CSWP 29 publication — it was reproduced from
    training-data knowledge, not transcribed from the source document (see
    Phase 5 notes above)
-8. **Get real GitHub Dependabot alert data.** This session triaged what
+7. **Get real GitHub Dependabot alert data.** This session triaged what
    `npm audit` could see (30 findings; `multer`'s 5 fixed, see
    Post-Phase-17 Hardening above) but never had tool access to GitHub's
    own Dependabot alerts API, so the gap between GitHub's "72
@@ -1743,7 +1747,7 @@ punt on the rest pending dedicated major-version-bump work):
    see at all). Whoever has GitHub UI/API access should pull the real
    list before assuming the `npm audit`-visible findings are the whole
    picture.
-9. The large, deliberately-deferred major-version bumps themselves:
+8. The large, deliberately-deferred major-version bumps themselves:
    Next.js 14→16 (`apps/web`, user-facing, worth prioritizing first) and
    the NestJS 10→12 ecosystem (`@nestjs/core`/`platform-express`/
    `common`/`config`/`swagger`/`testing`/`cli`, `turbo`). Both need their
