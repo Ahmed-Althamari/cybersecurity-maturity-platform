@@ -173,6 +173,10 @@ export interface MaturityOverview {
   criticalGaps: number;
   highRiskFindings: number;
   openRemediationActions: number;
+  /** Every assessment folded into these numbers. Length 1 unless `combined` is true. */
+  assessmentIds: string[];
+  /** True when this organisation had more than one active (SUBMITTED/APPROVED) assessment, so the numbers above are a weighted rollup across all of them rather than a single assessment's own scores. */
+  combined: boolean;
 }
 
 export interface FunctionMaturity {

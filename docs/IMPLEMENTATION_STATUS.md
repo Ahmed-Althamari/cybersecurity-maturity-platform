@@ -1688,6 +1688,85 @@ concern at scale, and explicitly named as such in
   tests 119/119), `npm run test:e2e` (42/42), `npm run lint` clean,
   plus the live pruning verification above.
 
+## Post-Phase-17 Feature Work
+
+Real feature additions requested after the security-hardening list above
+was cleared, picked from `docs/IMPLEMENTATION_STATUS.md`'s own Next Steps
+(items the user asked to prioritize).
+
+### Multi-assessment rollup on the dashboard
+Every `/dashboard/*` endpoint scoped to exactly one assessment (the org's
+latest submitted one, or an explicit `assessmentId`) — an organisation
+with more than one active assessment (different frameworks, different
+business units, a phased rollout) only ever saw one of them reflected in
+its headline numbers. `@cmmp/scoring-engine`'s `combineScores` existed
+since Phase 7 but was never wired into `DashboardService`.
+- `getMaturityOverview` (and, through it, `getExecutiveSummary`) now
+  combines every `SUBMITTED`/`APPROVED` assessment for an organisation
+  via `combineScores`, weighted by each assessment's own
+  `applicableCount` — a bigger, more-complete assessment counts more
+  than a small partial one, rather than every assessment counting
+  equally regardless of size. `DRAFT`/`IN_PROGRESS` assessments (not yet
+  real, signed-off data) and `ARCHIVED` ones (retired) never enter the
+  rollup. An explicit `assessmentId`, or an org with 0-1 active
+  assessments, keeps the exact single-assessment behavior from before —
+  this is additive, not a behavior change for the common case.
+- New response fields (`assessmentIds: string[]`, `combined: boolean`)
+  on `MaturityOverview` (added to `@cmmp/shared` and mirrored in
+  `apps/web/lib/api.ts`, matching that file's existing "mirrored, not
+  imported" pattern from Phase 10) — additive, not a breaking change to
+  the existing `overallMaturity`/`targetMaturity`/etc. fields.
+- **Deliberately scoped out, not silently dropped**: `getFunctionMaturity`
+  and `getGapAnalysis` (the function/category-level breakdowns) still
+  resolve to a single assessment. Combining function-level breakdowns
+  *across different frameworks* doesn't have an honest answer — NIST
+  CSF's `GV.OC` and an ISO 27001 control domain aren't the same axis, so
+  averaging them together would be meaningless, not just imprecise.
+  Revisit if/when this needs solving for real (e.g. scoping the
+  combination to assessments that share one framework).
+- **A real bug found and fixed while writing the unit tests, not just
+  assumed correct**: the first version double-fetched the organisation
+  (once in the new rollup-resolution path, again inside the existing
+  single-assessment fallback it delegated to) — harmless in production
+  (an extra identical query) but caught immediately by a test using
+  `mockResolvedValueOnce` a second time than the code actually called
+  it, which surfaced as a false `NotFoundException`. Fixed by extracting
+  a shared `assertOrganisation` check and a `findLatestAssessment`
+  lookup that assumes it's already been done, so the org is verified
+  exactly once per call regardless of which path is taken.
+- **A second real issue found via live browser verification, not caught
+  by any unit test**: the "primary" assessment used for `assessmentId`
+  (what the dashboard's detail widgets — heatmap, radar chart, function
+  cards — drill into) was initially just `assessments[0]`, ordered by
+  most-recent `assessmentDate`. Live-tested by creating a second,
+  near-empty assessment for the seeded demo org and submitting it — it
+  sorted first (most recent) and became "primary," so the KPI cards
+  correctly showed the combined ~2.5/96% numbers while the heatmap and
+  function cards below rendered an almost-entirely-red, 3%-complete
+  tree from the tiny new assessment instead of the real, 97%-complete
+  one. Fixed by picking the "primary" by *substance*
+  (`applicableCount`) instead of array position; added a dedicated unit
+  test (`assessments[0]` deliberately made the less-substantive one, to
+  prove the fix isn't just "return the first result").
+- Verified live end-to-end against a running server and a real
+  Playwright-driven browser session, not just the mocked unit tests: created
+  a second real assessment for the seeded demo org, answered one
+  question, submitted it, confirmed `GET /dashboard/maturity` and `GET
+  /dashboard/executive` both returned `combined: true` with the correct
+  weighted-average math (hand-verified: `(2.46×106 + 5×1)/107 ≈ 2.48`,
+  matching the API's own output exactly), confirmed the dashboard UI's
+  new "Combined across 2 active assessments…" indicator rendered
+  correctly, and confirmed the detail widgets showed the substantive
+  assessment's real data after the primary-selection fix — all via a
+  real signed-in browser session and a screenshot, not just an API
+  response. Cleaned up the test assessment afterward (soft-deleted, per
+  the app's own delete semantics).
+- Full verification: `npx turbo run type-check test build` (27/27, unit
+  tests 123/123 — 4 new dashboard tests plus the existing suite),
+  `npm run test:e2e` (42/42, unaffected — no e2e suite exercises the
+  dashboard endpoints yet, a pre-existing gap not introduced here),
+  `npm run lint` clean.
+
 ## Next Steps
 
 What's left, roughly in priority order. Every item from
@@ -1714,30 +1793,23 @@ punt on the rest pending dedicated major-version-bump work):
    React Testing Library component tests and a persisted Playwright E2E
    suite (the dependency and a `test:e2e` script exist, scaffolded since
    Phase 1, but no spec file has ever been written).
-3. **Multi-assessment rollup**: every `/dashboard/*` endpoint currently
-   scopes to *one* assessment (the org's latest submitted one, or an
-   explicit `assessmentId`) — a real "organisation-wide" score across
-   several concurrently-active assessments (different frameworks, business
-   units) would need `@cmmp/scoring-engine`'s `combineScores`, which
-   exists but isn't wired into the dashboard yet. Revisit if/when an org
-   genuinely has more than one active assessment at a time.
-4. Frontend follow-ups from Phase 10: a framework navigation view, an
+3. Frontend follow-ups from Phase 10: a framework navigation view, an
    assessment-taking flow (`/assessments/:id/items`), a risk register view
    (`/risks` now has a real API), the Excel import wizard's upload/
    preview/column-mapping steps, and extracting the dashboard components
    into `@cmmp/ui` if/when a second app or page needs them (not worth the
    abstraction for one dashboard page yet)
-5. Wire `POST /assessments/:id/import`'s `columnMapping` override — the
+4. Wire `POST /assessments/:id/import`'s `columnMapping` override — the
    library (`ImportOptions.columnMapping`) already supports it, but the
    endpoint only auto-maps columns today; needs a way to accept a manual
    mapping as a form field or a preceding "preview" call, matching the
    import wizard's step 3 in master prompt §14.
-6. Before relying on the seeded NIST CSF 2.0 data for anything
+5. Before relying on the seeded NIST CSF 2.0 data for anything
    compliance-facing, diff `packages/database/prisma/fixtures/nist-csf-2.0.json`
    against the official NIST CSWP 29 publication — it was reproduced from
    training-data knowledge, not transcribed from the source document (see
    Phase 5 notes above)
-7. **Get real GitHub Dependabot alert data.** This session triaged what
+6. **Get real GitHub Dependabot alert data.** This session triaged what
    `npm audit` could see (30 findings; `multer`'s 5 fixed, see
    Post-Phase-17 Hardening above) but never had tool access to GitHub's
    own Dependabot alerts API, so the gap between GitHub's "72
@@ -1747,7 +1819,7 @@ punt on the rest pending dedicated major-version-bump work):
    see at all). Whoever has GitHub UI/API access should pull the real
    list before assuming the `npm audit`-visible findings are the whole
    picture.
-8. The large, deliberately-deferred major-version bumps themselves:
+7. The large, deliberately-deferred major-version bumps themselves:
    Next.js 14→16 (`apps/web`, user-facing, worth prioritizing first) and
    the NestJS 10→12 ecosystem (`@nestjs/core`/`platform-express`/
    `common`/`config`/`swagger`/`testing`/`cli`, `turbo`). Both need their

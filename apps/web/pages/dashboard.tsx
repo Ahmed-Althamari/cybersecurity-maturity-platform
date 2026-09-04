@@ -58,6 +58,12 @@ export default function DashboardPage({ userEmail, overview, functions, gaps, re
             <div className="bg-red-950/40 border border-red-800 text-red-300 rounded-lg p-4 mb-6">{errorMessage}</div>
           )}
 
+          {overview?.combined && (
+            <p className="text-slate-400 text-xs mb-2">
+              Combined across {overview.assessmentIds.length} active assessments, weighted by each one&apos;s completeness.
+            </p>
+          )}
+
           {overview && (
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
               <KpiCard title="Overall Maturity" value={overview.overallMaturity.toFixed(1)} />

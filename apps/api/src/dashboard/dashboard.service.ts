@@ -1,3 +1,4 @@
+import { combineScores, type MaturityScore } from '@cmmp/scoring-engine';
 import { Injectable, NotFoundException } from '@nestjs/common';
 
 import { AssessmentsService } from '../assessments/assessments.service';
@@ -6,6 +7,20 @@ import { PrismaService } from '../prisma/prisma.service';
 const RISK_SEVERITY: Record<string, number> = { CRITICAL: 4, HIGH: 3, MEDIUM: 2, LOW: 1, MINIMAL: 0 };
 const ACTIVE_INITIATIVE_STATUSES = ['PLANNED', 'IN_PROGRESS'];
 const OPEN_RISK_STATUSES = ['OPEN', 'IN_PROGRESS'];
+/** An assessment counts toward the organisation-wide rollup once it has real, signed-off data — DRAFT/IN_PROGRESS ones are still being worked on, ARCHIVED ones are retired. */
+const ROLLUP_ASSESSMENT_STATUSES = ['SUBMITTED', 'APPROVED'];
+
+function round2(n: number): number {
+  return Math.round(n * 100) / 100;
+}
+
+/** Same weighting rule as `combineScores`, for a plain number (e.g. completionPercentage) rather than a full MaturityScore. */
+function weightedAverage(entries: { value: number; weight: number }[]): number {
+  const withWeight = entries.filter((entry) => entry.weight > 0);
+  if (withWeight.length === 0) return 0;
+  const totalWeight = withWeight.reduce((sum, entry) => sum + entry.weight, 0);
+  return round2(withWeight.reduce((sum, entry) => sum + entry.value * entry.weight, 0) / totalWeight);
+}
 
 function worstRiskLevel(levels: string[]): string {
   return levels.reduce((worst, level) => ((RISK_SEVERITY[level] ?? 0) > (RISK_SEVERITY[worst] ?? -1) ? level : worst), 'MINIMAL');
@@ -28,28 +43,16 @@ export class DashboardService {
     private assessmentsService: AssessmentsService,
   ) {}
 
-  /**
-   * Every dashboard endpoint is scoped to one organisation and (usually)
-   * one assessment. When `assessmentId` isn't given, this picks the most
-   * recently submitted assessment for the org, falling back to the most
-   * recently updated one of any status.
-   */
-  private async resolveAssessment(tenantId: string, organisationId: string, assessmentId?: string) {
+  /** Confirms the organisation belongs to this tenant, or 404s — the one check every resolution path below needs exactly once. */
+  private async assertOrganisation(tenantId: string, organisationId: string): Promise<void> {
     const organisation = await this.prisma.organisation.findFirst({ where: { id: organisationId, tenantId, deletedAt: null } });
     if (!organisation) {
       throw new NotFoundException('Organisation not found');
     }
+  }
 
-    if (assessmentId) {
-      const assessment = await this.prisma.assessment.findFirst({
-        where: { id: assessmentId, tenantId, organisationId, deletedAt: null },
-      });
-      if (!assessment) {
-        throw new NotFoundException('Assessment not found for this organisation');
-      }
-      return assessment;
-    }
-
+  /** The most recently submitted assessment for the org, falling back to the most recently updated one of any status. Assumes the organisation has already been validated by the caller. */
+  private async findLatestAssessment(tenantId: string, organisationId: string) {
     const latestSubmitted = await this.prisma.assessment.findFirst({
       where: { tenantId, organisationId, status: 'SUBMITTED', deletedAt: null },
       orderBy: { assessmentDate: 'desc' },
@@ -66,12 +69,70 @@ export class DashboardService {
     return latestAny;
   }
 
-  async getMaturityOverview(tenantId: string, organisationId: string, assessmentId?: string) {
-    const assessment = await this.resolveAssessment(tenantId, organisationId, assessmentId);
-    const results = await this.assessmentsService.getResults(assessment.id, tenantId);
+  /**
+   * Every dashboard endpoint is scoped to one organisation and (usually)
+   * one assessment. When `assessmentId` isn't given, this picks the most
+   * recently submitted assessment for the org, falling back to the most
+   * recently updated one of any status.
+   */
+  private async resolveAssessment(tenantId: string, organisationId: string, assessmentId?: string) {
+    await this.assertOrganisation(tenantId, organisationId);
 
-    const [criticalGaps, highRiskFindings, openRemediationActions] = await Promise.all([
-      this.prisma.assessmentItem.count({ where: { assessmentId: assessment.id, riskLevel: 'CRITICAL' } }),
+    if (assessmentId) {
+      const assessment = await this.prisma.assessment.findFirst({
+        where: { id: assessmentId, tenantId, organisationId, deletedAt: null },
+      });
+      if (!assessment) {
+        throw new NotFoundException('Assessment not found for this organisation');
+      }
+      return assessment;
+    }
+
+    return this.findLatestAssessment(tenantId, organisationId);
+  }
+
+  /**
+   * With no explicit `assessmentId`, an organisation that has more than one
+   * "active" assessment (SUBMITTED/APPROVED — real, signed-off data, not a
+   * still-in-progress draft) gets a real organisation-wide rollup via
+   * `@cmmp/scoring-engine`'s `combineScores`, weighted by each assessment's
+   * own `applicableCount` (a bigger, more-complete assessment counts more
+   * than a small partial one) — rather than picking just one and ignoring
+   * the rest. An explicit `assessmentId`, or an org with 0-1 active
+   * assessments, keeps today's single-assessment behavior exactly.
+   */
+  async getMaturityOverview(tenantId: string, organisationId: string, assessmentId?: string) {
+    const assessments = assessmentId
+      ? [await this.resolveAssessment(tenantId, organisationId, assessmentId)]
+      : await this.resolveRollupAssessments(tenantId, organisationId);
+
+    const perAssessmentResults = await Promise.all(assessments.map((a) => this.assessmentsService.getResults(a.id, tenantId)));
+    const combined = assessments.length > 1;
+
+    // The "primary" assessment (surfaced as `assessmentId`, and what the detail views — heatmap,
+    // radar chart, function cards — drill into via GET /assessments/:id/results) is the most
+    // *substantive* one when combined, not just the most recently dated: a brand-new assessment
+    // with one answered question shouldn't out-rank a 97%-complete one just for being newer.
+    const primaryIndex = combined
+      ? perAssessmentResults.reduce(
+          (best, r, i) => (r.overall.applicableCount > perAssessmentResults[best].overall.applicableCount ? i : best),
+          0,
+        )
+      : 0;
+
+    const overall: MaturityScore = combined
+      ? combineScores(perAssessmentResults.map((r) => ({ score: r.overall, weight: r.overall.applicableCount })))
+      : perAssessmentResults[0].overall;
+
+    const completionPercentage = combined
+      ? weightedAverage(perAssessmentResults.map((r) => ({ value: r.completionPercentage, weight: r.overall.applicableCount || 1 })))
+      : perAssessmentResults[0].completionPercentage;
+
+    const [criticalGapsPerAssessment, highRiskFindings, openRemediationActions] = await Promise.all([
+      Promise.all(
+        assessments.map((a) => this.prisma.assessmentItem.count({ where: { assessmentId: a.id, riskLevel: 'CRITICAL' } })),
+      ),
+      // Already organisation-wide, not assessment-scoped — unaffected by combining.
       this.prisma.risk.count({
         where: { tenantId, organisationId, deletedAt: null, status: { in: OPEN_RISK_STATUSES }, riskLevel: { in: ['CRITICAL', 'HIGH'] } },
       }),
@@ -81,15 +142,30 @@ export class DashboardService {
     ]);
 
     return {
-      assessmentId: assessment.id,
-      overallMaturity: results.overall.current,
-      targetMaturity: results.overall.target,
-      maturityGap: results.overall.gap,
-      completionPercentage: results.completionPercentage,
-      criticalGaps,
+      assessmentId: assessments[primaryIndex].id,
+      assessmentIds: assessments.map((a) => a.id),
+      combined,
+      overallMaturity: overall.current,
+      targetMaturity: overall.target,
+      maturityGap: overall.gap,
+      completionPercentage,
+      criticalGaps: criticalGapsPerAssessment.reduce((sum, n) => sum + n, 0),
       highRiskFindings,
       openRemediationActions,
     };
+  }
+
+  /** Every SUBMITTED/APPROVED assessment for this org, or the single-assessment `resolveAssessment` fallback if there are 0 or 1. */
+  private async resolveRollupAssessments(tenantId: string, organisationId: string) {
+    await this.assertOrganisation(tenantId, organisationId);
+
+    const active = await this.prisma.assessment.findMany({
+      where: { tenantId, organisationId, deletedAt: null, status: { in: ROLLUP_ASSESSMENT_STATUSES } },
+      orderBy: { assessmentDate: 'desc' },
+    });
+    if (active.length >= 1) return active;
+
+    return [await this.findLatestAssessment(tenantId, organisationId)];
   }
 
   /**
@@ -275,6 +351,12 @@ export class DashboardService {
       enterpriseMaturity: maturity.overallMaturity,
       targetMaturity: maturity.targetMaturity,
       maturityGap: maturity.maturityGap,
+      // Mirrors getMaturityOverview's own rollup state — enterpriseMaturity/targetMaturity/
+      // maturityGap above are combined across every assessment named here when true.
+      // largestMaturityGaps below is NOT combined the same way (getGapAnalysis still picks a
+      // single assessment) — a deliberate, documented scoping limit, not an oversight.
+      assessmentIds: maturity.assessmentIds,
+      combined: maturity.combined,
       topRisks: risks.topRisks,
       largestMaturityGaps: gaps,
       roadmapProgress: roadmap.countByStatus,

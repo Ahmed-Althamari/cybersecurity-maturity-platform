@@ -35,7 +35,7 @@ describe('DashboardService', () => {
   beforeEach(() => {
     prisma = {
       organisation: { findFirst: jest.fn() },
-      assessment: { findFirst: jest.fn() },
+      assessment: { findFirst: jest.fn(), findMany: jest.fn().mockResolvedValue([]) },
       assessmentItem: { count: jest.fn(), findMany: jest.fn() },
       assessmentTemplate: { findUnique: jest.fn() },
       assessmentQuestion: { findMany: jest.fn() },
@@ -90,6 +90,8 @@ describe('DashboardService', () => {
 
       expect(overview).toEqual({
         assessmentId: 'a1',
+        assessmentIds: ['a1'],
+        combined: false,
         overallMaturity: 2.5,
         targetMaturity: 4,
         maturityGap: 1.5,
@@ -98,6 +100,96 @@ describe('DashboardService', () => {
         highRiskFindings: 2,
         openRemediationActions: 4,
       });
+    });
+  });
+
+  describe('getMaturityOverview — multi-assessment rollup', () => {
+    const assessmentB = {
+      ...scoredResults,
+      assessmentId: 'a2',
+      completionPercentage: 40,
+      overall: { current: 4, target: 5, gap: 1, itemCount: 1, applicableCount: 1 },
+    };
+
+    it('combines every SUBMITTED/APPROVED assessment for the org, weighted by applicableCount, when more than one exists', async () => {
+      prisma.organisation.findFirst.mockResolvedValueOnce({ id: 'org-a' });
+      prisma.assessment.findMany.mockResolvedValueOnce([
+        { id: 'a1', templateId: 'template-1', status: 'SUBMITTED' },
+        { id: 'a2', templateId: 'template-1', status: 'APPROVED' },
+      ]);
+      assessmentsService.getResults.mockResolvedValueOnce(scoredResults).mockResolvedValueOnce(assessmentB);
+      prisma.assessmentItem.count.mockResolvedValueOnce(2).mockResolvedValueOnce(1);
+      prisma.risk.count.mockResolvedValueOnce(0);
+      prisma.remediationInitiative.count.mockResolvedValueOnce(0);
+
+      const overview = await service.getMaturityOverview('tenant-a', 'org-a');
+
+      expect(overview.combined).toBe(true);
+      expect(overview.assessmentIds).toEqual(['a1', 'a2']);
+      expect(overview.assessmentId).toBe('a1');
+      // weighted average of current (2.5, weight 2) and (4, weight 1): (2.5*2 + 4*1) / 3 = 3
+      expect(overview.overallMaturity).toBe(3);
+      // criticalGaps summed across both assessments, not just the first
+      expect(overview.criticalGaps).toBe(3);
+      // never combines DRAFT/IN_PROGRESS/ARCHIVED assessments into the rollup
+      expect(prisma.assessment.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({ where: expect.objectContaining({ status: { in: ['SUBMITTED', 'APPROVED'] } }) }),
+      );
+    });
+
+    it('picks the most substantive assessment as "primary" (for the detail-view drill-down), not just the first one returned', async () => {
+      // a1 is listed FIRST by the DB query but has fewer applicable items than a2 — the primary
+      // pick must look at substance, not array position, or a near-empty assessment could "win"
+      // over a mostly-complete one just because it sorted first.
+      const tinyAssessment = { ...scoredResults, overall: { current: 5, target: 5, gap: 0, itemCount: 1, applicableCount: 1 } };
+      const substantialAssessment = { ...assessmentB, overall: { current: 2.5, target: 4, gap: 1.5, itemCount: 100, applicableCount: 100 } };
+
+      prisma.organisation.findFirst.mockResolvedValueOnce({ id: 'org-a' });
+      prisma.assessment.findMany.mockResolvedValueOnce([
+        { id: 'tiny', templateId: 'template-1', status: 'SUBMITTED' },
+        { id: 'substantial', templateId: 'template-1', status: 'SUBMITTED' },
+      ]);
+      assessmentsService.getResults.mockResolvedValueOnce(tinyAssessment).mockResolvedValueOnce(substantialAssessment);
+      prisma.assessmentItem.count.mockResolvedValueOnce(0).mockResolvedValueOnce(0);
+      prisma.risk.count.mockResolvedValueOnce(0);
+      prisma.remediationInitiative.count.mockResolvedValueOnce(0);
+
+      const overview = await service.getMaturityOverview('tenant-a', 'org-a');
+
+      expect(overview.assessmentId).toBe('substantial');
+    });
+
+    it('falls back to the single-assessment behavior when only one active assessment exists', async () => {
+      prisma.organisation.findFirst.mockResolvedValueOnce({ id: 'org-a' });
+      prisma.assessment.findMany.mockResolvedValueOnce([{ id: 'a1', templateId: 'template-1', status: 'SUBMITTED' }]);
+      assessmentsService.getResults.mockResolvedValueOnce(scoredResults);
+      prisma.assessmentItem.count.mockResolvedValueOnce(3);
+      prisma.risk.count.mockResolvedValueOnce(2);
+      prisma.remediationInitiative.count.mockResolvedValueOnce(4);
+
+      const overview = await service.getMaturityOverview('tenant-a', 'org-a');
+
+      expect(overview.combined).toBe(false);
+      expect(overview.assessmentIds).toEqual(['a1']);
+      expect(overview.overallMaturity).toBe(2.5);
+      // single-active-assessment case never falls through to resolveAssessment's own DB call
+      expect(prisma.assessment.findFirst).not.toHaveBeenCalled();
+    });
+
+    it('an explicit assessmentId always wins over the rollup, even when multiple active assessments exist', async () => {
+      prisma.organisation.findFirst.mockResolvedValueOnce({ id: 'org-a' });
+      prisma.assessment.findFirst.mockResolvedValueOnce({ id: 'a1', templateId: 'template-1' });
+      assessmentsService.getResults.mockResolvedValueOnce(scoredResults);
+      prisma.assessmentItem.count.mockResolvedValueOnce(1);
+      prisma.risk.count.mockResolvedValueOnce(0);
+      prisma.remediationInitiative.count.mockResolvedValueOnce(0);
+
+      const overview = await service.getMaturityOverview('tenant-a', 'org-a', 'a1');
+
+      expect(overview.combined).toBe(false);
+      expect(overview.assessmentIds).toEqual(['a1']);
+      // an explicit assessmentId never even queries for other active assessments
+      expect(prisma.assessment.findMany).not.toHaveBeenCalled();
     });
   });
 

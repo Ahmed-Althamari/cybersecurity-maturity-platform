@@ -88,6 +88,10 @@ export interface AssessmentResults {
 
 export interface MaturityOverview {
   assessmentId: string;
+  /** Every assessment folded into these numbers. Length 1 unless `combined` is true. */
+  assessmentIds: string[];
+  /** True when this organisation had more than one active (SUBMITTED/APPROVED) assessment, so the numbers below are a weighted rollup across all of them. */
+  combined: boolean;
   overallMaturity: number;
   targetMaturity: number;
   maturityGap: number;
