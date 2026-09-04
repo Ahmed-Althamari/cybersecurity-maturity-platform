@@ -85,6 +85,67 @@ describe('Tenant isolation (e2e)', () => {
     });
   });
 
+  describe('RemediationInitiative', () => {
+    let initiativeAId: string;
+
+    beforeAll(async () => {
+      const createResponse = await request(app.getHttpServer())
+        .post('/api/v1/remediation-initiatives')
+        .set('Authorization', `Bearer ${tokenA}`)
+        .send({ organisationId: tenantA.organisationId, title: 'Tenant A initiative' })
+        .expect(201);
+      initiativeAId = createResponse.body.id;
+    });
+
+    it('never returns another tenant\'s initiative from a direct GET', async () => {
+      await request(app.getHttpServer())
+        .get(`/api/v1/remediation-initiatives/${initiativeAId}`)
+        .set('Authorization', `Bearer ${tokenB}`)
+        .expect(404);
+    });
+
+    it('never returns another tenant\'s initiative from a list scoped by that tenant\'s own organisationId', async () => {
+      const response = await request(app.getHttpServer())
+        .get(`/api/v1/remediation-initiatives?organisationId=${tenantA.organisationId}`)
+        .set('Authorization', `Bearer ${tokenB}`)
+        .expect(200);
+
+      expect(response.body).toEqual([]);
+    });
+
+    it('refuses to update another tenant\'s initiative (404, not silently scoped)', async () => {
+      await request(app.getHttpServer())
+        .patch(`/api/v1/remediation-initiatives/${initiativeAId}`)
+        .set('Authorization', `Bearer ${tokenB}`)
+        .send({ status: 'BLOCKED' })
+        .expect(404);
+    });
+
+    it('refuses to link another tenant\'s risk to another tenant\'s initiative', async () => {
+      // riskBId doesn't need to exist for this assertion — the initiative lookup itself 404s first,
+      // since it's scoped to tokenB's own tenant and initiativeAId belongs to tenantA.
+      await request(app.getHttpServer())
+        .post(`/api/v1/remediation-initiatives/${initiativeAId}/risks/${randomUUID()}`)
+        .set('Authorization', `Bearer ${tokenB}`)
+        .expect(404);
+    });
+
+    it('refuses to delete another tenant\'s initiative', async () => {
+      await request(app.getHttpServer())
+        .delete(`/api/v1/remediation-initiatives/${initiativeAId}`)
+        .set('Authorization', `Bearer ${tokenB}`)
+        .expect(404);
+    });
+
+    it('the owning tenant can still read its own initiative', async () => {
+      const response = await request(app.getHttpServer())
+        .get(`/api/v1/remediation-initiatives/${initiativeAId}`)
+        .set('Authorization', `Bearer ${tokenA}`)
+        .expect(200);
+      expect(response.body.id).toBe(initiativeAId);
+    });
+  });
+
   describe('Assessment', () => {
     let assessmentAId: string;
 

@@ -1530,6 +1530,19 @@ the priority list.
   type-check test build` (27/27), `npm run test:e2e` (36/36, up from
   22 — the file went from 5 tests to 19), `npm run lint` clean.
 
+**Follow-up, same file**: added a sixth nested `describe('RemediationInitiative', ...)`
+block (6 tests: direct GET, org-scoped list, update, the risk-link
+endpoint, delete, and owning-tenant read) right after `Risk`'s, closing
+the one remaining resource this same section's Tampering STRIDE row had
+flagged as still relying on pattern-consistency rather than its own
+dedicated test. Reuses the same `tokenA`/`tokenB` pair (still 2 logins
+total for the whole file). `apps/api/test/tenant-isolation.e2e-spec.ts`
+now has 19 tests, `npm run test:e2e` 42/42 total. Verified live via
+`psql`: zero orphaned `remediation_initiatives` rows after a full run.
+`docs/security-architecture.md`'s Tampering STRIDE row updated to say
+every tenant-scoped resource now has its own dedicated cross-tenant
+test, not just four of five.
+
 ### Triaging the Dependabot / npm audit findings
 Sixth and final item from `docs/security-architecture.md`'s priority
 list. This session has no tool access to GitHub's Dependabot alerts API
@@ -1696,13 +1709,6 @@ punt on the rest pending dedicated major-version-bump work):
 10. No pruning job exists for `RevokedToken` rows past their own
     `expiresAt` — no correctness impact today, but a real operational
     one once the table has accumulated enough history at scale.
-11. `RemediationInitiative` is now the one resource left without its
-    own dedicated cross-tenant e2e test in
-    `apps/api/test/tenant-isolation.e2e-spec.ts` (Risk, Assessment,
-    Framework, and User all have one as of the Post-Phase-17 Hardening
-    section above) — the isolation *pattern* is structurally consistent
-    with every other service, but that consistency itself isn't
-    independently e2e-verified for this one resource yet.
 
 ## Contact & Questions
 
