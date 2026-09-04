@@ -1164,24 +1164,42 @@ None recorded yet
 
 ## Security Findings
 
-From `npm audit` (2026-08-31, after removing the unused `xlsx` dependency
-and running non-breaking `npm audit fix`): 29 findings remain (9 high, 15
-moderate, 5 low), all requiring a major-version bump to resolve. Classified
-per the finding-remediation scheme in the master prompt (section 73):
+From `npm audit` (re-run 2026-09-04 as part of the Dependabot-triage item
+in Post-Phase-17 Hardening below, after fixing `multer`): 30 findings
+remain (8 high, 16 moderate, 6 low), effectively all requiring a
+major-version bump to resolve. Classified per the finding-remediation
+scheme in the master prompt (section 73):
 
+- **Fixed — `multer` (Denial of Service, 4 advisories high + 1
+  moderate)**: see the Post-Phase-17 Hardening section below. This one
+  genuinely didn't need a major bump and is now resolved.
 - **Dependency Issue — Next.js 14.0.2** (high): several CVEs (SSRF via
   rewrites, Server Action/RSC DoS, cache poisoning). User-facing surface
-  (`apps/web`), so this is the one worth prioritizing. Fix requires
+  (`apps/web`), so this is the one worth prioritizing next. Fix requires
   upgrading to Next 16.x, which is a real breaking change (App Router/config
   surface) — not attempted blind; needs its own scoped PR with the app
   actually exercised in a browser afterward, per this repo's own UI-testing
   expectations.
+- **Dependency Issue — `@nestjs/core`/`@nestjs/platform-express`/
+  `@nestjs/common`/`@nestjs/config`/`@nestjs/swagger`/`@nestjs/testing`**
+  (moderate, mostly transitive — `file-type`'s ASF-parser infinite loop
+  and ZIP-decompression-bomb advisories via `@nestjs/common`, `lodash`
+  prototype pollution via `@nestjs/swagger`, `qs` DoS via
+  `@nestjs/platform-express`): `npm audit fix` (the non-breaking form)
+  makes no additional progress on any of these — confirmed by actually
+  running it, not assumed — meaning every one of them genuinely needs
+  the same `@nestjs/core@12`/`platform-express@12`/etc. major bump as
+  `@nestjs/cli` below, not a safe patch release. These are runtime
+  dependencies (unlike the `@nestjs/cli` toolchain), so this is a step
+  up in real risk from how this section characterized the NestJS
+  ecosystem before this pass.
 - **Dependency Issue — `@nestjs/cli`/`turbo`/`@angular-devkit/*` toolchain**
   (mixed moderate/high: ajv, glob, picomatch, webpack, tmp, inquirer): all
   devDependencies used only for local builds/codegen, not shipped or
-  reachable by an end user. Lower real-world risk than the Next.js findings.
-  Fix requires `@nestjs/cli@12` (breaking relative to the `@nestjs/core@10`
-  runtime this repo pins) and `turbo@2.10`.
+  reachable by an end user. Lower real-world risk than the Next.js or
+  runtime-NestJS findings above. Fix requires `@nestjs/cli@12` (breaking
+  relative to the `@nestjs/core@10` runtime this repo pins) and
+  `turbo@2.10`.
 - **Dependency Issue — `exceljs`** (moderate, via nested `uuid`; GHSA-w5hq-
   g745-h8pq, "missing buffer bounds check in v3/v5/v6 when `buf` is
   provided"): `npm audit fix --force` still only offers to *downgrade* to
@@ -1201,10 +1219,25 @@ per the finding-remediation scheme in the master prompt (section 73):
   `packages/reporting` — it had an advisory with no available fix and
   nothing in the codebase imports it (`exceljs` already covers this need).
 
-None of these are wired as a required branch-protection check yet (see CI
-notes below) — `npm audit --audit-level=high` runs on every PR/push via
+**On the "72 Dependabot advisories" GitHub's own banner shows, versus
+the ~30 `npm audit` finds**: this session has no tool access to GitHub's
+Dependabot alerts API (no `gh` CLI, and the GitHub MCP server available
+here doesn't expose a Dependabot-alert-listing tool), so the full list
+was never directly enumerable — the gap between the two counts is a real,
+open question, not something resolved by this pass. The likely
+explanation is scope: `dependabot.yml` (Phase 16) watches the `npm`,
+`docker`, and `github-actions` ecosystems, while `npm audit` only ever
+sees the `npm` one — so a real chunk of the 72 is plausibly Docker
+base-image and/or GitHub Actions advisories this session simply can't
+see from here. Whoever has GitHub UI/API access to the Security tab
+should pull the actual list before assuming the `npm audit` findings
+above are the whole picture.
+
+None of the still-open findings above are wired as a required
+branch-protection check yet (see CI notes below) — `npm audit
+--audit-level=high` runs on every PR/push via
 `.github/workflows/security.yml` and will show red until the Next.js/NestJS
-CLI upgrades happen, but doesn't block merges in the meantime.
+core/CLI upgrades happen, but doesn't block merges in the meantime.
 
 ## CI / DevSecOps Pipeline
 
@@ -1497,12 +1530,108 @@ the priority list.
   type-check test build` (27/27), `npm run test:e2e` (36/36, up from
   22 — the file went from 5 tests to 19), `npm run lint` clean.
 
+### Triaging the Dependabot / npm audit findings
+Sixth and final item from `docs/security-architecture.md`'s priority
+list. This session has no tool access to GitHub's Dependabot alerts API
+(no `gh` CLI, no Dependabot-listing tool on the GitHub MCP server
+available here), so a full triage of the 72 advisories GitHub's own
+banner shows was never actually possible from inside this session — see
+the new note in the Security Findings section above on the likely
+`npm`-vs-`docker`/`github-actions`-ecosystem explanation for that gap.
+What *was* possible: re-run `npm audit` for real (last done 2026-08-31)
+and act on whatever it found that didn't require the large, deliberately
+-deferred major-version bumps (Next.js 14→16, the NestJS 10→12
+ecosystem).
+- Re-running surfaced one genuinely fixable finding: `multer`, a
+  **direct, runtime dependency** used by
+  `apps/api/src/assessments/assessments.controller.ts`'s
+  `FileInterceptor` on `POST /assessments/:id/import` — the same
+  untrusted-file-upload endpoint `@cmmp/import-engine` already treats as
+  live, security-relevant surface (Phase 8). Five real advisories, four
+  high-severity: two "incomplete cleanup" DoS variants, an uncontrolled-
+  recursion DoS, a deeply-nested-field-names DoS, and one moderate
+  aborted-upload-cleanup DoS. All fixed in `multer@2.2.0`+; the repo was
+  pinned at `2.0.2`.
+- **The obvious fix wasn't as simple as bumping the version**: this
+  repo's own direct dependency (`apps/api/package.json`, `^2.0.2`) would
+  have happily resolved to a newer 2.x on its own, but
+  `@nestjs/platform-express@10.4.22` — the actual package whose
+  `FileInterceptor` uses `multer` internally — pins its own nested copy
+  at the *exact* version `"2.0.2"` (not a range), and npm dedupes both
+  requirements to one shared copy. That exact pin is what
+  `npm audit fix`'s own suggestion of `@nestjs/platform-express@12.0.1`
+  (a breaking major bump, exactly the kind of change this priority list
+  exists to avoid making blind) was actually working around — not a
+  real requirement, just npm's dependency resolver not knowing a root-
+  level `overrides` field could do the same job without the major bump.
+- Added a root `package.json` `"overrides": { "multer": "^2.3.0" }` —
+  npm's mechanism for forcing every consumer in the tree (including one
+  that pins an exact nested version, like `@nestjs/platform-express`
+  does here) onto a single resolved version, without needing that
+  consumer's own package.json to change. `apps/api/package.json`'s own
+  declared range was bumped to match (`^2.3.0`).
+- **A real resolution quirk hit while applying this, worth documenting
+  since it cost real time**: neither a plain `npm install` nor a full
+  `rm -rf node_modules && npm install` actually applied the override
+  cleanly — both left a split tree (the old `2.0.2` still hoisted at the
+  root, a *second*, separate `2.0.2`-vs-`2.3.0` mismatch reported by
+  `npm ls` as `ELSPROBLEMS`). `npm dedupe` fixed the split but had an
+  unacceptably wide blast radius for a security-only fix — it silently
+  renegotiated ~630 lines of the lockfile, including *downgrading*
+  `typescript` from `5.9.3` to `5.7.2` in the process, nothing to do
+  with `multer` at all. Reverted that. The fix that actually worked:
+  hand-editing the single `node_modules/multer` lockfile entry directly
+  (bumping `version`/`resolved`/`integrity` to the real published
+  `2.3.0` values, confirmed via `npm view multer@2.3.0 dist`) and then
+  running `npm ci`, which installs exactly what the lockfile says
+  without npm's resolver getting another chance to make a different
+  choice. Net lockfile diff: 3 files, ~15 changed lines — `multer`
+  only.
+- Verified live against a running server with a real seeded account,
+  since no e2e test exercises the file-upload endpoint at all (a
+  pre-existing, separately-noted gap — see Next Steps): logged in,
+  created a fresh `DRAFT` assessment, uploaded a real CSV through
+  `POST /assessments/:id/import` — `201`, `importedCount: 1`, confirming
+  the multipart parse path through the new `multer@2.3.0` behaves
+  identically to before. Also hit the endpoint against the seeded
+  (already-`SUBMITTED`) demo assessment first, which correctly 409'd
+  *after* multer had already parsed the multipart body — proof the
+  upload pipeline itself was intact even before finding a `DRAFT`
+  assessment to complete the happy path against.
+- `npm audit` before/after: 31 findings (10 high/15 moderate/6 low) →
+  30 (8 high/16 moderate/6 low). `multer` itself is fully gone from the
+  findings list; `@nestjs/platform-express`'s own severity rating
+  dropped from high to moderate as a direct consequence (multer was its
+  highest-severity contributor).
+- Also checked whether `@nestjs/common`'s `file-type`-sourced findings
+  (two moderate DoS advisories, notably a ZIP-decompression-bomb one —
+  relevant given `import-engine`'s own documented, still-open zip-bomb
+  gap) had a similarly narrow fix. They don't: `npm audit fix` (the
+  non-force, non-breaking form) was actually run, not assumed, and made
+  zero additional changes — confirming this one and the rest of the
+  NestJS-ecosystem findings genuinely need the same major-version bump
+  `@nestjs/cli`'s findings do, not a safe patch. Left as documented,
+  deferred work rather than force-applied.
+- Docs updated in the same pass: the Security Findings section above
+  (re-run numbers, the `multer` fix, the runtime-vs-toolchain NestJS
+  distinction, the 72-vs-~30 ecosystem-scope note),
+  `docs/security-architecture.md`'s DoS threat-model row and Priority
+  Order list (struck through as done — the list's last remaining item).
+- Full verification re-run after this change: `npx turbo run
+  type-check test build` (27/27, after regenerating the Prisma client —
+  a clean `node_modules` reinstall drops the generated
+  `.prisma/client`), `npm run test:e2e` (36/36), `npm run lint` clean,
+  plus the live upload verification above.
+
 ## Next Steps
 
-What's left, roughly in priority order (Docker verification, rate
-limiting, the JWT_SECRET fail-closed fix, token revocation on logout +
-refresh, and extending the tenant-isolation e2e pattern were the top
-five; all five are now done above):
+What's left, roughly in priority order. Every item from
+`docs/security-architecture.md`'s own priority list — Docker
+verification, rate limiting, the JWT_SECRET fail-closed fix, token
+revocation on logout + refresh, extending the tenant-isolation e2e
+pattern, and the Dependabot/`npm audit` triage — is now done above (the
+triage closed with one real fix (`multer`) and a documented, deliberate
+punt on the rest pending dedicated major-version-bump work):
 
 1. **Actually build and run Phase 15's Docker images.** `docker compose
    build && docker compose up` somewhere with a working daemon (this
@@ -1547,13 +1676,27 @@ five; all five are now done above):
    against the official NIST CSWP 29 publication — it was reproduced from
    training-data knowledge, not transcribed from the source document (see
    Phase 5 notes above)
-8. Triage the 72 existing Dependabot advisories GitHub surfaces on every
-   push (1 critical, 25 high, 37 moderate, 9 low) — noted several times
-   across this session but never actually investigated
-9. No pruning job exists for `RevokedToken` rows past their own
-   `expiresAt` — no correctness impact today, but a real operational
-   one once the table has accumulated enough history at scale.
-10. `RemediationInitiative` is now the one resource left without its
+8. **Get real GitHub Dependabot alert data.** This session triaged what
+   `npm audit` could see (30 findings; `multer`'s 5 fixed, see
+   Post-Phase-17 Hardening above) but never had tool access to GitHub's
+   own Dependabot alerts API, so the gap between GitHub's "72
+   vulnerabilities" banner and `npm audit`'s ~30 was never actually
+   closed — only reasoned about (likely the `docker`/`github-actions`
+   ecosystems `dependabot.yml` also watches, which `npm audit` can't
+   see at all). Whoever has GitHub UI/API access should pull the real
+   list before assuming the `npm audit`-visible findings are the whole
+   picture.
+9. The large, deliberately-deferred major-version bumps themselves:
+   Next.js 14→16 (`apps/web`, user-facing, worth prioritizing first) and
+   the NestJS 10→12 ecosystem (`@nestjs/core`/`platform-express`/
+   `common`/`config`/`swagger`/`testing`/`cli`, `turbo`). Both need their
+   own scoped PR with real testing afterward (a browser pass for
+   Next.js, the full test suite plus manual verification for NestJS) —
+   not something to do blind in an autonomous pass.
+10. No pruning job exists for `RevokedToken` rows past their own
+    `expiresAt` — no correctness impact today, but a real operational
+    one once the table has accumulated enough history at scale.
+11. `RemediationInitiative` is now the one resource left without its
     own dedicated cross-tenant e2e test in
     `apps/api/test/tenant-isolation.e2e-spec.ts` (Risk, Assessment,
     Framework, and User all have one as of the Post-Phase-17 Hardening

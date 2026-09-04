@@ -96,7 +96,7 @@ doesn't exist).
 
 | Threat | Mitigation | Residual risk |
 |---|---|---|
-| Unbounded file upload | 10MB size cap, 20,000 row cap (`file-guard.ts`) | A zip bomb inside a valid-looking `.xlsx` isn't fully mitigated — `exceljs` doesn't expose a cheap "inspect before decompressing" API, so the compressed-size cap is the practical defense today, not a true streaming byte-budget decompressor. Documented as a known limitation in `import-engine`'s own code comments since Phase 8. |
+| Unbounded file upload | 10MB size cap, 20,000 row cap (`file-guard.ts`); the underlying multipart parser (`multer`) is now `2.3.0`, past 5 real DoS advisories (4 high, 1 moderate — incomplete-cleanup, resource-exhaustion, uncontrolled-recursion, and deeply-nested-field-name variants) that affected the exact `<2.0.2` version this repo shipped through Post-Phase-17 Hardening | A zip bomb inside a valid-looking `.xlsx` isn't fully mitigated — `exceljs` doesn't expose a cheap "inspect before decompressing" API, so the compressed-size cap is the practical defense today, not a true streaming byte-budget decompressor. Documented as a known limitation in `import-engine`'s own code comments since Phase 8. Also unaddressed: `@nestjs/common`'s own `file-type` dependency carries a separate, still-open ZIP-decompression-bomb advisory (moderate) — confirmed to require the same NestJS-ecosystem major-version bump as the rest of that dependency cluster, not a safe patch. |
 | Login brute-force as a resource-exhaustion vector | 5/min/IP throttle on `POST /auth/login` | Same distributed-source caveat as the Spoofing section. |
 | Unbounded query results | Most list endpoints don't paginate (`GET /risks`, `GET /remediation-initiatives` return everything matching the filter); `GET /audit-events` does paginate (`limit`/`offset`, default 50) | A tenant with a very large Risk/RemediationInitiative table could produce a large, slow response. Not yet a problem at demo-data scale (106 seeded assessment items), worth revisiting before real production data volumes. |
 
@@ -125,9 +125,11 @@ doesn't exist).
 
 ## Priority Order for Closing Gaps
 
-If picking one thing at a time, in order of actual risk. The first
-four are done — struck rather than deleted, so the priority history
-stays visible:
+Every item below is now done — struck rather than deleted, so the
+priority history stays visible. See `docs/IMPLEMENTATION_STATUS.md`'s
+"Next Steps" for what's still genuinely open (the large NestJS/Next.js
+major-version bumps this list deliberately never asked for, and getting
+real GitHub Dependabot alert data this session had no tool access to):
 
 1. ~~Rate limiting on `/auth/login`~~ — done (`@nestjs/throttler`,
    5/min/IP, `apps/api/test/rate-limit.e2e-spec.ts`).
@@ -143,7 +145,20 @@ stays visible:
    token it was called with (via the same `RevokedToken` mechanism)
    right after minting the replacement, rather than leaving the old one
    valid alongside the new one; `apps/api/test/token-revocation.e2e-spec.ts`.
-5. **Triage the 72 open Dependabot advisories.**
+5. ~~Triage the 72 open Dependabot advisories~~ — done as far as this
+   session's tooling allowed: no GitHub Dependabot-alerts API access
+   existed here, so `npm audit` (~30 findings, the npm-ecosystem subset
+   of the 72) was the real, actionable source. Found and fixed `multer`
+   — a direct runtime dependency behind the file-upload endpoint, 5 real
+   DoS advisories, fixable via a root `overrides` entry without the
+   major-version bump `npm audit`'s own suggestion implied was required.
+   Confirmed the rest (Next.js, the NestJS 10→12 ecosystem) genuinely
+   need those major bumps — not left unchecked, actually verified via a
+   real `npm audit fix` run finding nothing further. See
+   `docs/IMPLEMENTATION_STATUS.md`'s Post-Phase-17 Hardening section for
+   the full writeup, including a resolution quirk (`npm dedupe`'s
+   unrelated blast radius) worth knowing about before touching this
+   dependency tree again.
 6. ~~Extend the tenant-isolation e2e pattern~~ — done: `Assessment`,
    `Framework`, and `User` now each have their own cross-tenant e2e
    coverage in `apps/api/test/tenant-isolation.e2e-spec.ts` (nested
