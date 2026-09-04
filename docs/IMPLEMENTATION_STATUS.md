@@ -2488,6 +2488,36 @@ fixed:
 - **`Security Gate` failing**: purely downstream of the three failures
   above (it aggregates every other job's result) — no separate fix needed.
 
+### PR #20 second-run failures (2026-09-04)
+
+The `db:seed`/Unit-Tests/`Security Gate` fixes above verified clean on
+re-run (Integration Tests and Unit Tests both went green), but two more
+real bugs surfaced — neither was a merge artifact, both pre-existed and
+were simply never exercised on a real runner before:
+
+- **`E2E Tests (Playwright)` — `browserType.launch: Failed to launch
+  chromium because executable doesn't exist at /opt/pw-browsers/chromium`**:
+  `apps/web/playwright.config.ts` hardcoded that exact path as a fallback
+  `executablePath` whenever `PLAYWRIGHT_CHROMIUM_PATH` wasn't set — almost
+  certainly a leftover from whatever sandbox environment had a Chromium
+  preinstalled there, but on a GitHub Actions runner (which installs
+  Chromium into Playwright's own default cache dir via `playwright install
+  --with-deps chromium`, not `/opt/pw-browsers`), that path never exists.
+  Fixed by only setting `launchOptions.executablePath` when
+  `PLAYWRIGHT_CHROMIUM_PATH` is actually set, otherwise omitting it
+  entirely so Playwright resolves its own managed browser.
+- **`ZAP Baseline Scan` — still failing after the openssl fix above**:
+  the earlier fix installed `openssl` only in `Dockerfile.api`'s *runner*
+  stage, but `prisma generate` runs in the *builder* stage, which still had
+  no openssl. The build log showed exactly this: `Prisma failed to detect
+  the libssl/openssl version to use... Defaulting to "openssl-1.1.x"` at
+  generate time — so the engine binary Prisma fetched was built for
+  openssl-1.1.x, while the runner stage actually has openssl 3.x (3.5.8, an
+  Alpine 3.20 package) installed at runtime. That ABI mismatch is what made
+  the engine fail to load and the container exit(1) immediately, same
+  symptom as before. Fixed by installing openssl in the builder stage too,
+  before `db:generate` runs.
+
 ## Next Steps
 
 1. ~~Generate the first Prisma migration~~ — done this session (see "First

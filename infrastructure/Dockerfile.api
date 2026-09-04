@@ -4,6 +4,16 @@
 
 FROM node:20-alpine AS builder
 WORKDIR /app
+# Must be installed before `prisma generate` below, not just in the runner
+# stage: without it here, `prisma generate` can't detect the installed
+# libssl version and silently defaults to fetching an engine binary built
+# for openssl-1.1.x -- incompatible with the openssl 3.x actually present
+# at runtime (once installed in the runner stage), so the engine fails to
+# load and the container exits (1) immediately on start. Confirmed via a
+# real `docker compose up` run in CI: installing openssl only in the
+# runner stage still produced the "Prisma failed to detect the libssl/
+# openssl version... Defaulting to openssl-1.1.x" warning at generate time.
+RUN apk add --no-cache openssl
 COPY . .
 RUN npm ci
 # @cmmp/database re-exports the generated Prisma Client, so every workspace
