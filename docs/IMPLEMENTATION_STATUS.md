@@ -1267,10 +1267,42 @@ and zero throttling. Fixed:
   test build` (27/27), `npm run test:e2e` (19/19, including the 2 new
   rate-limit tests), `npm run lint` clean
 
+### Fail closed on a missing `JWT_SECRET` in production
+Second item from `docs/security-architecture.md`'s priority list.
+`AuthModule`'s `resolveJwtSecret()` (exported for direct unit testing)
+now throws — refusing the app to start — when `NODE_ENV === 'production'`
+and `JWT_SECRET` is unset, instead of silently signing every token with
+the value hard-coded in the public source tree. Outside production it
+still falls back to that value, now with a loud `Logger.warn`, so local
+dev/CI don't need to configure a secret just to run the test suite.
+4 new unit tests (`auth.module.spec.ts`) cover all four cases: a real
+secret always wins regardless of `NODE_ENV`; production + unset throws;
+non-production + unset falls back with a warning; `NODE_ENV` itself
+unset is never treated as production (falls back, doesn't throw).
+
+**A genuinely interesting environmental finding while live-verifying
+this**: attempting to start the built API with `NODE_ENV=production` and
+`JWT_SECRET` deliberately unset in *this session's own sandbox* did
+**not** throw — traced it down to the sandbox's root `.env` file (not
+created by this session) already containing
+`JWT_SECRET="your-jwt-secret-here-min-32-chars-long"`, which gets
+absorbed into `process.env` as a side effect of `@prisma/client`'s own
+runtime dotenv auto-loading (the same mechanism that explained, earlier
+in this session, why `DATABASE_URL` always resolved correctly without
+an explicit `apps/api/.env` — Prisma's generated client loads the
+nearest `.env` it can find and populates *every* variable in it, not
+just the ones Prisma itself cares about). This isn't a flaw in the
+fail-closed logic — it's this specific sandbox's pre-existing `.env`
+masking the unset case — so live process-level verification of the
+throw path isn't meaningfully possible here; the unit tests, which
+manipulate `process.env` directly and never go through Prisma's
+require chain, are the real verification for this one.
+
 ## Next Steps
 
 What's left, roughly in priority order (Docker verification and rate
-limiting were the top two open items; rate limiting is now done above):
+limiting and the JWT_SECRET fail-closed fix were the top three; both are
+now done above):
 
 1. **Actually build and run Phase 15's Docker images.** `docker compose
    build && docker compose up` somewhere with a working daemon (this
@@ -1284,10 +1316,16 @@ limiting were the top two open items; rate limiting is now done above):
    GitHub Actions runner (which does have a working daemon) — worth
    watching for that specifically, since it's the first real
    verification those Dockerfiles will get.
-2. **Fail closed on a missing `JWT_SECRET`** (refuse to start rather
-   than fall back to the hard-coded value in `auth.module.ts`) and
-   **implement real token revocation on logout** (currently a no-op) —
-   both called out in `docs/security-architecture.md`'s priority list.
+2. **Implement real token revocation on logout** (currently a no-op) —
+   the last item from `docs/security-architecture.md`'s priority list.
+   No Redis exists in this system (removed as unused scaffolding in
+   Phase 15) and adding one just for this would be exactly the kind of
+   speculative infrastructure this session has avoided elsewhere — the
+   honest options are a small database-backed revoked-token table
+   (survives restarts, correct across multiple instances, needs a `jti`
+   claim added to the JWT payload and a migration) or an in-memory
+   deny-list (simpler, doesn't survive a restart or scale past one
+   instance). Neither is built yet.
 3. Frontend test coverage — zero automated tests in `apps/web` today.
    React Testing Library component tests and a persisted Playwright E2E
    suite (the dependency and a `test:e2e` script exist, scaffolded since

@@ -116,7 +116,7 @@ section):
 | Variable | Consumed by | Required? |
 |---|---|---|
 | `DATABASE_URL` | `packages/database` (Prisma) | Yes |
-| `JWT_SECRET` | `apps/api/src/auth/auth.module.ts` | Falls back to a hard-coded value if unset — **set this explicitly in any real deployment**, the fallback is visible in the public source tree |
+| `JWT_SECRET` | `apps/api/src/auth/auth.module.ts` | **Required when `NODE_ENV=production`** — the app refuses to start without it. Outside production it falls back to a hard-coded value (with a startup warning) so dev/CI don't need to configure one; **still set it explicitly in any shared or deployed environment**, `NODE_ENV=production` is the only thing enforcing this |
 | `CORS_ORIGIN` | `apps/api/src/main.ts` | Defaults to `http://localhost:3000` |
 | `PORT` | `apps/api/src/main.ts` | Defaults to `3001` |
 | `RATE_LIMIT_WINDOW_MS` | `apps/api/src/app.module.ts` (`ThrottlerModule`) | Defaults to `900000` (15 min) — the app-wide rate-limit window |

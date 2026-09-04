@@ -61,7 +61,7 @@ doesn't exist).
 | Threat | Mitigation | Residual risk |
 |---|---|---|
 | Credential stuffing / password guessing against `POST /auth/login` | bcrypt (slow hash) makes offline cracking of a stolen hash expensive; `@nestjs/throttler` caps login at 5 attempts/minute/IP (see Security Controls above) | IP-based limiting is bypassable by an attacker rotating source IPs (a botnet, a proxy pool) — this stops casual/single-source brute force, not a distributed one. No account-level lockout exists as a second layer. |
-| Forged JWT | HMAC-signed (`@nestjs/jwt`), verified by `JwtStrategy` on every request | `JWT_SECRET` has a hard-coded fallback (`auth.module.ts`) if the env var isn't set — a deployment that forgets to set it uses a secret visible in the public source tree. Fail-closed instead (refuse to start) is the fix, not yet made. |
+| Forged JWT | HMAC-signed (`@nestjs/jwt`), verified by `JwtStrategy` on every request; `resolveJwtSecret()` refuses to start in production if `JWT_SECRET` is unset rather than falling back to the value hard-coded in the public source tree | Outside production the fallback still applies (by design, so dev/CI don't need a configured secret) — a staging environment that forgets to set `NODE_ENV=production` would silently keep using it. |
 | Session fixation / token theft | Bearer token over HTTPS (in a real deployment — this sandbox runs plain HTTP locally) | No token binding to IP/user-agent; a stolen token works from anywhere until expiry. Standard JWT trade-off, not unique to this system, but worth naming. |
 
 ### Tampering (modifying data or requests in transit/at rest)
@@ -114,7 +114,7 @@ doesn't exist).
 | A02 | Cryptographic Failures | bcrypt for passwords; no TLS termination configured in this repo (deployment-time); no encryption at rest beyond the DB host's own |
 | A03 | Injection | Prisma parameterises all queries (no raw SQL string concatenation anywhere in the services this session touched); formula/CSV injection specifically defended against on spreadsheet import |
 | A04 | Insecure Design | Tenant isolation and RBAC are structural (every service follows the same validated-scope pattern), not bolted on per-endpoint |
-| A05 | Security Misconfiguration | `JWT_SECRET` fallback (see Spoofing) is the concrete instance of this category in the current codebase |
+| A05 | Security Misconfiguration | `JWT_SECRET` now fails closed in production (see Spoofing); the residual case is a non-production environment mislabeled as such |
 | A06 | Vulnerable & Outdated Components | Dependabot + `npm audit --audit-level=high` in CI (Phase 16); GitHub's own banner currently shows 72 open advisories (1 critical, 25 high, 37 moderate, 9 low) repo-wide, un-triaged as of this writing |
 | A07 | Identification & Authentication Failures | Login is now rate-limited (5/min/IP); no MFA and no session/token revocation on logout remain open — see Security Gaps above |
 | A08 | Software & Data Integrity Failures | `package-lock.json` committed (reproducible installs); no code-signing or SLSA-style provenance |
@@ -123,16 +123,20 @@ doesn't exist).
 
 ## Priority Order for Closing Gaps
 
-If picking one thing at a time, in order of actual risk. Rate limiting
-on `/auth/login` was #1 here and is now done (`@nestjs/throttler`, 5/min
-/IP, `apps/api/test/rate-limit.e2e-spec.ts`) — struck rather than
-deleted, so the priority history stays visible:
+If picking one thing at a time, in order of actual risk. The first two
+are done — struck rather than deleted, so the priority history stays
+visible:
 
-1. ~~Rate limiting on `/auth/login`~~ — done.
-2. **Fail-closed on missing `JWT_SECRET`** — refuse to start rather than
-   fall back to a value visible in the public repository.
-3. **Token revocation on logout** — even a simple in-memory/Redis
-   deny-list for the remaining TTL would close the current no-op.
+1. ~~Rate limiting on `/auth/login`~~ — done (`@nestjs/throttler`,
+   5/min/IP, `apps/api/test/rate-limit.e2e-spec.ts`).
+2. ~~Fail-closed on missing `JWT_SECRET`~~ — done
+   (`resolveJwtSecret()` in `auth.module.ts` throws in production when
+   unset; `auth.module.spec.ts`).
+3. **Token revocation on logout** — even a simple in-memory deny-list
+   for the remaining TTL would close the current no-op; a database-backed
+   revoked-token table is the more correct option (survives a restart,
+   works across multiple instances) but needs a `jti` claim added to the
+   JWT payload and a migration. Neither built yet.
 4. **Triage the 72 open Dependabot advisories.**
 5. **Extend the tenant-isolation e2e pattern** to `Assessment`,
    `Framework`, and `User` explicitly, rather than relying on the
