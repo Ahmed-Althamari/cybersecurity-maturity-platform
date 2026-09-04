@@ -4,8 +4,8 @@ Last Updated: 2026-09-04
 
 ## Overall Progress
 
-**Phase**: 4 / 17
-**Completion**: ~24%
+**Phase**: 5 / 17
+**Completion**: ~29%
 
 ## Completed ✅
 
@@ -35,13 +35,16 @@ Last Updated: 2026-09-04
       RemediationInitiative, SecurityCapability, AuditEvent, ImportJob, etc.)
 - [x] Entity definitions with tenant scoping on every major table
 - [x] Relationships setup
-- [x] Seed data script (`packages/database/prisma/seed.ts`) — NIST CSF sample
-      hierarchy, demo tenant/org/users, sample assessment/risks/initiatives
-- [ ] Migrations structure — schema is migration-ready but no migration has
-      been generated yet; requires a reachable Postgres instance
-      (`npm run db:generate` then `prisma migrate dev` from
-      `packages/database`). Not runnable in this sandbox (no Docker/Postgres
-      available).
+- [x] Seed data script (`packages/database/prisma/seed.ts`) — full NIST CSF
+      2.0 hierarchy (see Phase 5), demo tenant/org/users, 106 sample
+      assessment items, 12 risks, 6 remediation initiatives
+- [x] Migrations structure — this environment had a local PostgreSQL 16
+      available (unlike the sandbox that did Phases 1-4): generated and
+      applied the first real migration
+      (`packages/database/prisma/migrations/20260904143053_init/`) via
+      `npx prisma migrate dev`, matching the 28-model schema. Committed to
+      the repo per the master prompt's "migration and seed scripts must be
+      included" requirement.
 
 ### Phase 3: Authentication & RBAC
 - [x] JWT strategy (`passport-jwt`, `@nestjs/jwt`)
@@ -62,9 +65,10 @@ Last Updated: 2026-09-04
       still open)
 - [ ] Token revocation / refresh-token rotation (current `refresh` endpoint
       re-signs a valid token; no blacklist or rotation yet)
-- [ ] End-to-end verification against a live database — not possible in this
-      sandbox (no Docker/Postgres). Verified instead via: `tsc --noEmit`,
-      `nest build`, and Jest unit tests with a mocked `PrismaService`.
+- [x] End-to-end verification against a live database — this environment had
+      PostgreSQL 16 available; ran the real migration, seeded the database,
+      started the API, and confirmed `POST /api/v1/auth/login` issues a
+      working JWT against the real `admin@example.local` row.
 
 ### Phase 4: Framework Engine
 - [x] `@cmmp/framework-engine` package: framework-agnostic `FrameworkDefinition`
@@ -98,12 +102,48 @@ Last Updated: 2026-09-04
       built from a persisted tree, invalid-definition rejection short-circuits
       before touching the database, duplicate slug/version mapped to 409
       (`frameworks.service.spec.ts` — 6 tests)
-- [ ] "NIST CSF configuration structure" as a filled-in JSON config file is
-      Phase 5's work (loading the full NIST CSF 2.0 hierarchy through this
-      loader) — the seed script still creates the sample hierarchy directly
-      via Prisma calls rather than through `POST /frameworks/import`;
-      switching it over belongs with the Phase 5 data work so the two land
-      together
+- [x] Prisma ↔ engine mapping (`toFrameworkDefinition`, `buildFrameworkCreateInput`,
+      `frameworkTreeInclude`) moved from `apps/api`'s `FrameworksService` into
+      `@cmmp/database` (`src/framework-import.ts`) so both the API and the
+      seed script share one implementation instead of two copies
+
+### Phase 5: NIST CSF Framework Data
+- [x] Full NIST CSF 2.0 hierarchy: 6 Functions, 22 Categories, 106
+      Subcategories (`packages/database/prisma/fixtures/nist-csf-2.0.json`),
+      matching the official CSWP 29 counts. Codes, names, and outcome
+      statements reproduced from training-data knowledge of the public
+      standard, not copy-pasted from the PDF — validated for internal
+      consistency (unique codes at every level, correct hierarchy) via the
+      Phase 4 loader, but not diffed word-for-word against the official
+      publication. Treat as a strong starting point; verify exact wording
+      against the official NIST CSWP 29 document before relying on it for
+      real compliance/audit use.
+- [x] One assessment question per subcategory, auto-derived from its
+      outcome statement ("To what extent has the organization achieved the
+      following outcome: …?") — 106 questions total
+- [x] Framework seed data now flows through the Phase 4 loader instead of
+      ad hoc Prisma calls: `seed.ts` loads the JSON, validates it with
+      `parseFrameworkDefinition`, and persists the whole tree via
+      `buildFrameworkCreateInput` in one nested transaction
+- [x] Realistic (non-uniform) sample assessment data, per master prompt §36:
+      a seeded deterministic PRNG spreads current maturity around each
+      function's target profile (Govern 2.2, Identify 3.1, Protect 2.8,
+      Detect 2.4, Respond 2.1, Recover 1.9 — the master prompt's own
+      example numbers) with target maturity in the 3.5-4.5 range, one
+      `AssessmentItem` per subcategory (106 total). The 12 highest-gap
+      items become tracked `Risk` records, 6 of those get
+      `RemediationInitiative`s — not a 1:1 mirror of the assessment, the
+      way a real risk register stays curated
+- [x] Regression test: `framework-import.spec.ts` validates the real JSON
+      fixture through `parseFrameworkDefinition` on every test run, so a
+      future edit that breaks the hierarchy (duplicate code, bad format)
+      fails CI instead of only failing at seed time
+- [x] Verified end-to-end against a live PostgreSQL 16 instance (available
+      in this environment): generated the first Prisma migration, ran
+      `npm run db:seed`, confirmed function/category/subcategory counts in
+      the database match the fixture exactly (GV 6/31, ID 3/21, PR 5/22,
+      DE 2/11, RS 4/13, RC 2/8), and exercised the framework navigation
+      through the running API
 
 ## Known Issues 🐛
 
@@ -121,14 +161,6 @@ Last Updated: 2026-09-04
   binary; `packages/database`'s own `build` script only runs `tsc`.
 
 ## Not Started ⭕
-
-### Phase 5: NIST CSF Framework Data
-- [ ] NIST CSF 2.0 complete hierarchy
-- [ ] Functions (GOVERN, IDENTIFY, PROTECT, DETECT, RESPOND, RECOVER)
-- [ ] Categories (GV.RM, GV.SC, ID.BE, etc.)
-- [ ] Subcategories & Outcomes
-- [ ] Assessment questions
-- [ ] Framework seed data
 
 ### Phase 6: Assessment Engine
 - [ ] Assessment model
@@ -385,18 +417,26 @@ they've been observed passing on an actual PR.
 
 ## Next Steps
 
-1. **Generate the first Prisma migration** once a Postgres instance is
-   reachable (`docker compose up postgres`, then
-   `npm run db:generate && cd packages/database && npx prisma migrate dev`)
-2. **Begin Phase 5**: NIST CSF Framework Data — build the full NIST CSF 2.0
-   hierarchy (all 6 functions, ~22 categories, ~106 subcategories) as a JSON
-   config loadable through `@cmmp/framework-engine`'s
-   `parseFrameworkDefinition`, and switch the seed script to load it via
-   `POST /frameworks/import` (or the service directly) instead of the
-   hand-written Prisma calls it uses today
-3. Wire the Next.js frontend to the new `/api/v1/auth/login` and
-   `/api/v1/users` endpoints (login page, session/token storage)
-4. Fix the repo-wide ESLint plugin gap (see Known Issues)
+1. **Begin Phase 6**: Assessment Engine — a real `AssessmentsService`/
+   `AssessmentsController` (create, save-in-progress, submit) instead of the
+   seed script being the only thing that ever writes `AssessmentItem` rows;
+   reuse `@cmmp/framework-engine`'s `flattenFramework` to validate that an
+   incoming response's subcategory code actually belongs to the assessment's
+   framework
+2. **Phase 7** (Scoring Engine) follows naturally once Phase 6 exists: the
+   seed script's weighted-average/gap logic
+   (`FUNCTION_MATURITY_PROFILE`, `riskLevelFromGap` in `seed.ts`) is a
+   reasonable starting point to lift into `@cmmp/scoring-engine` as real,
+   tested logic rather than one-off seed math
+3. Before relying on the seeded NIST CSF 2.0 data for anything
+   compliance-facing, diff `packages/database/prisma/fixtures/nist-csf-2.0.json`
+   against the official NIST CSWP 29 publication — it was reproduced from
+   training-data knowledge, not transcribed from the source document (see
+   Phase 5 notes above)
+4. Wire the Next.js frontend to the new `/api/v1/auth/login`,
+   `/api/v1/users`, and `/api/v1/frameworks` endpoints (login page,
+   session/token storage, a framework navigation view)
+5. Fix the repo-wide ESLint plugin gap (see Known Issues)
 
 ## Contact & Questions
 

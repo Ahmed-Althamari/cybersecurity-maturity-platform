@@ -21,7 +21,7 @@
     "format": "prettier --write \"**/*.{ts,tsx,js,jsx,json,md}\"",
     "db:generate": "npx prisma generate --schema packages/database/prisma/schema.prisma",
     "db:migrate": "cd packages/database && npx prisma migrate deploy",
-    "db:seed": "cd packages/database && npx prisma db seed",
+    "db:seed": "npm run build --workspace=@cmmp/framework-engine --workspace=@cmmp/database && cd packages/database && npx prisma db seed",
     "db:studio": "cd packages/database && npx prisma studio",
     "security:audit": "npm audit --audit-level=moderate",
     "docker:build": "docker-compose build",
