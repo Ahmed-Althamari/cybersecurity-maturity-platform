@@ -1,5 +1,6 @@
 import { UserRole } from '@cmmp/shared';
 import { Controller, Get, Param, Query, UseGuards } from '@nestjs/common';
+import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { Roles } from '../auth/decorators/roles.decorator';
@@ -12,6 +13,8 @@ import { QueryAuditEventsDto } from './dto/query-audit-events.dto';
 
 const AUDIT_READ_ROLES = [UserRole.PLATFORM_ADMIN, UserRole.ORGANISATION_ADMIN, UserRole.CISO, UserRole.AUDITOR, UserRole.GRC_MANAGER];
 
+@ApiTags('Audit')
+@ApiBearerAuth()
 @Controller('audit-events')
 @UseGuards(JwtAuthGuard, RolesGuard)
 export class AuditController {

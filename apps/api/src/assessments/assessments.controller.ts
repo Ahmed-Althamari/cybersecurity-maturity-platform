@@ -15,6 +15,7 @@ import {
   UseInterceptors,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
+import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { memoryStorage } from 'multer';
 
 import { AuditLog } from '../audit/decorators/audit-log.decorator';
@@ -37,6 +38,8 @@ const ASSESSMENT_WRITE_ROLES = [
   UserRole.ASSESSOR,
 ];
 
+@ApiTags('Assessments')
+@ApiBearerAuth()
 @Controller('assessments')
 @UseGuards(JwtAuthGuard)
 export class AssessmentsController {

@@ -1,5 +1,6 @@
 import { UserRole } from '@cmmp/shared';
 import { Body, Controller, Get, Param, Post, UseGuards } from '@nestjs/common';
+import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { Roles } from '../auth/decorators/roles.decorator';
@@ -9,6 +10,8 @@ import type { RequestUser } from '../auth/types/authenticated-request';
 
 import { FrameworksService } from './frameworks.service';
 
+@ApiTags('Frameworks')
+@ApiBearerAuth()
 @Controller('frameworks')
 @UseGuards(JwtAuthGuard)
 export class FrameworksController {

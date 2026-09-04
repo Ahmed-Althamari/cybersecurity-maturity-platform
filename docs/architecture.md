@@ -1,655 +1,400 @@
 # CMMP System Architecture
 
-## Overview
+This describes the system as actually implemented, not as originally
+planned — verified against the real code, tested live, updated
+alongside every phase in `docs/IMPLEMENTATION_STATUS.md`. Where
+something in an earlier draft of this document (Redis, AWS ALB, a
+`scoring/` NestJS module) never got built, it's been removed rather than
+left as aspiration presented as fact. Where a whole area is real but
+narrower than the original ambition (Docker exists but was never built
+and run — see Phase 15's own caveat), that's called out inline.
 
-The Cybersecurity Maturity Management Platform (CMMP) is designed as a modern, scalable, multi-tenant SaaS application using industry-standard enterprise architecture patterns.
+## System Overview
 
-## System Context Diagram
+CMMP is a multi-tenant SaaS platform for running cybersecurity maturity
+assessments against a configurable framework (NIST CSF 2.0 today,
+architecturally not hard-coded to it), tracking the resulting risks, and
+generating a prioritised remediation roadmap.
 
 ```
-┌─────────────────────────────────────────────────────────────────────┐
-│                          External Users                              │
-│  (CISO, Security Architect, Risk Manager, GRC Team, Auditor)       │
-└────────────────────────────┬────────────────────────────────────────┘
-                             │
+┌────────────────────────────────────────────────────────────┐
+│                        Users (browser)                       │
+│   Platform/Org Admin · CISO · Security Architect · GRC       │
+│   Manager · Assessor · Control/Remediation Owner · Auditor   │
+│   Executive/Read-Only Viewer                                  │
+└───────────────────────────┬────────────────────────────────┘
+                             │ HTTPS
                              ▼
-                    ┌────────────────────┐
-                    │   CMMP Platform    │
-                    │  (Web Application) │
-                    └────────┬───────────┘
-                             │
-        ┌────────────────────┼────────────────────┐
-        │                    │                    │
-        ▼                    ▼                    ▼
-┌──────────────────┐  ┌──────────────────┐  ┌──────────────────┐
-│   Authentication │  │   Assessment     │  │   Reporting      │
-│    Service       │  │    Service       │  │    Service       │
-└────────┬─────────┘  └────────┬─────────┘  └────────┬─────────┘
-         │                     │                     │
-         └─────────────────────┼─────────────────────┘
-                               ▼
-                      ┌────────────────────┐
-                      │  PostgreSQL DB     │
-                      │  (Multi-tenant)    │
-                      └────────────────────┘
+                  ┌────────────────────────┐
+                  │  apps/web (Next.js)     │  :3000
+                  │  pages router,          │
+                  │  NextAuth.js Credentials │
+                  └───────────┬─────────────┘
+                              │ REST, JWT bearer
+                              ▼
+                  ┌────────────────────────┐
+                  │  apps/api (NestJS)      │  :3001
+                  │  /api/v1/*  + /health   │
+                  └───────────┬─────────────┘
+                              │ Prisma
+                              ▼
+                  ┌────────────────────────┐
+                  │  PostgreSQL 16          │  :5432
+                  │  (multi-tenant, one DB) │
+                  └────────────────────────┘
 ```
 
-## Container Architecture
+There is no Redis, message queue, or object storage in the running
+system today. `packages/reporting`, `packages/security`, and
+`packages/ui` exist as workspace packages but nothing currently imports
+them — they're unused scaffolding, not wired into either app.
 
-### Services
+## Monorepo Layout
 
-#### 1. **Next.js Web Application** (Frontend)
-- **Port**: 3000
-- **Purpose**: User interface for assessments, dashboards, reporting
-- **Technology**: React + Next.js + Tailwind CSS
-- **Key Features**:
-  - Server-side rendering for performance
-  - API data fetching on the server
-  - Static generation for dashboards
-  - Real-time chart visualizations
-
-#### 2. **NestJS API Server** (Backend)
-- **Port**: 3001
-- **Purpose**: Business logic, authentication, scoring
-- **Technology**: NestJS + Express
-- **Key Features**:
-  - RESTful API endpoints
-  - Input validation with Zod
-  - Authorization middleware
-  - Scoring engine integration
-  - Framework engine integration
-
-#### 3. **PostgreSQL Database**
-- **Port**: 5432
-- **Purpose**: Persistent data storage
-- **Technology**: PostgreSQL 15+
-- **Features**:
-  - UUID primary keys
-  - Soft deletion support
-  - Audit logging tables
-  - Full-text search capability
-
-#### 4. **Redis Cache** (Future)
-- **Port**: 6379
-- **Purpose**: Session management, caching
-- **Technology**: Redis 7+
-- **Use Cases**:
-  - Session store
-  - Assessment calculation cache
-  - Rate limiting counters
-
-## Component Architecture
-
-### Frontend Components
+npm workspaces + Turborepo (`turbo.json`). `turbo run build/test/type-check`
+walks the dependency graph (`dependsOn: ["^build"]`) so a package's own
+workspace dependencies are always built before it.
 
 ```
-Next.js Application
-├── pages/
-│   ├── _app.tsx                 # Layout wrapper
-│   ├── index.tsx                # Dashboard landing
-│   ├── assessments/
-│   │   ├── index.tsx            # Assessment list
-│   │   ├── [id]/                # Assessment detail
-│   │   └── create.tsx           # Assessment creation
-│   ├── frameworks/              # Framework management
-│   ├── risks/                   # Risk register
-│   ├── roadmap/                 # Remediation roadmap
-│   ├── reports/                 # Report generation
-│   └── admin/                   # Administration
-├── components/
-│   ├── dashboard/               # Dashboard components
-│   │   ├── OverviewCards.tsx
-│   │   ├── RadarChart.tsx
-│   │   ├── MaturityGapChart.tsx
-│   │   ├── FunctionCards.tsx
-│   │   └── Heatmap.tsx
-│   ├── assessments/             # Assessment components
-│   ├── shared/                  # Reusable components
-│   └── layout/                  # Layout components
-├── lib/
-│   ├── api.ts                   # API client
-│   ├── auth.ts                  # Auth configuration
-│   ├── hooks/                   # Custom React hooks
-│   └── utils/                   # Utility functions
-└── public/                      # Static assets
-```
-
-### Backend Services
-
-```
-NestJS API
-├── src/
-│   ├── main.ts                  # Application entry point
-│   ├── app.module.ts            # Root module
-│   ├── auth/                    # Authentication
-│   │   ├── auth.module.ts
-│   │   ├── auth.controller.ts
-│   │   ├── auth.service.ts
-│   │   └── jwt.strategy.ts
-│   ├── assessments/             # Assessment management
-│   │   ├── assessments.module.ts
-│   │   ├── assessments.controller.ts
-│   │   ├── assessments.service.ts
-│   │   └── dto/
-│   ├── frameworks/              # Framework management
-│   ├── scoring/                 # Scoring calculations
-│   ├── risks/                   # Risk management
-│   ├── roadmap/                 # Roadmap management
-│   ├── import/                  # Excel/CSV import
-│   ├── reporting/               # Report generation
-│   ├── audit/                   # Audit logging
-│   ├── middleware/              # Custom middleware
-│   └── prisma/                  # Database integration
-└── test/                        # Test files
-```
-
-### Shared Packages
-
-```
+apps/
+  api/     NestJS backend — the only thing that talks to Postgres
+  web/     Next.js frontend — talks to apps/api over HTTP, never to the DB directly
 packages/
-├── database/
-│   ├── prisma/
-│   │   └── schema.prisma        # Database schema
-│   ├── migrations/              # Prisma migrations
-│   └── seed.ts                  # Seed scripts
-│
-├── framework-engine/
-│   ├── src/
-│   │   ├── types.ts             # Framework types
-│   │   ├── loader.ts            # Framework loader
-│   │   ├── nist-csf-2.0.ts      # NIST CSF config
-│   │   └── validator.ts         # Configuration validator
-│
-├── scoring-engine/
-│   ├── src/
-│   │   ├── types.ts             # Scoring types
-│   │   ├── calculator.ts        # Maturity calculation
-│   │   ├── aggregator.ts        # Score aggregation
-│   │   └── gap-analyzer.ts      # Gap analysis
-│
-├── import-engine/
-│   ├── src/
-│   │   ├── parser.ts            # Excel/CSV parsing
-│   │   ├── validator.ts         # Data validation
-│   │   ├── mapper.ts            # Column mapping
-│   │   └── security.ts          # Injection prevention
-│
-├── security/
-│   ├── src/
-│   │   ├── middleware/          # Auth & tenant isolation
-│   │   ├── validation/          # Input validation
-│   │   ├── sanitization/        # Output encoding
-│   │   └── encryption/          # Crypto utilities
-│
-├── shared/
-│   ├── src/
-│   │   ├── types/               # Shared TypeScript types
-│   │   ├── constants/           # Application constants
-│   │   └── utils/               # Utility functions
-│
-└── ui/
-    ├── src/
-    │   ├── components/          # Reusable React components
-    │   ├── hooks/               # Reusable React hooks
-    │   └── styles/              # Shared styles
+  database/          Prisma schema, migrations, seed script, and the
+                      framework-import glue shared between the seed
+                      script and FrameworksService
+  framework-engine/   Framework-agnostic loader/validator/navigation-tree
+                      builder — the thing that makes "NIST CSF 2.0" a
+                      loaded JSON fixture rather than hard-coded types
+  scoring-engine/     Pure functions: maturity level <-> numeric score,
+                      weighted-average rollup, gap analysis, trend —
+                      no framework or database knowledge
+  import-engine/      Excel/CSV parsing, column auto-mapping, formula/
+                      CSV-injection sanitisation, row validation
+  shared/             Cross-cutting enums (UserRole, MaturityLevel,
+                      RiskLevel, ControlStatus) and their Zod schemas
+  reporting/          Present but unused — no app imports it
+  security/           Present but unused — no app imports it
+  ui/                 Present but unused — no app imports it
 ```
 
-## Data Flow Architecture
+**Why separate `scoring-engine` from the API service layer**: master
+prompt §33 explicitly asked for scoring math not to live inside
+NestJS services or React components. `AssessmentsService` and
+`DashboardService` call into `@cmmp/scoring-engine`'s pure functions;
+neither reimplements the arithmetic.
 
-### Assessment Creation Flow
+## Backend (`apps/api`)
 
-```
-User Input
-    │
-    ▼
-Next.js Form Component
-    │
-    ▼
-Client-side Validation (Zod)
-    │
-    ▼
-API Request (POST /assessments)
-    │
-    ▼
-NestJS Controller
-    │
-    ▼
-Input Sanitization & Validation
-    │
-    ▼
-Authorization Check (Tenant)
-    │
-    ▼
-Assessment Service
-    │
-    ▼
-Prisma ORM (Database)
-    │
-    ▼
-PostgreSQL
-    │
-    ▼
-Audit Log Entry
-    │
-    ▼
-Response (API)
-    │
-    ▼
-Next.js State Management
-    │
-    ▼
-Dashboard Update
-```
-
-### Assessment Scoring Flow
+NestJS, one module per resource, each following the same shape:
+tenant/org scoping validated server-side (never trusted from a client
+value that could reference another tenant's data), a service that owns
+the actual logic, a controller that's mostly routing + role gates +
+`@AuditLog` decorators, and Zod-free DTOs (this API uses `class-validator`
+decorators, not Zod, for request-body validation — Zod is used in
+`@cmmp/shared` for enum/type validation and in `@cmmp/import-engine`).
 
 ```
-Assessment Response
-    │
-    ▼
-Scoring Service (NestJS)
-    │
-    ├─► Framework Engine (Load NIST CSF structure)
-    │   
-    ├─► Scoring Calculator
-    │   ├─ Item maturity score
-    │   ├─ Category aggregation
-    │   ├─ Function aggregation
-    │   └─ Organization score
-    │
-    ├─► Gap Analyzer
-    │   ├─ Current vs Target
-    │   ├─ Gap = Target - Current
-    │   └─ Risk rating
-    │
-    ▼
-Database Update
-    │
-    ▼
-Dashboard Refresh (Redis cache invalidation)
-    │
-    ▼
-Next.js Receives Updated Scores
-    │
-    ▼
-Charts & Visualizations Render
+apps/api/src/
+  main.ts                Global prefix (api/v1, health excluded),
+                          ValidationPipe, CORS, security headers,
+                          optional Swagger UI (see below)
+  app.module.ts           Wires every feature module together
+  prisma/                 PrismaService (global module)
+  auth/                   Login, JWT strategy, RolesGuard, JwtAuthGuard
+  health/                 GET /health — real DB check, unauthenticated
+  users/                  User CRUD + role assignment
+  frameworks/              Framework read + JSON import (loads via
+                          @cmmp/framework-engine, persists via
+                          @cmmp/database's shared import glue)
+  assessments/            Assessment CRUD, item upsert, submit,
+                          Excel/CSV import, scoring, gap analysis
+  risks/                  Risk register — inherentRiskScore/riskLevel
+                          always computed server-side from
+                          likelihood x impact, never trusted from the client
+  remediation-initiatives/ Initiative CRUD, risk linking,
+                          generate-from-gaps, priority scoring
+  dashboard/              Six read-only aggregation endpoints —
+                          maturity, per-function, gaps, risk summary,
+                          roadmap status, executive summary
+  audit/                  Global AuditInterceptor + @AuditLog decorator;
+                          turns any decorated controller method into an
+                          immutable AuditEvent row
+test/                    apps/api/test/*.e2e-spec.ts — real AppModule,
+                          real Postgres, via supertest (see Phase 14)
 ```
 
-### Excel Import Flow
+### API surface
+
+35 routes across 9 controllers as of Phase 17 (the exact, current list
+is easiest to read live: run the API with `ENABLE_SWAGGER=true` and open
+`/api/docs`, or fetch `/api/docs-json` for the raw OpenAPI document —
+generated straight from the actual route decorators, so unlike a
+hand-written list it can't drift). The shape, by controller:
+
+| Controller | Base path | Auth |
+|---|---|---|
+| `HealthController` | `/health` (no `/api/v1` prefix) | none |
+| `AuthController` | `/api/v1/auth` | `login` public; `logout`/`refresh`/`me` need a bearer token |
+| `UsersController` | `/api/v1/users` | bearer token; write ops role-gated |
+| `FrameworksController` | `/api/v1/frameworks` | bearer token; `import` role-gated |
+| `AssessmentsController` | `/api/v1/assessments` | bearer token; writes role-gated |
+| `RisksController` | `/api/v1/risks` | bearer token; writes role-gated |
+| `RemediationInitiativesController` | `/api/v1/remediation-initiatives` | bearer token; writes role-gated |
+| `DashboardController` | `/api/v1/dashboard` | bearer token only — any authenticated role can read |
+| `AuditController` | `/api/v1/audit-events` | bearer token; read itself is role-gated |
+
+### Role gating (as implemented, not as originally planned)
+
+`RolesGuard` reads `@Roles(...)` metadata off the **handler method**, not
+the controller class — a class-level `@Roles()` is silently a no-op (see
+Phase 13's own bug writeup for how that was found). Every controller
+below follows the handler-level pattern.
+
+| Resource | Write roles (create/update) | Delete roles | Read |
+|---|---|---|---|
+| Assessment | PLATFORM_ADMIN, ORGANISATION_ADMIN, CISO, GRC_MANAGER, ASSESSOR | PLATFORM_ADMIN, ORGANISATION_ADMIN | any authenticated role |
+| Risk | PLATFORM_ADMIN, ORGANISATION_ADMIN, CISO, GRC_MANAGER, SECURITY_ARCHITECT | PLATFORM_ADMIN, ORGANISATION_ADMIN | any authenticated role |
+| RemediationInitiative | PLATFORM_ADMIN, ORGANISATION_ADMIN, CISO, GRC_MANAGER, SECURITY_ARCHITECT | PLATFORM_ADMIN, ORGANISATION_ADMIN | any authenticated role |
+| Framework import | PLATFORM_ADMIN, ORGANISATION_ADMIN | — | any authenticated role |
+| User | PLATFORM_ADMIN, ORGANISATION_ADMIN | PLATFORM_ADMIN only | any authenticated role (no role gate on `GET /users`) |
+| Audit log | — (read-only resource) | — | PLATFORM_ADMIN, ORGANISATION_ADMIN, CISO, AUDITOR, GRC_MANAGER |
+| Dashboard | — (read-only resource) | — | any authenticated role |
+
+This is enforced server-side in every case and is what
+`apps/api/test/authorization.e2e-spec.ts` and `tenant-isolation.e2e-spec.ts`
+actually exercise against a live database, not just asserted here.
+
+### Authentication
+
+- `POST /api/v1/auth/login` verifies `email`/`password` (bcrypt) against
+  `User.passwordHash`, then signs a JWT (`@nestjs/jwt`,
+  `JwtModule.register`) carrying `sub`, `email`, `tenantId`,
+  `organisationId`, `role` (first assigned role, or `READ_ONLY_VIEWER` if
+  none), and `roles` (the full list). 24h expiry.
+- The API returns the token as `access_token` in the JSON body — there's
+  no server-set cookie on the API side. `apps/web`'s NextAuth Credentials
+  provider is what turns that into a session; the browser never talks to
+  the JWT directly.
+- `JwtAuthGuard` (Passport JWT strategy) verifies the token on every
+  protected route; `RolesGuard` checks `roles` against a route's
+  `@Roles(...)` metadata, as above.
+- `JWT_SECRET` has a hard-coded fallback
+  (`'your-secret-key-change-in-production'`) in `auth.module.ts` if the
+  env var isn't set — fine for this sandbox's local testing, a real
+  deployment must set `JWT_SECRET` (see `docs/DEPLOYMENT.md`).
+
+### Tenant isolation
+
+Every tenant-scoped table carries `tenantId` directly (not inferred via
+joins). Every service method that reads or writes one first scopes its
+Prisma `where` clause to the caller's `tenantId` (taken from the JWT, never
+a client-supplied value) — a request for another tenant's resource by ID
+gets a 404, not a 403 (it doesn't exist *for this tenant*, which is also
+slightly better information hygiene than confirming the ID is valid
+elsewhere). `apps/api/test/tenant-isolation.e2e-spec.ts` verifies this
+live: two real tenants, one creates a risk, the other gets 404/empty-list
+on every read/write path against it.
+
+### Audit logging
+
+A global `AuditInterceptor` (`APP_INTERCEPTOR`) plus an
+`@AuditLog(action, resource)` decorator turn any controller method into
+an `AuditEvent` row after a successful response — no per-service
+`AuditService.record()` calls scattered through business logic. Captures
+actor (from the JWT, or the response body for the one pre-auth case,
+login), resource id, a sanitised copy of the request body (`password`/
+`token`/`secret`-shaped fields replaced with `[REDACTED]` before
+anything is ever persisted), IP, user-agent, and a correlation id.
+`AuditService` exposes `record`/`findAll`/`findOne` and deliberately no
+`update`/`delete` — the trail is append-only by construction, not by
+convention.
+
+## Frontend (`apps/web`)
+
+Next.js 14, **pages router** (not the app router), NextAuth.js
+Credentials provider, Tailwind, Recharts for charts.
 
 ```
-User Uploads File
-    │
-    ▼
-Next.js Upload Handler
-    │
-    ├─ MIME type validation
-    ├─ File size validation
-    └─ Virus scan (future)
-    │
-    ▼
-API: POST /assessments/import
-    │
-    ▼
-Import Engine
-    │
-    ├─ Parse XLSX/CSV
-    ├─ Validate structure
-    ├─ Sanitize against injection
-    ├─ Column mapping
-    ├─ Data validation
-    └─ Error collection
-    │
-    ▼
-Assessment Creation Loop
-    │
-    ▼
-Scoring Engine (Calculate all scores)
-    │
-    ▼
-Bulk Database Insert
-    │
-    ▼
-Response: Valid/Invalid/Warning records
-    │
-    ▼
-User sees import results & error report
+apps/web/
+  pages/
+    index.tsx              Landing
+    dashboard.tsx           The one real dashboard page — KPI cards,
+                            radar chart, gap bar chart, heatmap, top-gaps
+                            table, maturity distribution
+    auth/signin.tsx         Login form
+    api/auth/[...nextauth].ts  NextAuth config — calls the real
+                            POST /api/v1/auth/login server-side
+  components/dashboard/     KpiCard, MaturityRadarChart,
+                            FunctionGapBarChart, FunctionDetailCards,
+                            MaturityHeatmap, TopGapsTable,
+                            MaturityDistributionChart
+  lib/
+    api.ts                  Typed client — NEXT_PUBLIC_API_URL + /api/v1
+    maturity-scale.ts        Shared status colours, risk-level colours,
+                            maturity banding (dataviz-skill-validated palette)
+  public/                    Exists (Phase 15 fix — didn't before), currently empty
 ```
 
-## Authentication Architecture
+**What exists**: login, one full dashboard page reading all six
+`/dashboard/*` endpoints. **What doesn't**: a framework navigation view,
+an assessment-taking flow (`/assessments/:id/items`), a risk register
+page, the Excel import wizard's UI (upload/preview/column-mapping steps
+— the API supports the underlying flow, nothing calls it from a page),
+and an organisation picker (the dashboard reads whichever org the logged
+-in demo user belongs to). All genuinely deferred, not silently dropped —
+tracked in `docs/IMPLEMENTATION_STATUS.md`'s Next Steps every phase.
 
-```
-User Credentials
-    │
-    ▼
-NextAuth.js (NextAuth)
-    │
-    ├─ Email/Password authentication
-    ├─ JWT token generation
-    ├─ Session management
-    └─ OIDC integration (future)
-    │
-    ▼
-Token stored in HttpOnly cookie
-    │
-    ▼
-API requests include token
-    │
-    ▼
-NestJS JWT Strategy
-    │
-    ├─ Token verification
-    ├─ User lookup
-    ├─ Role assignment
-    └─ Tenant context
-    │
-    ▼
-Authorization middleware
-    │
-    ├─ Role-based access control
-    ├─ Tenant isolation
-    └─ Resource-level permissions
-    │
-    ▼
-Request execution with user context
-```
+There are currently **zero automated frontend tests** — no React Testing
+Library component tests, no persisted Playwright E2E spec files (the
+`@playwright/test` dependency and a `test:e2e` script exist, scaffolded
+since Phase 1, but nothing has ever populated them with a spec).
 
-## Authorization Architecture
+## Data Model
 
-### Role Hierarchy
-
-```
-Tenant Admin
-├── Read/Write all tenant data
-├── User management
-└── Configuration
-
-CISO
-├── Read all assessments
-├── Create/Edit assessments
-├── View all reports
-└── Risk management
-
-Security Architect
-├── Create/Edit assessments
-├── View framework definitions
-├── Collaborate on design
-
-GRC Manager
-├── Create/Edit assessments
-├── Manage risks & roadmap
-└── Generate reports
-
-Assessor
-├── Create/Edit own assessments
-└── View framework structure
-
-Control Owner
-├── View related controls
-├── Provide evidence
-└── Update control status
-
-Remediation Owner
-├── View remediation roadmap
-├── Update initiative status
-└── Track progress
-
-Auditor
-├── Read-only access
-└── View audit logs
-
-Executive Viewer
-├── Executive dashboard only
-└── High-level summaries
-
-Read-Only Viewer
-├── View-only access to all data
-└── No modification rights
-```
-
-### Permission Matrix
-
-| Resource | Admin | CISO | Architect | GRC | Assessor | Owner | Auditor | Viewer |
-|----------|-------|------|-----------|-----|----------|-------|---------|--------|
-| Assessment | CRUD | CRUD | CRU | CRUD | CRU* | R | R | R |
-| Risk | CRUD | CRUD | CU | CRUD | R | CU | R | R |
-| Roadmap | CRUD | CRU | CRU | CRUD | R | CU | R | R |
-| Framework | CRUD | R | R | R | R | R | R | R |
-| Reports | CRUD | R | R | R | R | R | R | R |
-| Users | CRUD | R | R | R | R | R | R | - |
-| Audit Log | R | R | R | R | R | R | R | - |
-
-*Own records only
-
-## Database Architecture
-
-### Core Entities
-
-```
-Tenant
-├── Organisation
-│   ├── User (with roles)
-│   ├── Assessment
-│   │   ├── AssessmentItem (one per control)
-│   │   ├── AssessmentResponse (score & evidence)
-│   │   └── AssessmentHistory
-│   ├── Risk
-│   ├── Recommendation
-│   └── RemediationInitiative
-
-Framework
-├── FrameworkVersion
-├── Function
-├── Category
-├── Subcategory
-└── AssessmentQuestion
-
-MaturityModel
-└── MaturityLevel (1-5 scale)
-
-Evidence
-├── File metadata
-└── Reference to Assessment/Control
-
-AuditEvent
-├── Action (login, create, update, etc.)
-├── Actor
-├── Resource
-└── Timestamp
-```
-
-### Entity Relationships
+Real relationships, from `packages/database/prisma/schema.prisma` (not
+the aspirational sketch this doc used to have — no separate
+`AssessmentResponse`/`AssessmentHistory`/`Evidence`/`FrameworkVersion`
+models exist; history is a field on `Assessment` itself and evidence is
+a free-text field on `AssessmentItem`, not its own entity).
 
 ```
 Tenant (1) ──── (N) Organisation
 Organisation (1) ──── (N) User
+User (1) ──── (N) UserRoleAssignment        (a user can hold several roles)
 Organisation (1) ──── (N) Assessment
-Assessment (1) ──── (N) AssessmentItem
-AssessmentItem (N) ──── (1) Framework
-AssessmentItem (N) ──── (1) Category
-AssessmentItem (N) ──── (1) Subcategory
-Assessment (1) ──── (N) AssessmentResponse
-Assessment (N) ──── (N) Evidence
-Assessment (1) ──── (N) Risk
-Risk (1) ──── (N) Recommendation
-Recommendation (1) ──── (1) RemediationInitiative
-RemediationInitiative (N) ──── (1) Organisation
+Assessment (1) ──── (N) AssessmentItem       (one per assessment question)
+AssessmentItem (N) ──── (1) AssessmentQuestion ──── (1) Subcategory ──── (1) Category ──── (1) Function ──── (1) Framework
+Organisation (1) ──── (N) Risk
+Risk (N) ──── (0..1) AssessmentItem          (optional link back to the item it originated from)
+Risk (N) ──── (N) RemediationInitiative      (many-to-many)
+Organisation (1) ──── (N) RemediationInitiative
+Recommendation (0..1) ──── AssessmentItem, (0..1) ──── Risk, (0..1) ──── RemediationInitiative
+                                              (three independent optional FKs, not a strict
+                                              child-of-initiative — a Recommendation can exist
+                                              linked to any subset of the three, or none)
+Tenant (1) ──── (N) AuditEvent
+User (1) ──── (N) AuditEvent                 (onDelete: Restrict — a user
+                                              can't be hard-deleted while
+                                              audit rows reference them)
 ```
 
-## Scoring Engine Architecture
+Soft delete (`deletedAt: DateTime?`) is used consistently across
+tenant-scoped resources instead of hard `DELETE`; every service filters
+`deletedAt: null` on reads.
 
-```
-Assessment Response (Current Maturity = 3)
-    │
-    ▼
-Item Score: 3
-    │
-    ▼
-Category Aggregation
-├─ Average all items in category
-└─ Example: (3 + 2 + 4) / 3 = 3.0
-    │
-    ▼
-Function Aggregation
-├─ Average all categories in function
-└─ Example: (3.0 + 2.5) / 2 = 2.75
-    │
-    ▼
-Organisation Score
-├─ Average all functions
-└─ Example: (2.75 + 3.1 + 2.8 + ...) / 6 = 2.8
-    │
-    ▼
-Gap Calculation
-├─ Maturity Gap = Target - Current
-├─ Example: 4.0 - 3.0 = 1.0
-└─ Risk Rating (High = gap > 1.5)
-    │
-    ▼
-Weighted Score (future)
-├─ Item Score × Item Weight
-├─ Category Score × Category Weight
-└─ Organisation Score × Function Weight
-```
+## Framework Model
 
-## Deployment Architecture
+`@cmmp/framework-engine` defines the loadable shape
+(`FrameworkDefinition` → `FunctionDefinition[]` → `CategoryDefinition[]`
+→ `SubcategoryDefinition[]` → optional `QuestionDefinition[]`), separate
+from `@cmmp/shared`'s flat, persistence-oriented types — the loader
+validates and walks a *nested* tree, independent of framework identity.
+Nothing in the engine, the loader, or the navigation-tree builder
+branches on "is this NIST CSF" — a second framework is a second JSON
+fixture through the same loader, not new code.
 
-```
-Developer
-    │
-    ├─ Git Push
-    │
-    ▼
-GitHub Actions (CI)
-    │
-    ├─ Run Tests
-    ├─ Lint & Type Check
-    ├─ SAST (CodeQL)
-    ├─ Dependency Scan
-    ├─ Secret Scan
-    ├─ Build Docker Images
-    └─ Container Scan (Trivy)
-    │
-    ├─ On Failure → Notify & Stop
-    │
-    ▼
-GitHub Actions (DAST) - Staging
-    │
-    ├─ Deploy to Test Environment
-    ├─ Run OWASP ZAP
-    └─ Collect Results
-    │
-    ├─ Security Gate Check
-    │
-    ▼
-GitHub Actions (Deploy) - Production
-    │
-    ├─ Approval Required
-    ├─ Deploy to Production
-    ├─ Run Smoke Tests
-    └─ Monitor Logs
-```
+`packages/database/prisma/fixtures/nist-csf-2.0.json` is the one loaded
+framework today: 6 functions, 22 categories, 106 subcategories. It was
+reproduced from training-data knowledge of NIST CSWP 29, not transcribed
+from the source document — flagged since Phase 5, still not diffed
+against the official publication. Don't treat it as compliance-grade
+without doing that diff first.
 
-## Security Architecture
+## Scoring Methodology
 
-### Network Security
+`@cmmp/scoring-engine`, pure functions, no side effects:
 
-```
-┌─────────────────────────────────────────┐
-│         Internet / Public Network        │
-└────────────┬────────────────────────────┘
-             │
-             ▼
-     ┌───────────────────┐
-     │  AWS ALB / WAF    │
-     │ (Rate Limiting)   │
-     └────────┬──────────┘
-              │
-              ▼
-     ┌───────────────────┐
-     │  VPC / Private    │
-     │  Network          │
-     └────────┬──────────┘
-              │
-    ┌─────────┴─────────┐
-    │                   │
-    ▼                   ▼
-  API              Database
-  Pod              Pod
-(Encrypted)      (Encrypted)
-```
+- **Level <-> score**: `MaturityLevel` is a 6-value enum
+  (`NOT_APPLICABLE`, `INITIAL`, `DEVELOPING`, `DEFINED`, `MANAGED`,
+  `OPTIMISED`) mapped to a 0-5 numeric scale (`NOT_APPLICABLE` = 0,
+  `INITIAL` = 1, ..., `OPTIMISED` = 5) — not a bare 1-5 scale.
+- **Rollup** (`scoreItems`): a **weighted average**, not a simple
+  average. Each `AssessmentItem` carries a `weight` (default 1.0); an
+  item whose current maturity is `NOT_APPLICABLE` is excluded from the
+  average entirely (both current and target), rather than counted as a
+  zero that would drag the score down. Rolls up subcategory → category
+  → function → organisation the same way at every level.
+- **Gap**: `target - current` at any node, always derived, never stored
+  independently of the two scores it comes from.
+- **Combining separately-scored rollups** (`combineScores`) — e.g. an
+  organisation-wide score across several concurrently-active assessments
+  — exists as a function but isn't wired into any endpoint yet; every
+  `/dashboard/*` route today scopes to one assessment (the org's latest
+  submitted one, or an explicit `assessmentId`).
+- **Gap analysis** (`analyzeGaps`) flattens the scored tree, filters to
+  nodes with a positive gap (configurable `minGap`, default excludes
+  anything at or past target), sorts by gap descending, and optionally
+  caps to a depth (function/category/subcategory) and a result count.
 
-### Data Security
+### Risk scoring
 
-- **Encryption in Transit**: TLS 1.3 for all API calls
-- **Encryption at Rest**: AES-256 for sensitive database fields (future)
-- **Secrets Management**: AWS Secrets Manager / HashiCorp Vault (production)
-- **Password Hashing**: bcrypt for user passwords
-- **Input Validation**: Server-side validation with Zod
-- **Output Encoding**: Context-aware XSS prevention
+`RisksService`, not `scoring-engine` (risk severity isn't part of the
+maturity-scoring domain): `inherentRiskScore = likelihood × impact`
+(both 1-5, so a 1-25 range), banded into `RiskLevel` by
+`riskLevelFromScore()` — a single, swappable, unit-tested function per
+master prompt §20's "don't permanently hard-code this formula":
+`>=20 CRITICAL`, `>=12 HIGH`, `>=6 MEDIUM`, `>=3 LOW`, else `MINIMAL`.
+Recomputed only when `likelihood`/`impact` actually change on update;
+`residualRiskScore` (post-control effectiveness) is a separate,
+explicitly user-set field, never auto-derived.
 
-### Access Control
+### Remediation priority
 
-- **Authentication**: JWT tokens with 1-hour expiration
-- **Session Management**: Secure HttpOnly cookies
-- **Tenant Isolation**: Enforced at API, DB query, and application layers
-- **Authorization**: Role-based access control (RBAC)
-- **Audit Logging**: All sensitive actions logged
+`RemediationInitiativesService.computePriority()`, same "isolate the
+formula" pattern: `raw = riskScore(1-5) × gap × businessCriticality(1-5)
+× weight`, banded 1 (highest) to 5 (lowest): `>=60 → 1`, `>=30 → 2`,
+`>=15 → 3`, `>=5 → 4`, else `5`. `POST /remediation-initiatives/generate`
+creates one `PLANNED` initiative per open subcategory gap, computing
+priority from the real backing `AssessmentItem`'s stored
+`riskLevel`/`businessCriticality`/`weight` — never a placeholder default
+— and skips any subcategory a non-terminal initiative already tracks
+(`securityCapability` doubles as that dedup key).
 
-## Scalability Considerations
+## Excel/CSV Import
 
-### Horizontal Scaling
+See `docs/EXCEL_IMPORT_GUIDE.md` for the user-facing column format and
+validation rules. Architecturally: `@cmmp/import-engine` parses (xlsx via
+`exceljs`, csv via a hand-rolled parser), auto-maps headers to 17
+canonical columns by exact name or known alias, sanitises every cell
+against formula/CSV injection (master prompt §40 — a cell starting with
+`=`, `+`, `-`, `@`, or a control character gets prefixed with `'` so it
+can never execute as a formula when reopened), validates and types each
+row (collecting every issue rather than stopping at the first), flags
+duplicate `Control_ID`s without masking a more severe `invalid` status,
+and returns a `valid`/`warning`/`invalid` breakdown.
+`AssessmentsService.importFile` processes both `valid` and `warning`
+rows (only `invalid` rows are skipped) — a real bug from Phase 8 (warning
+rows were silently never imported) that live end-to-end testing caught
+and a unit test now guards against.
 
-- **Stateless API**: NestJS instances can scale independently
-- **Database Connection Pool**: Configurable Prisma pool
-- **Redis**: Session store for distributed sessions (future)
-- **CDN**: Static assets via CloudFront (future)
+## Deployment
 
-### Caching Strategy
+See `docs/DEPLOYMENT.md`. Summary: `infrastructure/Dockerfile.{api,web}`
++ `docker-compose.yml` (Phase 15) build production images via
+Turborepo's `turbo prune --docker` recipe; GitHub Actions
+(`.github/workflows/`, Phase 16) runs lint/type-check/unit-tests/build on
+every PR plus a real Postgres-backed e2e job, and separately runs
+CodeQL, Gitleaks, Trivy, a weekly SBOM, and a nightly OWASP ZAP scan.
+**The Docker images have never actually been built or run** — this
+session's sandbox had no reachable Docker daemon, so Phase 15 was
+validated as far as possible without one (a real `turbo prune`, `docker
+compose config` parsing correctly, the Next.js standalone output
+inspected file-by-file) but not proven end-to-end. Treat that as open
+until someone runs `docker compose build && up` for real.
 
-- **Database Queries**: Prisma automatic caching
-- **API Responses**: HTTP caching headers
-- **Calculation Results**: Redis cache for scores (future)
-- **Framework Data**: In-memory cache with TTL
+## Security Architecture & Threat Model
 
-### Performance Optimization
-
-- **Server-Side Rendering**: Next.js for SEO & performance
-- **API Data Fetching**: Minimize waterfalls
-- **Query Optimization**: Indexed database queries
-- **Lazy Loading**: Code splitting in Next.js
-- **Image Optimization**: Next.js Image component
-
-## Monitoring & Observability
-
-### Application Metrics
-
-- Request latency (p50, p95, p99)
-- Error rates by endpoint
-- Assessment scoring time
-- Import processing time
-- Database query performance
-
-### Audit Metrics
-
-- Login attempts & failures
-- Assessment modifications
-- Risk updates
-- Score changes
-- User role changes
-
-### Infrastructure Metrics
-
-- Pod CPU & memory usage
-- Database connection count
-- Redis memory usage
-- Network I/O
-- Error rates
-
-### Alerting
-
-- Error rate > 5%
-- P95 latency > 2s
-- Database connection pool exhaustion
-- Security event detection
-- Failed dependency scans
+See `docs/security-architecture.md` for the full picture (STRIDE
+analysis included). Summary of what's real today: server-side tenant
+scoping on every query, RBAC enforced by `RolesGuard` reading
+handler-level metadata, bcrypt password hashing, JWT bearer auth,
+immutable audit logging, formula/CSV-injection sanitisation on
+spreadsheet import, security response headers
+(`X-Content-Type-Options`, `X-Frame-Options`, `X-XSS-Protection`) and
+CORS restricted to a configured origin. What's *not* real yet despite
+being mentioned in earlier drafts of this doc or in `SECURITY.md`: no
+rate limiting (`ENABLE_RATE_LIMITING` is declared in `.env.example` but
+nothing in the code reads it), no encryption-at-rest configuration
+beyond whatever the Postgres host provides, no WAF/ALB (there's no cloud
+deployment at all yet), no secrets manager integration (env vars only).

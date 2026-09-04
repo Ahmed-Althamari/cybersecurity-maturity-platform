@@ -1,13 +1,18 @@
 # CMMP Implementation Status
 
-Last Updated: 2026-09-04 (Phase 16)
+Last Updated: 2026-09-04 (Phase 17)
 
 ## Overall Progress
 
-**Phase**: 16 / 17
-**Completion**: ~90% (Phase 15's Docker artifacts are still written-but-
-unbuilt — see that phase's caveat; everything else through Phase 16 has
-been verified live)
+**Phase**: 17 / 17 — all 17 phases from the master prompt have a
+Completed section below.
+**Completion**: ~95%. Not 100%: Phase 15's Docker images have still
+never actually been built or run (see that phase's own caveat, restated
+in `docs/DEPLOYMENT.md`), `apps/web` has zero automated tests, and a
+handful of frontend flows (framework navigation, assessment-taking,
+the import wizard's UI) were never built — all tracked below under
+"Next Steps," none silently dropped. "All phases complete" describes
+breadth of coverage, not "nothing left to do."
 
 ## Completed ✅
 
@@ -919,6 +924,109 @@ a pipeline from nothing.
       `npm run lint` "currently fails repo-wide" — neither was true
       by the time this phase checked. See the corrected entry below
 
+### Phase 17: Documentation
+The last unstarted phase. `docs/architecture.md` (and, before this
+phase, several other docs) dated to Phase 1 — written before any real
+code existed, describing a system that only partially got built the way
+it was planned (a `scoring/` NestJS module, Redis, AWS ALB/WAF/VPC,
+`AssessmentResponse`/`AssessmentHistory`/`Evidence`/`FrameworkVersion` as
+separate entities, a permission matrix that didn't match any real
+`@Roles()` array). Publishing docs that describe a system more capable
+than the one that exists is worse than no docs — it costs a future
+reader (human or agent) time discovering the gap the hard way. This
+phase's work was corrective as much as additive: every claim below was
+checked against the real code, not assumed from the original design.
+- [x] **Security architecture document + Threat model & STRIDE
+      analysis** — `docs/security-architecture.md` (new). A verified
+      table of real controls with how each is tested, an honest "not
+      implemented" list (rate limiting is the standout — genuinely
+      absent everywhere, including on login), a full STRIDE pass across
+      the actual system (not a generic template), an OWASP Top 10
+      cross-reference, and a priority-ordered list of what to fix first.
+      Documents the Phase 13 class-vs-method `@Roles()` bug as a
+      concrete Elevation-of-Privilege case study, since it's the one
+      real incident this session has to point to
+- [x] **Data model documentation + Framework model documentation +
+      Scoring methodology** — folded into a rewritten
+      `docs/architecture.md` rather than three separate files (better
+      information architecture — these are tightly coupled, and
+      fragmenting them into stubs would've meant three thinner, harder
+      -to-cross-reference documents). Data model diagram corrected
+      against the real `schema.prisma` (caught two of my own drafting
+      mistakes before committing: `AssessmentItem` links to
+      `Subcategory` through `AssessmentQuestion`, not directly; and
+      `Recommendation` has three independent optional FKs, not a strict
+      child-of-`RemediationInitiative` relationship). Scoring section
+      corrects the rollup formula specifically — it's a **weighted
+      average** excluding `NOT_APPLICABLE` items, 0-5 scale, not the
+      simple-average description the original draft had
+- [x] **API design document** — two complementary pieces rather than one
+      static file: (1) `docs/architecture.md`'s API Surface section — a
+      verified table of all 9 controllers, their base paths, and the
+      exact role-gating per resource, built from a real `grep` across
+      every controller's `@Roles(...)` calls, not from memory; (2) live
+      OpenAPI/Swagger via `@nestjs/swagger` (`ENABLE_SWAGGER=true` env
+      var, off by default — see the security rationale in
+      `docs/security-architecture.md`), `@ApiTags`/`@ApiBearerAuth` on
+      every controller. Verified live: `/api/docs` returns 200,
+      `/api/docs-json` lists all 35 routes correctly tagged and grouped,
+      confirmed off (404) when the env var is unset. A hand-written API
+      doc goes stale the moment a route changes; a live schema generated
+      from the actual decorators can't
+- [x] **Excel import format guide** — `docs/EXCEL_IMPORT_GUIDE.md` (new),
+      the one genuinely user-facing document from this phase (not
+      developer architecture) — the 17 canonical columns and their
+      aliases, accepted maturity/risk/status value formats, the
+      formula-injection defense explained for a non-developer audience,
+      row-outcome rules (valid/warning/invalid/duplicate — including
+      that a duplicate `Control_ID` doesn't override a more severe
+      `invalid` status), the exact JSON response shape read straight
+      from `AssessmentsService.importFile`, and an explicit callout that
+      the API endpoint is real but the upload-wizard *UI* isn't built
+- [x] **Deployment guide** — `docs/DEPLOYMENT.md` (new). Leads with the
+      same Docker caveat as Phase 15 itself (never built/run in this
+      session) rather than burying it; documents the two-different-
+      API-URLs Docker Compose gotcha Phase 15 found; a verified
+      configuration reference (every env var the running code actually
+      reads, cross-checked against source, not transcribed from
+      `.env.example`); explicitly lists what's genuinely not built
+      (a deploy workflow, TLS termination, any cloud-specific config)
+      rather than gesturing at "production-ready"
+- [x] **DevSecOps pipeline documentation** — summarised inside
+      `docs/DEPLOYMENT.md`'s CI/CD section (what each of the five
+      `.github/workflows/*.yml` files actually does, in plain language)
+      rather than a separate file — the workflows themselves are
+      already thoroughly commented (Phase 16), so a separate doc would
+      mostly restate them
+- [x] **ADRs (Architecture Decision Records)** — already existed, inside
+      `docs/IMPLEMENTATION_STATUS.md`'s "Architecture Decisions" section
+      (ADR-001 through ADR-010) from earlier in this session. Not
+      duplicated into a separate `docs/adr/` directory; `README.md` and
+      `SECURITY.md` corrected to point at where they actually live
+      rather than a nonexistent path
+- [x] Fixed real inaccuracies found while cross-checking every doc
+      against the code rather than trusting earlier drafts: `README.md`
+      claimed apps/api used "NextAuth/OIDC" (it doesn't — NextAuth is
+      frontend-only, the API uses `@nestjs/jwt`), claimed rate limiting
+      and CSRF protection were implemented (neither is), listed
+      `dev:web`/`dev:api`/`build:web`/`build:api`/`test:coverage` npm
+      scripts that don't exist in `package.json`, listed six
+      `docs/*.md` files that don't exist under those names, referenced
+      `.github/workflows/deploy.yml`/`container.yml` (real name:
+      `container-security.yml`; no deploy workflow exists), and only
+      listed one of the four seeded demo accounts. `SECURITY.md`'s
+      "Security Baseline"/"Infrastructure Security" sections stated
+      rate limiting, AWS Secrets Manager/Vault, and CloudWatch/ELK as
+      present-tense facts; rewritten to match `docs/security-architecture.md`'s
+      verified findings, and its existing (previously dead) link to
+      `/docs/security-architecture.md` now resolves for real
+- [x] Verified live rather than assumed: full `npx turbo run type-check
+      test build` (27/27 tasks) and `npm run test:e2e` (17/17) both still
+      pass after every code change this phase made (the Swagger wiring,
+      mainly); `npm run lint` clean; the Swagger UI/JSON endpoints
+      behave exactly as documented (live curl checks, both with and
+      without `ENABLE_SWAGGER` set)
+
 ## Known Issues 🐛
 
 - **Re-verified during Phase 16**: the actual `npm run lint` (=`turbo run
@@ -958,17 +1066,9 @@ a pipeline from nothing.
 
 ## Not Started ⭕
 
-### Phase 17: Documentation
-- [ ] Security architecture document
-- [ ] Data model documentation
-- [ ] API design document
-- [ ] Scoring methodology
-- [ ] Framework model documentation
-- [ ] Excel import format guide
-- [ ] Deployment guide
-- [ ] DevSecOps pipeline documentation
-- [ ] ADRs (Architecture Decision Records)
-- [ ] Threat model & STRIDE analysis
+Nothing — Phase 17 was the last unstarted phase. See "Next Steps" below
+for what's still open within already-"complete" phases (the Docker
+build-and-run verification, frontend tests, a few deferred UI flows).
 
 ## Blockers 🚫
 
@@ -1130,35 +1230,33 @@ they've been observed passing on an actual PR.
 
 ## Next Steps
 
-1. **Before anything else touches Docker**: actually run `docker compose
+All 17 phases now have a Completed section above. What's left is real
+work within phases already marked done, roughly in priority order:
+
+1. **Actually build and run Phase 15's Docker images.** `docker compose
    build && docker compose up` somewhere with a working daemon (this
-   sandbox didn't have one — see the Phase 15 section's caveat) and fix
-   whatever that first real build surfaces. Everything in Phase 15 was
-   validated as far as possible without a daemon (`turbo prune` run for
-   real, `docker compose config` parsing cleanly, the Next.js
-   `standalone` output inspected file-by-file), but "parses correctly"
-   and "boots and serves traffic" are different claims, and only the
-   first one has been checked.
-2. **Begin Phase 17**: Documentation — the last unstarted phase. An
-   architecture overview doc (the monorepo layout, the framework-
-   agnostic engine design, how scoring/gaps/roadmap-generation chain
-   together), API documentation (OpenAPI/Swagger — NestJS has
-   `@nestjs/swagger` for this, not wired up anywhere yet), a real
-   top-level `README.md` walkthrough (setup, `npm run db:seed`, demo
-   credentials — currently scattered across this doc instead), and
-   deployment docs once Phase 15's images are actually built/run
-   somewhere for real.
-3. `container-security.yml`'s Trivy scan and `dast.yml`'s ZAP scan will
-   both, for the first time, actually exercise Phase 15's rewritten
-   Dockerfiles the next time either runs (a real daemon exists on GitHub
-   Actions runners, unlike this sandbox) — worth watching the next run
-   of either workflow specifically for that, since it's the first real
+   session's sandbox never had one). Everything was validated as far as
+   possible without a daemon (`turbo prune` run for real, `docker
+   compose config` parsing cleanly, the Next.js `standalone` output
+   inspected file-by-file), but "parses correctly" and "boots and serves
+   traffic" are different claims, and only the first one has been
+   checked. `container-security.yml`'s Trivy scan and `dast.yml`'s ZAP
+   scan will do this automatically the next time either fires on a
+   GitHub Actions runner (which does have a working daemon) — worth
+   watching for that specifically, since it's the first real
    verification those Dockerfiles will get.
-4. Phase 14 left two real gaps worth closing: frontend component tests
-   (React Testing Library — currently zero automated frontend tests) and
-   a persisted Playwright E2E suite (Playwright itself was used
-   interactively in Phase 10 to catch a real rendering bug, but nothing
-   was saved as a runnable spec file).
+2. **Rate limiting on `POST /auth/login`.** The single highest-priority
+   security gap identified in `docs/security-architecture.md` — a live
+   login endpoint with zero throttling. `ENABLE_RATE_LIMITING` is
+   already declared in `.env.example`; nothing reads it yet.
+3. **Fail closed on a missing `JWT_SECRET`** (refuse to start rather
+   than fall back to the hard-coded value in `auth.module.ts`) and
+   **implement real token revocation on logout** (currently a no-op) —
+   both called out in `docs/security-architecture.md`'s priority list.
+4. Frontend test coverage — zero automated tests in `apps/web` today.
+   React Testing Library component tests and a persisted Playwright E2E
+   suite (the dependency and a `test:e2e` script exist, scaffolded since
+   Phase 1, but no spec file has ever been written).
 5. **Multi-assessment rollup**: every `/dashboard/*` endpoint currently
    scopes to *one* assessment (the org's latest submitted one, or an
    explicit `assessmentId`) — a real "organisation-wide" score across
@@ -1189,6 +1287,12 @@ they've been observed passing on an actual PR.
 10. Triage the 72 existing Dependabot advisories GitHub surfaces on every
     push (1 critical, 25 high, 37 moderate, 9 low) — noted several times
     across this session but never actually investigated
+11. Extend the dedicated tenant-isolation e2e pattern
+    (`apps/api/test/tenant-isolation.e2e-spec.ts`) to `Assessment`,
+    `Framework`, and `User` explicitly — today only `Risk` has a
+    cross-tenant e2e test; the isolation *pattern* is structurally
+    consistent across every service, but that consistency itself isn't
+    independently e2e-verified per resource yet
 
 ## Contact & Questions
 

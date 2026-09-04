@@ -79,26 +79,49 @@ All findings are reviewed and remediated.
 
 ## Security Baseline
 
-CMMP implements:
+The full picture, including a STRIDE threat model and an honest gap
+list, lives in `docs/security-architecture.md`. Summary of what's
+actually implemented today:
 
-- **Authentication**: NextAuth.js with OIDC support
-- **Authorization**: Role-based access control (RBAC)
-- **Encryption**: TLS in transit, encrypted at rest (future)
-- **Secrets**: Environment variables, no hardcoded values
-- **Audit Logging**: All sensitive actions logged
-- **Rate Limiting**: API rate limiting enabled
-- **Input Validation**: Server-side validation required
-- **Output Encoding**: Context-aware encoding
-- **Tenant Isolation**: Multi-tenant data separation enforced
+- **Authentication**: JWT (`@nestjs/jwt`) issued by the API, bcrypt
+  password hashing; `apps/web` uses NextAuth.js's Credentials provider
+  against that API — no OIDC/SSO provider is wired up
+- **Authorization**: Role-based access control (RBAC), enforced
+  server-side on every write endpoint and on the audit log's read
+- **Encryption**: TLS in transit is a deployment-time concern (nothing
+  in this repo terminates TLS); no encryption at rest beyond whatever
+  the Postgres host provides
+- **Secrets**: Environment variables — **with one known gap**:
+  `JWT_SECRET` falls back to a hard-coded value in
+  `apps/api/src/auth/auth.module.ts` if the env var isn't set. Always
+  set it explicitly.
+- **Audit Logging**: Sensitive actions logged to an append-only
+  `AuditEvent` table; credentials are redacted before being persisted
+- **Rate Limiting**: **Not implemented.** `.env.example` declares
+  `ENABLE_RATE_LIMITING` and related variables; nothing in the codebase
+  reads them. No endpoint, including login, is rate-limited.
+- **Input Validation**: Server-side validation via `class-validator` DTOs
+- **Output Encoding**: Next.js/React's default JSX escaping; no custom
+  output-encoding layer beyond that
+- **Tenant Isolation**: Enforced server-side on every query, verified by
+  a dedicated end-to-end test suite
 
 ## Infrastructure Security
 
-- **Database**: PostgreSQL with parameterized queries
-- **Container**: Non-root user, minimal base images
-- **Network**: VPN/firewall for production access
-- **Secrets**: AWS Secrets Manager/Vault (production)
-- **Monitoring**: CloudWatch/ELK stack (production)
-- **Backup**: Automated encrypted backups
+There is no cloud deployment yet, so most of this section describes
+intent rather than a running configuration:
+
+- **Database**: PostgreSQL with parameterized queries (Prisma) — real
+- **Container**: Non-root user, multi-stage builds — real in the
+  Dockerfiles (`infrastructure/Dockerfile.{api,web}`), but those images
+  have never actually been built or run (no Docker daemon was available
+  in the session that wrote them — see `docs/DEPLOYMENT.md`)
+- **Network**: no VPN/firewall configuration exists — there's nothing
+  deployed to put one in front of yet
+- **Secrets**: environment variables only; no AWS Secrets Manager/Vault
+  integration exists
+- **Monitoring**: no CloudWatch/ELK or equivalent exists
+- **Backup**: no automated backup configuration exists
 
 ## Incident Response
 

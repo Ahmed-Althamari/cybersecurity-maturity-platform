@@ -1,5 +1,6 @@
 import { UserRole } from '@cmmp/shared';
 import { BadRequestException, Body, Controller, Delete, Get, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
+import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 
 import { AuditLog } from '../audit/decorators/audit-log.decorator';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
@@ -27,6 +28,8 @@ function requireOrganisationId(organisationId: string | undefined): string {
   return organisationId;
 }
 
+@ApiTags('Risks')
+@ApiBearerAuth()
 @Controller('risks')
 @UseGuards(JwtAuthGuard)
 export class RisksController {

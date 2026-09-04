@@ -1,4 +1,5 @@
 import { Controller, Post, Body, Get, UseGuards, Req } from '@nestjs/common';
+import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import type { Request } from 'express';
 
 import { AuditLog } from '../audit/decorators/audit-log.decorator';
@@ -8,6 +9,7 @@ import { LoginDto } from './dto/login.dto';
 import { JwtAuthGuard } from './guards/jwt-auth.guard';
 import type { AuthenticatedRequest } from './types/authenticated-request';
 
+@ApiTags('Auth')
 @Controller('auth')
 export class AuthController {
   constructor(private authService: AuthService) {}
@@ -19,6 +21,7 @@ export class AuthController {
   }
 
   @Post('logout')
+  @ApiBearerAuth()
   @UseGuards(JwtAuthGuard)
   @AuditLog('LOGOUT', 'User')
   async logout() {
@@ -26,6 +29,7 @@ export class AuthController {
   }
 
   @Post('refresh')
+  @ApiBearerAuth()
   @UseGuards(JwtAuthGuard)
   async refresh(@Req() req: Request) {
     const token = req.headers.authorization?.replace('Bearer ', '');
@@ -36,6 +40,7 @@ export class AuthController {
   }
 
   @Get('me')
+  @ApiBearerAuth()
   @UseGuards(JwtAuthGuard)
   async getCurrentUser(@Req() req: AuthenticatedRequest) {
     const user = req.user;

@@ -1,5 +1,6 @@
 import { UserRole } from '@cmmp/shared';
 import { Controller, Get, Post, Body, Patch, Param, Delete, UseGuards } from '@nestjs/common';
+import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 
 import { AuditLog } from '../audit/decorators/audit-log.decorator';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
@@ -13,6 +14,8 @@ import { UpdateUserDto } from './dto/update-user.dto';
 import { UsersService } from './users.service';
 
 
+@ApiTags('Users')
+@ApiBearerAuth()
 @Controller('users')
 @UseGuards(JwtAuthGuard)
 export class UsersController {

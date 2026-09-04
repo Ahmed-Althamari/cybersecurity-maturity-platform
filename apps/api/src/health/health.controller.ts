@@ -1,4 +1,5 @@
 import { Controller, Get, HttpCode, ServiceUnavailableException } from '@nestjs/common';
+import { ApiTags } from '@nestjs/swagger';
 
 import { PrismaService } from '../prisma/prisma.service';
 
@@ -10,6 +11,7 @@ import { PrismaService } from '../prisma/prisma.service';
  * probe hitting it every few seconds isn't a user action worth an audit
  * trail entry.
  */
+@ApiTags('Health')
 @Controller('health')
 export class HealthController {
   constructor(private prisma: PrismaService) {}

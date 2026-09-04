@@ -33,13 +33,12 @@ CMMP is a comprehensive platform that enables organizations to:
 - Express
 
 **Database:**
-- PostgreSQL 15
+- PostgreSQL 16
 - Prisma ORM
 
 **Infrastructure:**
-- Docker & Docker Compose
+- Docker & Docker Compose (images written, never actually built/run — see `docs/DEPLOYMENT.md`)
 - GitHub Actions
-- Redis (caching)
 
 ### Repository Structure
 
@@ -69,116 +68,79 @@ cybersecurity-maturity-platform/
 ### Prerequisites
 
 - Node.js 18+ and npm 9+
-- Docker & Docker Compose
+- A PostgreSQL 16 instance (local install or any reachable server) —
+  only Docker/Docker Compose if going that route instead (Option 2 below)
 - Git
 
-### Local Development Setup
+### Setup
 
-1. **Clone the repository** (when pushed to GitHub)
 ```bash
-git clone https://github.com/yourusername/cybersecurity-maturity-platform.git
+git clone https://github.com/Ahmed-Althamari/cybersecurity-maturity-platform.git
 cd cybersecurity-maturity-platform
+cp .env.example .env   # edit if your local Postgres uses different credentials
 ```
 
-2. **Install dependencies**
+### Option 1: Local Development (verified, recommended)
+
 ```bash
 npm install
-```
-
-3. **Create environment configuration**
-```bash
-cp .env.example .env
-cp .env.example .env.local
-```
-
-4. **Update `.env` for local development** (if needed)
-```bash
-# Database
-DATABASE_URL="postgresql://cmmp_user:cmmp_password@localhost:5432/cmmp_db?schema=public"
-
-# NextAuth
-NEXTAUTH_SECRET="your-development-secret-here-min-32-characters"
-NEXTAUTH_URL="http://localhost:3000"
-
-# API
-NEXT_PUBLIC_API_URL="http://localhost:3001"
-```
-
-### Option 1: Docker Compose (Recommended)
-
-```bash
-# Start all services (PostgreSQL, Redis, API, Web)
-npm run docker:up
-
-# View logs
-docker-compose logs -f
-
-# Stop services
-npm run docker:down
-```
-
-Access:
-- **Web UI**: http://localhost:3000
-- **API**: http://localhost:3001
-- **PostgreSQL**: localhost:5432
-
-### Option 2: Local Development
-
-```bash
-# Install dependencies
-npm install
-
-# Generate Prisma client
-cd apps/api && npx prisma generate
-
-# Run database migrations
+npm run db:generate
 npm run db:migrate
-
-# Seed sample data (optional)
-npm run db:seed
-
-# Start development servers (in separate terminals)
-npm run dev
-
-# In another terminal:
-cd apps/web && npm run dev
+npm run db:seed          # optional — demo tenant, users, a scored assessment
+npm run dev               # starts every app/package's dev script in parallel via Turborepo
 ```
 
-Web UI will be available at http://localhost:3000
-API will be available at http://localhost:3001
+Web UI at http://localhost:3000, API at http://localhost:3001.
+
+### Option 2: Docker Compose (written, not yet verified end-to-end)
+
+```bash
+cp .env.example .env      # edit JWT_SECRET / NEXTAUTH_SECRET to real values first
+npm run docker:build
+npm run docker:up
+docker compose exec api npx prisma migrate deploy --schema packages/database/prisma/schema.prisma
+```
+
+**These Dockerfiles and this compose file have never actually been
+built or run** — the session that wrote them had no Docker daemon
+available. See `docs/DEPLOYMENT.md` for exactly what was and wasn't
+verified before relying on this path.
 
 ## Development Workflow
 
 ### Available Scripts
 
 ```bash
-# Development
-npm run dev              # Start all services in development mode
-npm run dev:web         # Start only web application
-npm run dev:api         # Start only API server
-
-# Building
-npm run build           # Build all applications
-npm run build:web       # Build web application
-npm run build:api       # Build API
+# Development (all via Turborepo — use --filter=@cmmp/api or --filter=@cmmp/web
+# directly if you only want one app, e.g. `npx turbo run dev --filter=@cmmp/web`)
+npm run dev              # Start every app/package's dev script in parallel
+npm run build            # Build all workspaces
+npm run start            # Start built apps (production mode, after `npm run build`)
 
 # Testing
-npm run test            # Run all tests
-npm run test:watch      # Run tests in watch mode
-npm run test:coverage   # Generate coverage reports
+npm run test             # Unit tests (mocked, fast) across every workspace
+npm run test:watch       # Unit tests in watch mode
+npm run test:e2e         # apps/api's real end-to-end suite against a live Postgres
+                          # (requires DATABASE_URL pointing at a real, migrated DB)
 
 # Code Quality
-npm run lint            # Run ESLint on all packages
-npm run type-check      # TypeScript type checking
-npm run format          # Format code with Prettier
+npm run lint             # ESLint across every workspace
+npm run type-check       # TypeScript type checking across every workspace
+npm run format           # Format code with Prettier
 
 # Database
-npm run db:migrate      # Run database migrations
-npm run db:seed         # Seed sample data
-npm run db:studio       # Open Prisma Studio for database inspection
+npm run db:generate      # Generate the Prisma client
+npm run db:migrate       # Apply migrations (non-interactive — for CI/deploys)
+npm run db:seed          # Seed demo tenant, users, and a scored assessment
+npm run db:studio        # Open Prisma Studio for database inspection
 
 # Security
-npm run security:audit  # Check for dependency vulnerabilities
+npm run security:audit   # npm audit --audit-level=moderate
+
+# Docker (see the caveat above and docs/DEPLOYMENT.md)
+npm run docker:build
+npm run docker:up
+npm run docker:down
 ```
 
 ### Database Management
@@ -198,16 +160,19 @@ npx prisma generate
 npx prisma studio
 ```
 
-## Demo Account
+## Demo Accounts
 
-For local development, login with:
+After `npm run db:seed`, four demo users exist, all with password
+`DemoPassword123!` (override via the `DEMO_USER_PASSWORD` env var):
 
-- **Email**: `admin@example.local`
-- **Password**: `DemoPassword123!`
+| Email | Role |
+|---|---|
+| `admin@example.local` | Platform Administrator |
+| `ciso@example.local` | CISO |
+| `assessor@example.local` | Assessor |
+| `viewer@example.local` | Read-Only Viewer |
 
-Role: Platform Administrator
-
-**Note**: These credentials are for development only. Never use in production.
+**Note**: These credentials are for local development only. Never use in production.
 
 ## Project Structure Details
 
@@ -221,11 +186,14 @@ Next.js 14 frontend application with:
 
 ### `/apps/api`
 NestJS backend API with:
-- RESTful endpoints for assessment management
-- Authentication & authorization (NextAuth/OIDC)
-- Business logic for scoring and reporting
+- RESTful endpoints for assessment, risk, remediation, and audit management
+- JWT authentication (`@nestjs/jwt` + Passport) and role-based
+  authorization (`apps/web`'s NextAuth.js is a separate, frontend-only
+  layer that calls this API's `/auth/login` — the API itself has no
+  OIDC/SSO integration)
+- Business logic delegating to `@cmmp/scoring-engine`/`@cmmp/framework-engine`
 - Integration with Prisma ORM
-- Rate limiting and security middleware
+- No rate limiting yet (see `docs/security-architecture.md`)
 
 ### `/packages/database`
 Prisma-managed database layer:
@@ -246,39 +214,44 @@ Maturity scoring calculations:
 - Organization-wide scoring
 - Gap analysis
 
-### `/packages/security`
-Security utilities and middleware:
-- Input validation & sanitization
-- Output encoding
-- CSRF protection
-- Tenant isolation enforcement
-- Audit logging
+### `/packages/security`, `/packages/reporting`, `/packages/ui`
+Present in the workspace but currently **unused** — nothing in
+`apps/api` or `apps/web` imports any of them. Input validation happens
+via `class-validator` DTOs directly in `apps/api`; audit logging lives
+in `apps/api/src/audit`; tenant isolation is enforced per-service, not
+via a shared middleware package. Treat these three as unbuilt
+scaffolding, not working infrastructure.
 
 ## Configuration
 
 ### Environment Variables
 
-See `.env.example` for all available options. Key variables:
+See `.env.example` for the full list and `docs/DEPLOYMENT.md`'s
+Configuration table for exactly which variables the running code
+actually reads (`.env.example` includes several — SMTP, AWS, rate
+limiting — that nothing consumes yet). The ones that matter:
 
 ```bash
 # Database connection
 DATABASE_URL=postgresql://user:password@host:5432/database
 
-# Authentication
+# Authentication — set real values in any shared/deployed environment;
+# JWT_SECRET has a hard-coded fallback if unset (see docs/security-architecture.md)
+JWT_SECRET=your-jwt-secret
 NEXTAUTH_SECRET=your-secret
 NEXTAUTH_URL=http://localhost:3000
 
-# API endpoints
+# API endpoints — API_URL is server-side (NextAuth's own login call),
+# NEXT_PUBLIC_API_URL is client-side (the browser) — they differ under Docker,
+# see docs/DEPLOYMENT.md
 API_URL=http://localhost:3001
 NEXT_PUBLIC_API_URL=http://localhost:3001
 
 # Application
 NODE_ENV=development
-LOG_LEVEL=debug
 
-# Security
-ENABLE_RATE_LIMITING=true
-MAX_FILE_SIZE=52428800
+# Opt-in Swagger UI at /api/docs — off by default
+ENABLE_SWAGGER=false
 ```
 
 ## API Documentation
@@ -286,40 +259,51 @@ MAX_FILE_SIZE=52428800
 ### Core Endpoints
 
 ```
-GET  /api/v1/assessments           - List assessments
-POST /api/v1/assessments           - Create assessment
-GET  /api/v1/assessments/:id       - Get assessment detail
-PUT  /api/v1/assessments/:id       - Update assessment
+GET    /health                              - Liveness/readiness probe (no /api/v1 prefix, no auth)
 
-GET  /api/v1/frameworks            - List frameworks
-GET  /api/v1/frameworks/:id        - Get framework detail
+GET    /api/v1/assessments                  - List assessments
+POST   /api/v1/assessments                  - Create assessment
+GET    /api/v1/assessments/:id              - Get assessment detail
+PATCH  /api/v1/assessments/:id              - Update assessment
+POST   /api/v1/assessments/:id/import       - Import from Excel/CSV
+GET    /api/v1/assessments/:id/results      - Get assessment results
+GET    /api/v1/assessments/:id/gaps         - Gap analysis
 
-POST /api/v1/assessments/import    - Import from Excel/CSV
-GET  /api/v1/assessments/:id/results - Get assessment results
+GET    /api/v1/frameworks                   - List frameworks
+GET    /api/v1/frameworks/:id               - Get framework detail
 
-GET  /api/v1/dashboard/executive   - Executive dashboard data
-GET  /api/v1/dashboard/maturity    - Maturity dashboard data
+GET    /api/v1/risks                        - List risks
+POST   /api/v1/risks                        - Create risk
 
-GET  /api/v1/risks                 - List security risks
-GET  /api/v1/roadmap               - Get remediation roadmap
+GET    /api/v1/remediation-initiatives       - List remediation initiatives
+POST   /api/v1/remediation-initiatives/generate - Auto-generate initiatives from gaps
+
+GET    /api/v1/dashboard/executive          - Executive dashboard data
+GET    /api/v1/dashboard/maturity           - Maturity dashboard data
+
+GET    /api/v1/audit-events                 - Query the audit trail (role-gated)
 ```
 
-See `/docs/api-design.md` for complete API specification.
+This is a representative subset, not the full route table — see
+`docs/architecture.md`'s API Surface section for the complete
+controller/role list, or run the API with `ENABLE_SWAGGER=true` and open
+`/api/docs` for a live, always-accurate schema of every route.
 
 ## Security
 
-### Security Principles Applied
+See `docs/security-architecture.md` for the full picture, including a
+STRIDE threat model and an honest list of what's implemented versus
+declared-but-not-built (notably: **no rate limiting exists anywhere**,
+including on login — the single highest-priority open gap). What's
+real today:
 
-- **OWASP ASVS** alignment for application security
-- **Zero Trust** architecture with tenant isolation
-- **Secure by Design** principles
-- **Input validation** server-side
-- **Output encoding** to prevent XSS
-- **Parameterized queries** to prevent SQL injection
-- **Rate limiting** on all APIs
-- **CSRF protection** on state-changing operations
-- **Audit logging** of all significant actions
-- **Secrets management** via environment variables
+- Server-side tenant isolation on every query (not client-trusted)
+- Role-based access control, enforced per-route
+- Parameterized queries throughout (Prisma) — no raw SQL string
+  concatenation
+- Server-side input validation (`class-validator` DTOs, `whitelist: true`)
+- Formula/CSV injection defense on spreadsheet import
+- Append-only audit logging with credential redaction
 
 ### Security Scanning
 
@@ -327,54 +311,64 @@ CI/CD pipelines include:
 - **SAST** via GitHub CodeQL
 - **Dependency scanning** via npm audit & Dependabot
 - **Secret scanning** via Gitleaks
-- **Container scanning** via Trivy
-- **DAST** via OWASP ZAP
-
-See `/docs/devsecops.md` for security pipeline details.
+- **Container scanning** via Trivy (scans the Docker images from Phase
+  15 — the first time they'll actually be built, see the Docker caveat
+  above)
+- **DAST** via OWASP ZAP (schedule/manual-dispatch only, not on every PR)
 
 ## Testing
 
 ### Test Coverage
 
-- **Unit tests**: Jest with React Testing Library for components
-- **Integration tests**: API endpoint testing
-- **E2E tests**: Playwright for user workflows
-- **Security tests**: Tenant isolation, authorization, input validation
+- **`apps/api`**: extensive — a Jest unit-test spec beside every
+  service (100+ tests, mocked Prisma), plus a real end-to-end suite
+  (`apps/api/test/*.e2e-spec.ts`, Jest + supertest, boots the actual
+  `AppModule` against a live Postgres instance) covering auth, tenant
+  isolation, and role-based authorization
+- **`apps/web`**: zero automated tests. `@playwright/test` and
+  `@testing-library/react` are installed and a `test:e2e` script exists,
+  but no spec file has ever been written — a real, tracked gap (see
+  `docs/IMPLEMENTATION_STATUS.md`), not a silent omission
+- **Every `packages/*` engine** (`scoring-engine`, `import-engine`,
+  `framework-engine`) has its own thorough unit-test suite — these are
+  pure functions, easy to test exhaustively
 
 ```bash
-# Run all tests
-npm run test
-
-# Run with coverage
-npm run test:coverage
-
-# Run E2E tests
-cd apps/web && npm run test:e2e
+npm run test       # unit tests across every workspace
+npm run test:e2e   # apps/api's real e2e suite (needs a live, migrated Postgres)
 ```
 
 ## Documentation
 
-Comprehensive documentation available in `/docs`:
+Documentation actually present in `/docs` (plus `SECURITY.md` and
+`CONTRIBUTING.md` at the repo root):
 
-- `architecture.md` - System architecture & design
-- `security-architecture.md` - Security design & threat model
-- `data-model.md` - Database schema & relationships
-- `api-design.md` - REST API specification
-- `scoring-model.md` - Maturity scoring methodology
-- `framework-model.md` - Framework configuration format
-- `excel-import-format.md` - Spreadsheet upload format
-- `deployment.md` - Production deployment guide
+- `docs/architecture.md` - System architecture, data model, framework
+  model, scoring methodology, API surface, and role matrix
+- `docs/security-architecture.md` - Security controls, gaps, and a
+  STRIDE threat model
+- `docs/DEPLOYMENT.md` - Local dev, Docker Compose (with its caveat),
+  configuration reference, CI/CD summary
+- `docs/EXCEL_IMPORT_GUIDE.md` - Spreadsheet column format and
+  validation rules for the assessment import endpoint
+- `docs/IMPLEMENTATION_STATUS.md` - Phase-by-phase build log, ADRs,
+  known issues, and next steps — the most detailed and most frequently
+  updated document in the repo
 
 ## CI/CD Pipeline
 
-GitHub Actions workflows:
+GitHub Actions workflows (`.github/workflows/`):
 
-- `.github/workflows/ci.yml` - Build, lint, test on PR
-- `.github/workflows/security.yml` - Security scanning (SAST, DAST)
-- `.github/workflows/container.yml` - Container image scanning
-- `.github/workflows/deploy.yml` - Deployment workflows
+- `ci.yml` - lint, type-check, unit tests, build, and a real Postgres-
+  backed e2e job, on every PR and push to `main`
+- `security.yml` - CodeQL, Gitleaks, `npm audit`, weekly SBOM
+- `container-security.yml` - Trivy scan of both Docker images
+- `dast.yml` - OWASP ZAP baseline scan (scheduled/manual only)
+- `dependabot.yml` - weekly dependency update PRs (npm, github-actions,
+  docker)
 
-All workflows must pass before merging to main branch.
+There is no deployment workflow — no target environment exists yet to
+deploy to (see `docs/DEPLOYMENT.md`).
 
 ## License
 
@@ -385,7 +379,9 @@ All workflows must pass before merging to main branch.
 For issues, questions, or contributions:
 - Create GitHub Issues for bugs and feature requests
 - See CONTRIBUTING.md for contribution guidelines
-- Check ADRs in `/docs/adr/` for architecture decisions
+- Architecture Decision Records live in
+  `docs/IMPLEMENTATION_STATUS.md`'s "Architecture Decisions" section
+  (there's no separate `/docs/adr/` directory)
 
 ## Roadmap
 
