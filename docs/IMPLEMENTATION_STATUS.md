@@ -1,11 +1,13 @@
 # CMMP Implementation Status
 
-Last Updated: 2026-09-04 (Phase 14)
+Last Updated: 2026-09-04 (Phase 15)
 
 ## Overall Progress
 
-**Phase**: 14 / 17
-**Completion**: ~80%
+**Phase**: 15 / 17
+**Completion**: ~85% (Docker artifacts written and statically validated, but
+**not** built/run in this session — see the Phase 15 section for why and
+what that means for confidence level)
 
 ## Completed ✅
 
@@ -699,7 +701,145 @@ Last Updated: 2026-09-04 (Phase 14)
       that runs in CI or on demand — a real gap, honestly noted rather
       than claimed as done
 
-## Known Issues 🐛
+### Phase 15: Docker
+**Important caveat up front**: this session's sandbox has the `docker` CLI
+but no reachable daemon (`docker info` fails with
+`dial unix /var/run/docker.sock: connect: no such file or directory`, and
+`service docker start` fails with `ulimit: error setting limit (Operation
+not permitted)` — a sandbox restriction, not something fixable from here).
+That means none of this was verified the way every other phase in this
+session was (build the real thing, hit it with curl/Playwright, look at
+the result) — **no image in this phase was actually built or run**. What
+follows was validated as far as it's possible to without a daemon: real
+`turbo prune` runs against this exact repo, a real Next.js production
+build with `output: "standalone"` inspected file-by-file, and
+`docker compose config` (a client-side parse/interpolation step that
+doesn't need the daemon) confirming the compose file is syntactically
+valid and resolves variables correctly. Whoever picks this up next should
+run `docker compose build && docker compose up` for real before trusting
+it in any deployment.
+
+- [x] Docker image builds — `infrastructure/Dockerfile.api` and
+      `infrastructure/Dockerfile.web`, both rewritten from scratch. The
+      versions already in the repo (from Phase 1 scaffolding) were
+      broken beyond just "unverified": they ran `pnpm install` against a
+      `pnpm-lock.yaml` that doesn't exist anywhere in this npm-workspaces
+      repo, and `Dockerfile.api` copied a `/app/dist` that no build
+      script in this repo produces. Rewrote both using Turborepo's own
+      documented `turbo prune <workspace> --docker` recipe — verified
+      live (without a daemon, `turbo prune` is a plain CLI command) that
+      `turbo prune @cmmp/api --docker` correctly resolves to exactly
+      `@cmmp/database`, `@cmmp/framework-engine`, `@cmmp/import-engine`,
+      `@cmmp/scoring-engine`, `@cmmp/shared` (not `packages/reporting`,
+      `packages/security`, `packages/ui`, or `apps/web` — none of which
+      `@cmmp/api` actually imports), and that `turbo prune @cmmp/web
+      --docker` resolves to just `@cmmp/web` itself (it has no `@cmmp/*`
+      dependencies despite declaring `@prisma/client` directly — an
+      unused leftover dependency, noted but not removed, out of scope
+      here). Each Dockerfile is prune → install once → build → copy into
+      a slim `node:22-alpine` runtime stage running as a non-root user
+- [x] Enabled `output: "standalone"` in `apps/web/next.config.js` — not
+      set before this phase. Rebuilt the app for real (this part doesn't
+      need Docker) and confirmed the exact output shape a Turborepo
+      monorepo produces:
+      `apps/web/.next/standalone/apps/web/server.js`, with static assets
+      and `public/` deliberately *not* included (Next's own docs call
+      this out — the Dockerfile copies `.next/static` and `public/`
+      alongside the standalone bundle explicitly)
+- [x] Found and fixed real bugs while writing these, each caught by
+      tracing through actual repo state rather than assuming the old
+      scaffolding was trustworthy:
+  - `@cmmp/database`'s `build` script is only `tsc` — it does **not**
+    run `prisma generate` (that's a separate script). Without an
+    explicit `prisma generate` step in the image build, `@cmmp/database`
+    fails to type-check its own `export * from '@prisma/client'`
+    re-export, and even if that were skipped, `node_modules/.prisma`
+    would be missing at runtime. Added the step explicitly.
+  - Prisma's query engine on Alpine/musl dynamically links `libssl`,
+    which recent Alpine images don't ship by default — the classic
+    "Unable to require libquery_engine... libssl.so.3 not found" failure
+    happens at *runtime*, not build time, so it's easy to ship a build
+    that silently breaks on first request. Added `openssl` to both the
+    stage that runs `prisma generate` and the final runtime stage.
+  - `apps/web/public/` didn't exist anywhere in the repo, which would
+    have failed the Dockerfile's `COPY .../public ./apps/web/public`
+    outright (Docker's `COPY` hard-fails on a missing source). Created
+    it (with a `.gitkeep`) — a real, if minor, pre-existing gap (every
+    production Next.js app ends up wanting a `public/` dir for a
+    favicon etc.) surfaced only by actually trying to write a correct
+    Dockerfile for this app
+  - The old `docker-compose.yml` never set `API_URL` for the `web`
+    service (only `NEXT_PUBLIC_API_URL`). NextAuth's own server-side
+    login call (`apps/web/pages/api/auth/[...nextauth].ts`) reads
+    `API_URL`, defaulting to `http://localhost:3001` — which inside the
+    `web` container's own network namespace does **not** reach the `api`
+    container. Login would have failed 100% of the time under the old
+    compose file. Fixed by explicitly setting `API_URL: http://api:3001`
+    (the internal service name) while `NEXT_PUBLIC_API_URL` stays
+    `http://localhost:3001` (that one runs in the *browser*, which
+    reaches the host's published port, not the internal service name) —
+    the split between the two is now called out with a comment so it
+    doesn't get collapsed back into one variable later
+  - The old compose file hardcoded `NEXTAUTH_SECRET:
+    dev-secret-not-for-production` directly in version-controlled YAML.
+    Replaced with `${NEXTAUTH_SECRET:?...}` / `${JWT_SECRET:?...}` —
+    required, no fallback baked into the file — sourced from the
+    root `.env` (which `docker compose` auto-loads since it sits next to
+    `docker-compose.yml`), matching every other secret in this repo
+  - `infrastructure/init-db.sql` (mounted into Postgres's
+    `docker-entrypoint-initdb.d`) manually ran `CREATE TYPE
+    maturity_level AS ENUM (...)` and similar for every enum already
+    defined in `schema.prisma`. Since Postgres's `CREATE TYPE` has no
+    `IF NOT EXISTS`, and Prisma's own migrations create these same types
+    the first time `prisma migrate deploy` runs, this file would have
+    made the *first* migration fail outright with "type already exists".
+    Deleted it — Prisma migrations are the single source of truth for
+    schema in this project, and this file only ever fought that
+  - The old compose file included a `redis` service (with its own
+    healthcheck) that nothing in `apps/api` or `apps/web` connects to —
+    no `redis`/`ioredis` dependency, no `REDIS_URL` usage anywhere in
+    application code. Removed it rather than keep a service that looks
+    load-bearing but isn't; add it back for real once something actually
+    needs caching
+- [x] Health checks — added `GET /health` (deliberately unauthenticated,
+      deliberately excluded from the `api/v1` prefix via
+      `app.setGlobalPrefix('api/v1', { exclude: ['health'] })` in
+      `main.ts` so it stays reachable at a stable path regardless of API
+      versioning), checking real DB connectivity via `SELECT 1` through
+      `PrismaService`. Verified live (no Docker needed for this part):
+      `GET /health` → 200 `{"status":"ok","database":"up"}`, and
+      `GET /api/v1/health` → 404 (confirming the prefix exclusion
+      actually took effect, not just that the route responds somewhere).
+      Both Dockerfiles' `HEALTHCHECK` instructions call this endpoint
+      (API) or `/` (web, which has no dedicated health route), and
+      `docker-compose.yml`'s `depends_on: condition: service_healthy`
+      chains on these
+- [x] Volume management — a single named volume (`pgdata`) for Postgres
+      data, matching the pattern already used elsewhere in this repo
+- [x] Network configuration — one bridge network (`cmmp-network`); `api`
+      and `web` are reachable from the host via published ports
+      (3001/3000) while Postgres is only reachable at its internal
+      service name (`postgres`) from the other two containers plus a
+      published `5432` for local tooling (`psql`, Prisma Studio) —
+      matches how this session itself has been working against the
+      local Postgres instance all along
+- [x] Container security — both runtime stages run as a created non-root
+      user (`nestjs`/`nextjs`, uid 1001), multi-stage builds keep build
+      tooling (the `turbo` CLI, the full pruner-stage source tree) out of
+      the final image, `.dockerignore` (new, didn't exist before) keeps
+      `node_modules`, `.git`, `.env*` (except `.env.example`) and build
+      artifacts out of the build context so a stray local `.env` can
+      never end up baked into an image layer. **Not** done: an actual
+      image vulnerability scan (Trivy/Grype/Docker Scout) — needs a
+      built image to scan, which needs the daemon this session doesn't
+      have; that belongs in Phase 16's CI pipeline where a real runner
+      will have one
+- [x] Fixed the root `package.json`'s `docker:build`/`docker:up`/
+      `docker:down` scripts — they invoked the standalone `docker-compose`
+      binary, which isn't installed in this environment (only the
+      `docker compose` v2 plugin is); switched to `docker compose`
+
+
 
 - Root `.eslintrc.json` references `eslint-plugin-security`,
   `eslint-plugin-react`, `eslint-plugin-react-hooks`, `eslint-plugin-import`,
@@ -732,14 +872,6 @@ Last Updated: 2026-09-04 (Phase 14)
   both in play.
 
 ## Not Started ⭕
-
-### Phase 15: Docker
-- [ ] Docker image builds
-- [ ] Docker Compose orchestration
-- [ ] Health checks
-- [ ] Volume management
-- [ ] Network configuration
-- [ ] Container security scanning
 
 ### Phase 16: CI/CD Security Pipeline
 - [ ] GitHub Actions CI workflow (.github/workflows/ci.yml)
@@ -924,51 +1056,58 @@ they've been observed passing on an actual PR.
 
 ## Next Steps
 
-1. **Begin Phase 15**: Docker — a `Dockerfile` per app (`apps/api`,
-   `apps/web`), a `docker-compose.yml` wiring them to a Postgres service
-   (matching the `DATABASE_URL` shape already used locally), health
-   checks (`GET /api/v1` or a dedicated `/health` endpoint — doesn't
-   exist yet, worth adding), named volumes for Postgres data, and a
-   basic container security pass (non-root user, multi-stage build to
-   keep `node_modules`/build tooling out of the final image, no secrets
-   baked into layers). `apps/web`'s Next.js build already produces a
-   `.next` output suitable for a slim runtime image; `apps/api`'s Nest
-   build output (`dist/`) is likewise already container-ready — this
-   phase is packaging what already runs, not building new application
-   code.
-2. Phase 14 left two real gaps worth closing before or alongside Phase
-   16 (CI): frontend component tests (React Testing Library — currently
-   zero automated frontend tests) and a persisted Playwright E2E suite
+1. **Before anything else touches Docker**: actually run `docker compose
+   build && docker compose up` somewhere with a working daemon (this
+   sandbox didn't have one — see the Phase 15 section's caveat) and fix
+   whatever that first real build surfaces. Everything in Phase 15 was
+   validated as far as possible without a daemon (`turbo prune` run for
+   real, `docker compose config` parsing cleanly, the Next.js
+   `standalone` output inspected file-by-file), but "parses correctly"
+   and "boots and serves traffic" are different claims, and only the
+   first one has been checked.
+2. **Begin Phase 16**: CI/CD Security Pipeline — a GitHub Actions
+   workflow running `turbo run type-check test build` (and, once a
+   daemon exists in CI, `docker compose build` and an image scan —
+   Trivy or Docker Scout — which Phase 15 explicitly deferred for lack
+   of one here) on every PR, plus SAST (CodeQL), dependency scanning
+   (Dependabot — the repo already surfaces 72 existing advisories per
+   GitHub's own banner on every push, worth triaging), and secret
+   scanning (Gitleaks). The `apps/api/test:e2e` suite from Phase 14
+   needs a real Postgres service in that workflow (a `services:` block
+   in the Actions YAML, not a mock) to run there at all.
+3. Phase 14 left two real gaps worth closing before or alongside Phase
+   16: frontend component tests (React Testing Library — currently zero
+   automated frontend tests) and a persisted Playwright E2E suite
    (Playwright itself was used interactively in Phase 10 to catch a real
    rendering bug, but nothing was saved as a runnable spec file).
-3. **Multi-assessment rollup**: every `/dashboard/*` endpoint currently
+4. **Multi-assessment rollup**: every `/dashboard/*` endpoint currently
    scopes to *one* assessment (the org's latest submitted one, or an
    explicit `assessmentId`) — a real "organisation-wide" score across
    several concurrently-active assessments (different frameworks, business
    units) would need `@cmmp/scoring-engine`'s `combineScores`, which
    exists but isn't wired into the dashboard yet. Revisit if/when an org
    genuinely has more than one active assessment at a time.
-4. Frontend follow-ups from Phase 10: a framework navigation view, an
+5. Frontend follow-ups from Phase 10: a framework navigation view, an
    assessment-taking flow (`/assessments/:id/items`), a risk register view
    (`/risks` now has a real API), the Excel import wizard's upload/
    preview/column-mapping steps, and extracting the dashboard components
    into `@cmmp/ui` if/when a second app or page needs them (not worth the
    abstraction for one dashboard page yet)
-5. Wire `POST /assessments/:id/import`'s `columnMapping` override — the
+6. Wire `POST /assessments/:id/import`'s `columnMapping` override — the
    library (`ImportOptions.columnMapping`) already supports it, but the
    endpoint only auto-maps columns today; needs a way to accept a manual
    mapping as a form field or a preceding "preview" call, matching the
    import wizard's step 3 in master prompt §14.
-6. Look more closely at the `exceljs` → `uuid` advisory now that
+7. Look more closely at the `exceljs` → `uuid` advisory now that
    `import-engine` genuinely parses untrusted uploads (see Known Issues) —
    confirm whether `exceljs`'s internal `uuid` usage ever hits the
    vulnerable buffer-bounds code path, or upgrade past it.
-7. Before relying on the seeded NIST CSF 2.0 data for anything
+8. Before relying on the seeded NIST CSF 2.0 data for anything
    compliance-facing, diff `packages/database/prisma/fixtures/nist-csf-2.0.json`
    against the official NIST CSWP 29 publication — it was reproduced from
    training-data knowledge, not transcribed from the source document (see
    Phase 5 notes above)
-8. Fix the repo-wide ESLint plugin gap (see Known Issues)
+9. Fix the repo-wide ESLint plugin gap (see Known Issues)
 
 ## Contact & Questions
 

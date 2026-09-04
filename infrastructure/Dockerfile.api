@@ -1,36 +1,56 @@
-FROM node:18-alpine AS builder
+# Production image for @cmmp/api (NestJS).
+#
+# Uses Turborepo's documented `turbo prune --docker` recipe: prune the
+# monorepo down to just @cmmp/api's own dependency graph (its own
+# package.json plus the @cmmp/database, @cmmp/framework-engine,
+# @cmmp/import-engine, @cmmp/scoring-engine and @cmmp/shared workspaces
+# it actually imports — verified via `turbo prune @cmmp/api --docker`),
+# install once, then build. This keeps unrelated workspaces
+# (apps/web, packages/reporting, packages/security, packages/ui) and
+# their dependencies out of this image entirely.
+#
+# Build from the repo root: docker build -f infrastructure/Dockerfile.api -t cmmp-api .
 
+FROM node:22-alpine AS base
+
+FROM base AS pruner
+RUN apk add --no-cache libc6-compat
 WORKDIR /app
-
-# Install dependencies
-COPY package*.json ./
-COPY pnpm-lock.yaml* ./
-RUN npm install -g pnpm && pnpm install
-
-# Build
+RUN npm install -g turbo@1.13.4
 COPY . .
-RUN pnpm run build
+RUN turbo prune @cmmp/api --docker
 
-# Production stage
-FROM node:18-alpine
-
+FROM base AS installer
+# openssl: Prisma's query engine binary on musl/Alpine dynamically links against libssl, and
+# `prisma generate` (below) auto-detects its target from *this* image — get it wrong here and the
+# error only shows up at runtime ("Unable to require libquery_engine... libssl.so.3 not found").
+RUN apk add --no-cache libc6-compat openssl
 WORKDIR /app
+COPY --from=pruner /app/out/json/ .
+COPY --from=pruner /app/out/package-lock.json ./package-lock.json
+RUN npm ci
+COPY --from=pruner /app/out/full/ .
+# @cmmp/database's own `build` script is only `tsc` — it does NOT run `prisma generate` (that's
+# a separate script, normally invoked via the root `db:generate`), so without this step
+# @cmmp/database's build fails to type-check the `export * from '@prisma/client'` re-export, and
+# even if it didn't, node_modules/.prisma/client would be missing at runtime.
+RUN npx prisma generate --schema packages/database/prisma/schema.prisma
+# `...` pulls in every workspace @cmmp/api depends on, in dependency order, not just @cmmp/api itself.
+RUN npx turbo run build --filter=@cmmp/api...
+
+FROM base AS runner
+# The already-generated query engine binary (built for this same musl/Alpine target above) still
+# needs libssl present at runtime, not just at generate time.
+RUN apk add --no-cache openssl
+WORKDIR /app
+RUN addgroup --system --gid 1001 nodejs && adduser --system --uid 1001 nestjs
+COPY --from=installer --chown=nestjs:nodejs /app .
+USER nestjs
 
 ENV NODE_ENV=production
-
-# Install only production dependencies
-COPY package*.json ./
-COPY pnpm-lock.yaml* ./
-RUN npm install -g pnpm && pnpm install --prod
-
-# Copy built application
-COPY --from=builder /app/dist ./dist
-COPY --from=builder /app/apps/api/dist ./apps/api/dist
-COPY --from=builder /app/apps/api/node_modules ./apps/api/node_modules
-
 EXPOSE 3001
 
-HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-  CMD node -e "require('http').get('http://localhost:3001/health', (r) => {if (r.statusCode !== 200) throw new Error(r.statusCode)})"
+HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
+  CMD node -e "require('http').get('http://localhost:3001/health',(r)=>{process.exit(r.statusCode===200?0:1)}).on('error',()=>process.exit(1))"
 
 CMD ["node", "apps/api/dist/main.js"]

@@ -7,8 +7,8 @@ import { AppModule } from './app.module';
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
 
-  // Global prefix
-  app.setGlobalPrefix('api/v1');
+  // Global prefix — health stays unprefixed so container/orchestrator probes have a stable path
+  app.setGlobalPrefix('api/v1', { exclude: ['health'] });
 
   // Validation pipe
   app.useGlobalPipes(

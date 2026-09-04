@@ -1,36 +1,49 @@
-FROM node:18-alpine AS builder
+# Production image for @cmmp/web (Next.js, pages router).
+#
+# Same `turbo prune --docker` recipe as Dockerfile.api. @cmmp/web has no
+# @cmmp/* workspace dependencies of its own (verified via
+# `turbo prune @cmmp/web --docker`), so the pruned tree is just this one
+# app. The runtime stage copies Next's `output: "standalone"` bundle
+# (apps/web/next.config.js), which traces only the dependencies each page
+# actually needs — the final image never carries the monorepo's full
+# node_modules.
+#
+# Build from the repo root: docker build -f infrastructure/Dockerfile.web -t cmmp-web .
 
+FROM node:22-alpine AS base
+
+FROM base AS pruner
+RUN apk add --no-cache libc6-compat
 WORKDIR /app
-
-# Install dependencies
-COPY package*.json ./
-COPY pnpm-lock.yaml* ./
-RUN npm install -g pnpm && pnpm install
-
-# Build Next.js
+RUN npm install -g turbo@1.13.4
 COPY . .
-RUN pnpm run build
+RUN turbo prune @cmmp/web --docker
 
-# Production stage
-FROM node:18-alpine
-
+FROM base AS installer
+RUN apk add --no-cache libc6-compat
 WORKDIR /app
+COPY --from=pruner /app/out/json/ .
+COPY --from=pruner /app/out/package-lock.json ./package-lock.json
+RUN npm ci
+COPY --from=pruner /app/out/full/ .
+RUN npx turbo run build --filter=@cmmp/web...
+
+FROM base AS runner
+WORKDIR /app
+RUN addgroup --system --gid 1001 nodejs && adduser --system --uid 1001 nextjs
+
+# standalone output does not include static assets or public/ — Next's own docs call out copying them separately.
+COPY --from=installer --chown=nextjs:nodejs /app/apps/web/.next/standalone ./
+COPY --from=installer --chown=nextjs:nodejs /app/apps/web/.next/static ./apps/web/.next/static
+COPY --from=installer --chown=nextjs:nodejs /app/apps/web/public ./apps/web/public
+USER nextjs
 
 ENV NODE_ENV=production
-
-# Install only production dependencies
-COPY package*.json ./
-COPY pnpm-lock.yaml* ./
-RUN npm install -g pnpm && pnpm install --prod
-
-# Copy built application
-COPY --from=builder /app/apps/web/.next ./apps/web/.next
-COPY --from=builder /app/apps/web/public ./apps/web/public
-COPY --from=builder /app/apps/web/node_modules ./apps/web/node_modules
-
+ENV PORT=3000
+ENV HOSTNAME=0.0.0.0
 EXPOSE 3000
 
-HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-  CMD wget --quiet --tries=1 --spider http://localhost:3000 || exit 1
+HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
+  CMD node -e "require('http').get('http://localhost:3000/',(r)=>{process.exit(r.statusCode<500?0:1)}).on('error',()=>process.exit(1))"
 
-CMD ["npm", "run", "start", "--prefix", "apps/web"]
+CMD ["node", "apps/web/server.js"]
