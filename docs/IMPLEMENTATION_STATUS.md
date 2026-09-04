@@ -4,8 +4,8 @@ Last Updated: 2026-09-04
 
 ## Overall Progress
 
-**Phase**: 9 / 17
-**Completion**: ~53%
+**Phase**: 10 / 17
+**Completion**: ~59%
 
 ## Completed ✅
 
@@ -378,6 +378,68 @@ Last Updated: 2026-09-04
       everything including real cross-assessment trend history; a request
       missing `organisationId` correctly 400s
 
+### Phase 10: Dashboard UI
+- [x] Real authentication wired end to end — NextAuth's Credentials
+      provider now calls the actual `POST /api/v1/auth/login` (previously
+      four hardcoded demo users baked into the frontend, per Phase 3's
+      "Next Steps" left open since then); the JWT `access_token`,
+      `tenantId`, `organisationId`, `role`, and `roles` are carried through
+      NextAuth's `jwt`/`session` callbacks so every server-rendered page
+      has what it needs to call the API as that user
+- [x] `apps/web/lib/api.ts` — a typed client for `/frameworks`,
+      `/assessments/:id/results`, and every `/dashboard/*` endpoint from
+      Phase 9, with response types mirrored from the API rather than
+      re-derived
+- [x] Landing/home dashboard (`pages/index.tsx`, `pages/dashboard.tsx`) —
+      unauthenticated visitors see a landing page; authenticated ones are
+      redirected straight to `/dashboard` (and vice versa: `/dashboard`
+      redirects an unauthenticated visitor to sign-in), both via
+      `getServerSideProps` session checks, not client-side flicker
+- [x] Sign-in page (`pages/auth/signin.tsx`) — didn't exist before despite
+      `NextAuthOptions.pages.signIn` already pointing at it; clicking
+      "Sign In" previously 404'd
+- [x] KPI cards (Maturity, Target, Gap, Completion, Critical Gaps,
+      High-Risk Findings, Open Remediation Actions) — `GET
+      /dashboard/maturity`
+- [x] Radar chart, 6 functions, current vs target — `GET
+      /dashboard/functions`, recharts `RadarChart`
+- [x] Maturity gap bar chart — same endpoint, sorted descending, bars
+      colored by the function's current-maturity status band
+- [x] Function detail cards — current/target/gap, completion %,
+      high-risk-gap count, and a status badge per function
+- [x] Security maturity heatmap — one row per function, one cell per
+      category, from `GET /assessments/:id/results`'s full tree (the
+      dashboard endpoints only go down to function level; the heatmap
+      needed category-level data, which only the per-assessment results
+      endpoint has)
+- [x] Top 10 gaps table — `GET /dashboard/gaps`, with risk-level badges
+- [x] Maturity distribution — count of subcategories at each maturity
+      level (Initial..Optimised), computed client-side from the same
+      results tree the heatmap uses
+- [x] Color: loaded the `dataviz` skill before writing any chart code.
+      Maturity score -> a fixed 4-band status scale (critical/serious/
+      warning/good, the skill's validated dark-mode status hexes) rather
+      than a continuous rainbow gradient; current-vs-target uses the
+      skill's categorical slots 1/2 (blue/orange) with a legend; every
+      colored value is also printed as a number or label, never color
+      alone (`apps/web/lib/maturity-scale.ts`)
+- [x] **Not built** (out of this backend-adjacent phase's practical
+      scope, same "defer the UI polish" pattern every prior phase has
+      followed): a `@cmmp/ui` shared component library (dashboard
+      components live directly in `apps/web` for now), an organisation
+      picker (single-org assumed via the session, matching the seed
+      data), and the manual `columnMapping` override step of the Excel
+      import wizard (Phase 8's own noted gap)
+- [x] Verified in an actual browser via Playwright end to end, not just
+      `tsc`/`next build`: signed in as a real seeded user, landed on
+      `/dashboard`, confirmed every chart/card/table rendered with real
+      numbers matching Phase 9's own manual verification (106 scored
+      subcategories, correct per-function gaps and colors); confirmed an
+      unauthenticated visit to `/dashboard` redirects to sign-in, a wrong
+      password shows an inline error and stays on the sign-in page, and
+      sign-out actually invalidates the session (a follow-up visit to
+      `/dashboard` redirects again rather than serving a cached page)
+
 ## Known Issues 🐛
 
 - Root `.eslintrc.json` references `eslint-plugin-security`,
@@ -401,16 +463,6 @@ Last Updated: 2026-09-04
   runtime, this is purely a type-declaration mismatch.
 
 ## Not Started ⭕
-
-### Phase 10: Dashboard UI
-- [ ] Landing/home dashboard
-- [ ] KPI cards (Maturity, Gap, Completion, etc.)
-- [ ] Radar chart (6 functions)
-- [ ] Maturity gap bar chart
-- [ ] Function detail cards
-- [ ] Security maturity heatmap
-- [ ] Top 10 gaps table
-- [ ] Maturity distribution
 
 ### Phase 11: Risk Register
 - [ ] Risk model
@@ -636,10 +688,11 @@ they've been observed passing on an actual PR.
 
 ## Next Steps
 
-1. **Begin Phase 10**: Dashboard UI — the Next.js frontend work every prior
-   phase has deferred; `/dashboard/*` now has real endpoints to build the
-   KPI cards, radar chart, gap table, and roadmap Gantt view against
-   (master prompt §21-23/§38)
+1. **Begin Phase 11**: Risk Register — a real `RisksService`/
+   `RisksController` (`POST /risks`, `PUT /risks/:id`, etc. per master
+   prompt §32) instead of `Risk` rows only ever being written by the seed
+   script; `GET /dashboard/risks` already exists to read them back. A risk
+   detail page and risk-control mapping UI follow once the API exists.
 2. **Multi-assessment rollup**: every `/dashboard/*` endpoint currently
    scopes to *one* assessment (the org's latest submitted one, or an
    explicit `assessmentId`) — a real "organisation-wide" score across
@@ -647,26 +700,25 @@ they've been observed passing on an actual PR.
    units) would need `@cmmp/scoring-engine`'s `combineScores`, which
    exists but isn't wired into the dashboard yet. Revisit if/when an org
    genuinely has more than one active assessment at a time.
-3. Wire `POST /assessments/:id/import`'s `columnMapping` override — the
+3. Frontend follow-ups from Phase 10: a framework navigation view, an
+   assessment-taking flow (`/assessments/:id/items`), the Excel import
+   wizard's upload/preview/column-mapping steps, and extracting the
+   dashboard components into `@cmmp/ui` if/when a second app or page needs
+   them (not worth the abstraction for one dashboard page yet)
+4. Wire `POST /assessments/:id/import`'s `columnMapping` override — the
    library (`ImportOptions.columnMapping`) already supports it, but the
    endpoint only auto-maps columns today; needs a way to accept a manual
    mapping as a form field or a preceding "preview" call, matching the
    import wizard's step 3 in master prompt §14.
-4. Look more closely at the `exceljs` → `uuid` advisory now that
+5. Look more closely at the `exceljs` → `uuid` advisory now that
    `import-engine` genuinely parses untrusted uploads (see Known Issues) —
    confirm whether `exceljs`'s internal `uuid` usage ever hits the
    vulnerable buffer-bounds code path, or upgrade past it.
-5. Before relying on the seeded NIST CSF 2.0 data for anything
+6. Before relying on the seeded NIST CSF 2.0 data for anything
    compliance-facing, diff `packages/database/prisma/fixtures/nist-csf-2.0.json`
    against the official NIST CSWP 29 publication — it was reproduced from
    training-data knowledge, not transcribed from the source document (see
    Phase 5 notes above)
-6. Wire the Next.js frontend to the new `/api/v1/auth/login`,
-   `/api/v1/users`, `/api/v1/frameworks`, `/api/v1/assessments` (including
-   `/results`, `/gaps`, `/import`), and `/api/v1/dashboard/*` endpoints
-   (login page, session/token storage, a framework navigation view, an
-   assessment-taking flow, the Excel import wizard, and now the actual
-   dashboard views this phase's endpoints feed)
 7. Fix the repo-wide ESLint plugin gap (see Known Issues)
 
 ## Contact & Questions
