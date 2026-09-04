@@ -4,8 +4,8 @@ Last Updated: 2026-09-04
 
 ## Overall Progress
 
-**Phase**: 8 / 17
-**Completion**: ~47%
+**Phase**: 9 / 17
+**Completion**: ~53%
 
 ## Completed ✅
 
@@ -321,6 +321,63 @@ Last Updated: 2026-09-04
       weren't being imported at all, only clean `valid` ones — fixed
       before commit and locked in with new tests.
 
+### Phase 9: Dashboard APIs
+- [x] `DashboardModule` (`apps/api/src/dashboard`) — six organisation-scoped
+      GET endpoints, all thin wrappers over `@cmmp/scoring-engine` and the
+      existing `AssessmentsService.getResults` rather than new scoring
+      logic (per master prompt §33, scoring stays in one place). Every
+      endpoint requires `organisationId`; `assessmentId` is optional and
+      defaults to the organisation's most recently *submitted* assessment
+      (falling back to the most recently updated one of any status if none
+      is submitted yet).
+- [x] Maturity overview endpoint (`GET /dashboard/maturity`) — shaped to
+      match `@cmmp/shared`'s pre-existing `MaturityOverview` interface
+      from Phase 1's scaffolding (overallMaturity, targetMaturity,
+      maturityGap, completionPercentage, criticalGaps, highRiskFindings,
+      openRemediationActions) instead of inventing a new response shape
+- [x] Function maturity endpoint (`GET /dashboard/functions`) — matches
+      `@cmmp/shared`'s `FunctionMaturity` interface. `completionPercentage`
+      is computed per function from real question totals (not just
+      answered-item counts), `highRiskGaps` counts CRITICAL/HIGH items
+      per function. `trend` is only computed when the caller passes an
+      explicit `compareToAssessmentId` — which earlier assessment counts
+      as "the" comparison point is a judgement call left to the caller
+      rather than auto-detected.
+- [x] Gap analysis endpoint (`GET /dashboard/gaps`) — matches
+      `@cmmp/shared`'s `GapAnalysis` interface: function-level gaps sorted
+      descending, each with the worst `riskLevel` among that function's
+      items and an `affectedControls` count
+- [x] Risk summary endpoint (`GET /dashboard/risks`) — open-risk counts by
+      `riskLevel` plus the top N by inherent risk score
+- [x] Roadmap status endpoint (`GET /dashboard/roadmap`) — remediation
+      initiatives grouped into the master prompt §21 timeline buckets
+      (Immediate 0-3mo / Short Term 3-6mo / Medium Term 6-12mo / Strategic
+      12-36mo / Unscheduled) plus a status breakdown and an overdue count
+- [x] Executive dashboard endpoint (`GET /dashboard/executive`, master
+      prompt §23) — composes the above into one response: enterprise/
+      target maturity, top 5 risks, top 5 maturity gaps, roadmap status,
+      overdue high-risk actions, and a real `maturityTrend` built from
+      every `AssessmentHistory` snapshot across the organisation's
+      assessments. **Deliberately omitted**: "Top Improving/Deteriorating
+      Capabilities" — `SecurityCapability` only stores a current snapshot,
+      not a time series, so there's no honest way to compute a trend for
+      it without a schema change; rather than fake one from a single
+      point-in-time gap, it's left out and noted here.
+- [x] Unit tests (`dashboard.service.spec.ts` — 10 tests): tenant/org
+      isolation via `resolveAssessment`, the submitted-vs-fallback
+      assessment selection, per-function completion math, gap sorting and
+      risk-level/affected-control aggregation, risk-level counting,
+      timeline bucketing (including an overdue item correctly landing in
+      *both* "overdue" and "immediate"), and the executive composition
+- [x] Verified end-to-end against the live PostgreSQL instance and the
+      real 106-item seeded assessment: `functions` showed 100% completion
+      and correct `affectedControls` counts per function matching the
+      known NIST CSF 2.0 category counts (31/21/22/11/13/8); `gaps` sorted
+      correctly by severity; `roadmap` bucketed the seed's 6 initiatives
+      correctly (2 immediate/3 short/1 medium); `executive` composed
+      everything including real cross-assessment trend history; a request
+      missing `organisationId` correctly 400s
+
 ## Known Issues 🐛
 
 - Root `.eslintrc.json` references `eslint-plugin-security`,
@@ -344,14 +401,6 @@ Last Updated: 2026-09-04
   runtime, this is purely a type-declaration mismatch.
 
 ## Not Started ⭕
-
-### Phase 9: Dashboard APIs
-- [ ] Executive dashboard endpoint
-- [ ] Maturity overview endpoint
-- [ ] Function maturity endpoint
-- [ ] Gap analysis endpoint
-- [ ] Risk summary endpoint
-- [ ] Roadmap status endpoint
 
 ### Phase 10: Dashboard UI
 - [ ] Landing/home dashboard
@@ -587,34 +636,38 @@ they've been observed passing on an actual PR.
 
 ## Next Steps
 
-1. **Begin Phase 9**: Dashboard APIs — executive/maturity/function/gap/risk/
-   roadmap summary endpoints, all of which can now be built as thin
-   wrappers over `@cmmp/scoring-engine` (`scoreFramework`, `analyzeGaps`,
-   `combineScores` for organisation-wide rollups) rather than new scoring
-   logic. `GET /assessments/:id/results` and `/gaps` (Phase 7) already
-   cover the per-assessment case; Phase 9 is mainly about an
-   organisation-wide view across multiple assessments and shaping the
-   response for the dashboard layouts in master prompt §21-23/§38.
-2. Wire `POST /assessments/:id/import`'s `columnMapping` override — the
+1. **Begin Phase 10**: Dashboard UI — the Next.js frontend work every prior
+   phase has deferred; `/dashboard/*` now has real endpoints to build the
+   KPI cards, radar chart, gap table, and roadmap Gantt view against
+   (master prompt §21-23/§38)
+2. **Multi-assessment rollup**: every `/dashboard/*` endpoint currently
+   scopes to *one* assessment (the org's latest submitted one, or an
+   explicit `assessmentId`) — a real "organisation-wide" score across
+   several concurrently-active assessments (different frameworks, business
+   units) would need `@cmmp/scoring-engine`'s `combineScores`, which
+   exists but isn't wired into the dashboard yet. Revisit if/when an org
+   genuinely has more than one active assessment at a time.
+3. Wire `POST /assessments/:id/import`'s `columnMapping` override — the
    library (`ImportOptions.columnMapping`) already supports it, but the
    endpoint only auto-maps columns today; needs a way to accept a manual
    mapping as a form field or a preceding "preview" call, matching the
    import wizard's step 3 in master prompt §14.
-3. Look more closely at the `exceljs` → `uuid` advisory now that
+4. Look more closely at the `exceljs` → `uuid` advisory now that
    `import-engine` genuinely parses untrusted uploads (see Known Issues) —
    confirm whether `exceljs`'s internal `uuid` usage ever hits the
    vulnerable buffer-bounds code path, or upgrade past it.
-4. Before relying on the seeded NIST CSF 2.0 data for anything
+5. Before relying on the seeded NIST CSF 2.0 data for anything
    compliance-facing, diff `packages/database/prisma/fixtures/nist-csf-2.0.json`
    against the official NIST CSWP 29 publication — it was reproduced from
    training-data knowledge, not transcribed from the source document (see
    Phase 5 notes above)
-5. Wire the Next.js frontend to the new `/api/v1/auth/login`,
-   `/api/v1/users`, `/api/v1/frameworks`, and `/api/v1/assessments`
-   (including `/results`, `/gaps`, and `/import`) endpoints (login page,
-   session/token storage, a framework navigation view, an assessment-
-   taking flow, a results/gap-analysis view, the Excel import wizard)
-6. Fix the repo-wide ESLint plugin gap (see Known Issues)
+6. Wire the Next.js frontend to the new `/api/v1/auth/login`,
+   `/api/v1/users`, `/api/v1/frameworks`, `/api/v1/assessments` (including
+   `/results`, `/gaps`, `/import`), and `/api/v1/dashboard/*` endpoints
+   (login page, session/token storage, a framework navigation view, an
+   assessment-taking flow, the Excel import wizard, and now the actual
+   dashboard views this phase's endpoints feed)
+7. Fix the repo-wide ESLint plugin gap (see Known Issues)
 
 ## Contact & Questions
 
