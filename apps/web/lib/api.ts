@@ -62,6 +62,58 @@ export interface AssessmentSummary {
   _count: { items: number };
 }
 
+export interface AssessmentItemRecord {
+  id: string;
+  questionId: string;
+  currentMaturity: string;
+  targetMaturity: string;
+}
+
+/** GET /assessments/:id — note `items` here (every recorded response), not the list endpoint's `_count`. */
+export interface AssessmentDetail {
+  id: string;
+  name: string;
+  status: string;
+  completionPercentage: number;
+  organisationId: string;
+  template: { id: string; frameworkId: string; name: string } | null;
+  items: AssessmentItemRecord[];
+}
+
+export interface FrameworkQuestion {
+  id: string;
+  question: string;
+  guidance: string | null;
+}
+
+export interface FrameworkTreeSubcategory {
+  id: string;
+  code: string;
+  name: string;
+  assessmentQuestions: FrameworkQuestion[];
+}
+
+export interface FrameworkTreeCategory {
+  id: string;
+  code: string;
+  name: string;
+  subcategories: FrameworkTreeSubcategory[];
+}
+
+export interface FrameworkTreeFunction {
+  id: string;
+  code: string;
+  name: string;
+  categories: FrameworkTreeCategory[];
+}
+
+/** GET /frameworks/:id — the raw nested tree (every question included), unlike the flattened NavigationNode[] the /navigation endpoint returns. */
+export interface FrameworkTree {
+  id: string;
+  name: string;
+  functions: FrameworkTreeFunction[];
+}
+
 export interface MaturityScore {
   current: number;
   target: number;
@@ -186,6 +238,32 @@ export function listAssessments(accessToken: string, organisationId?: string) {
 
 export function getAssessmentResults(accessToken: string, assessmentId: string) {
   return apiFetch<AssessmentResults>(`/assessments/${assessmentId}/results`, accessToken);
+}
+
+export function getAssessment(accessToken: string, assessmentId: string) {
+  return apiFetch<AssessmentDetail>(`/assessments/${assessmentId}`, accessToken);
+}
+
+/** Ignores the nested assessmentQuestions[].guidance/examples/referenceLinks fields this doesn't need — GET /frameworks/:id returns the full raw tree either way. */
+export function getFrameworkTree(accessToken: string, frameworkId: string) {
+  return apiFetch<FrameworkTree>(`/frameworks/${frameworkId}`, accessToken);
+}
+
+export interface UpsertAssessmentItemInput {
+  questionId: string;
+  currentMaturity?: string;
+  targetMaturity?: string;
+}
+
+export function upsertAssessmentItem(accessToken: string, assessmentId: string, input: UpsertAssessmentItemInput) {
+  return apiFetch<AssessmentItemRecord>(`/assessments/${assessmentId}/items`, accessToken, {
+    method: 'POST',
+    body: JSON.stringify(input),
+  });
+}
+
+export function submitAssessment(accessToken: string, assessmentId: string) {
+  return apiFetch<AssessmentDetail>(`/assessments/${assessmentId}/submit`, accessToken, { method: 'POST' });
 }
 
 export function getDashboardMaturity(accessToken: string, organisationId: string, assessmentId?: string) {

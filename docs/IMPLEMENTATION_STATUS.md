@@ -1801,6 +1801,51 @@ that exists if you type the URL.
 - Full verification: `npx turbo run type-check build --filter=@cmmp/web`
   clean, `npm run lint` clean, plus the live browser verification above.
 
+### Frontend: assessment-taking flow
+Second of the Phase 10 frontend follow-ups. Two new pages:
+`/assessments` (a list over `GET /assessments`, status badges, links
+into each) and `/assessments/[id]/items` — the actual response-recording
+UI, backed by a new client-interactive `AssessmentItemsForm` component.
+- New `apps/web/lib/api.ts` calls/types: `getAssessment` (assessment
+  detail, `AssessmentDetail`/`AssessmentItemRecord`), `getFrameworkTree`
+  (the raw nested tree with every `AssessmentQuestion`, distinct from
+  the flattened `NavigationNode[]` the `/navigation` endpoint returns —
+  needed here because taking an assessment means answering actual
+  questions, not just browsing the hierarchy), `upsertAssessmentItem`,
+  `submitAssessment`.
+- One row per question (grouped by function → category → subcategory),
+  two `<select>`s (Current/Target maturity). Each change auto-saves
+  immediately via `POST /assessments/:id/items` — no separate "Save"
+  step — with a small inline Saving…/Saved/Failed indicator per row,
+  and a live "N of *total* questions answered" counter. A submitted (or
+  otherwise non-`DRAFT`/`IN_PROGRESS`) assessment renders every
+  dropdown disabled with a "Read-only" badge and no Submit button,
+  matching the API's own `EDITABLE_STATUSES` gate rather than only
+  relying on the API to reject the write after the fact.
+- **Deliberately scoped to current/target maturity only for this first
+  cut, not silently incomplete**: `UpsertAssessmentItemDto` also
+  accepts `rationale`/`evidence`/`assessorComments`/`owner*`/
+  `remediationDueDate`/`riskLevel`/`businessCriticality`/`controlStatus`
+  — none of those have UI yet. Revisit if/when the extended metadata
+  actually needs entering through this flow rather than only via
+  import or direct API access.
+- Verified live via a real signed-in Playwright browser session end to
+  end: created a real `DRAFT` assessment, opened its items page,
+  confirmed all 106 real seeded questions render grouped by function
+  with correct codes/text, answered one question's Current/Target
+  selects and confirmed the inline "Saved" indicator plus the counter
+  moving from "0 of 106" to "1 of 106", confirmed the status line
+  itself flipped from `DRAFT` to `IN_PROGRESS` after that first answer
+  (matching `AssessmentsService`'s own documented auto-transition),
+  clicked Submit and confirmed a real redirect to `/assessments`,
+  reloaded the items page and confirmed it now renders fully read-only
+  (`SUBMITTED`, every select disabled, no Submit button) — not assumed
+  from the API contract alone. Test assessment soft-deleted afterward.
+- Full verification: `npx turbo run type-check test build` (27/27),
+  `npm run lint` clean, plus the live browser verification above (a
+  full create → answer → submit → read-only round trip against a real
+  server and database).
+
 ## Next Steps
 
 What's left, roughly in priority order. Every item from
@@ -1828,12 +1873,15 @@ punt on the rest pending dedicated major-version-bump work):
    suite (the dependency and a `test:e2e` script exist, scaffolded since
    Phase 1, but no spec file has ever been written).
 3. Remaining frontend follow-ups from Phase 10 (the framework
-   navigation view is done — see Post-Phase-17 Feature Work above): an
-   assessment-taking flow (`/assessments/:id/items`), a risk register view
-   (`/risks` now has a real API), the Excel import wizard's upload/
-   preview/column-mapping steps, and extracting the dashboard components
-   into `@cmmp/ui` if/when a second app or page needs them (not worth the
-   abstraction for one dashboard page yet)
+   navigation view and the assessment-taking flow are both done — see
+   Post-Phase-17 Feature Work above): a risk register view (`/risks`
+   now has a real API), the Excel import wizard's upload/preview/
+   column-mapping steps, and extracting the dashboard components into
+   `@cmmp/ui` if/when a second app or page needs them (not worth the
+   abstraction for one dashboard page yet). The assessment-taking flow
+   also only covers current/target maturity for now — the extended
+   per-item metadata fields (`rationale`/`evidence`/`owner*`/etc.) have
+   no UI yet, noted in that section's own writeup.
 4. Wire `POST /assessments/:id/import`'s `columnMapping` override — the
    library (`ImportOptions.columnMapping`) already supports it, but the
    endpoint only auto-maps columns today; needs a way to accept a manual
