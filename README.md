@@ -193,7 +193,8 @@ NestJS backend API with:
   OIDC/SSO integration)
 - Business logic delegating to `@cmmp/scoring-engine`/`@cmmp/framework-engine`
 - Integration with Prisma ORM
-- No rate limiting yet (see `docs/security-architecture.md`)
+- Rate limiting (`@nestjs/throttler`) — app-wide default, with a much
+  tighter limit on login specifically (see `docs/security-architecture.md`)
 
 ### `/packages/database`
 Prisma-managed database layer:
@@ -293,9 +294,9 @@ controller/role list, or run the API with `ENABLE_SWAGGER=true` and open
 
 See `docs/security-architecture.md` for the full picture, including a
 STRIDE threat model and an honest list of what's implemented versus
-declared-but-not-built (notably: **no rate limiting exists anywhere**,
-including on login — the single highest-priority open gap). What's
-real today:
+declared-but-not-built (the top remaining gap: `JWT_SECRET` still falls
+back to a hard-coded value if unset, rather than refusing to start).
+What's real today:
 
 - Server-side tenant isolation on every query (not client-trusted)
 - Role-based access control, enforced per-route
@@ -304,6 +305,8 @@ real today:
 - Server-side input validation (`class-validator` DTOs, `whitelist: true`)
 - Formula/CSV injection defense on spreadsheet import
 - Append-only audit logging with credential redaction
+- Rate limiting (`@nestjs/throttler`), with a tight 5/min/IP limit on
+  `POST /auth/login` specifically
 
 ### Security Scanning
 

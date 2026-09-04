@@ -1,5 +1,6 @@
 import { Controller, Post, Body, Get, UseGuards, Req } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
+import { Throttle } from '@nestjs/throttler';
 import type { Request } from 'express';
 
 import { AuditLog } from '../audit/decorators/audit-log.decorator';
@@ -14,7 +15,11 @@ import type { AuthenticatedRequest } from './types/authenticated-request';
 export class AuthController {
   constructor(private authService: AuthService) {}
 
+  // 5 attempts/minute/IP — much tighter than the app-wide default. Login is the one endpoint an
+  // attacker can hit with zero prior authentication, so it's the one that actually needs a
+  // brute-force-resistant limit rather than just general abuse protection.
   @Post('login')
+  @Throttle({ default: { limit: 5, ttl: 60_000 } })
   @AuditLog('LOGIN', 'User')
   async login(@Body() loginDto: LoginDto) {
     return this.authService.login(loginDto);

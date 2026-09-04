@@ -97,9 +97,10 @@ actually implemented today:
   set it explicitly.
 - **Audit Logging**: Sensitive actions logged to an append-only
   `AuditEvent` table; credentials are redacted before being persisted
-- **Rate Limiting**: **Not implemented.** `.env.example` declares
-  `ENABLE_RATE_LIMITING` and related variables; nothing in the codebase
-  reads them. No endpoint, including login, is rate-limited.
+- **Rate Limiting**: `@nestjs/throttler`, app-wide default plus a
+  tighter 5-attempts/minute/IP limit on `POST /auth/login` specifically.
+  IP-based, so it doesn't stop a distributed/multi-IP attacker — see
+  `docs/security-architecture.md`.
 - **Input Validation**: Server-side validation via `class-validator` DTOs
 - **Output Encoding**: Next.js/React's default JSX escaping; no custom
   output-encoding layer beyond that

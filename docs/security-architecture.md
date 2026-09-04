@@ -22,18 +22,13 @@ design.
 | **Security response headers** | `main.ts`: `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, `X-XSS-Protection: 1; mode=block` on every response | Manual inspection of `main.ts`; not asserted by a test |
 | **CORS** | Restricted to a single configured origin (`CORS_ORIGIN` env var, defaults to `http://localhost:3000`), not `*` | Manual inspection of `main.ts` |
 | **Soft delete** | `deletedAt` timestamp instead of hard `DELETE` across tenant-scoped resources — every read filters `deletedAt: null` | Consistent pattern, unit-tested per-resource (e.g. `risks.service.spec.ts`'s "soft-deletes rather than hard-deletes") |
+| **Rate limiting** | `@nestjs/throttler`, global `APP_GUARD`. App-wide default (100 req/15min/IP, configurable via `RATE_LIMIT_MAX_REQUESTS`/`RATE_LIMIT_WINDOW_MS`) plus a much tighter override on `POST /auth/login` specifically (5/min/IP via `@Throttle()`) — that's the one endpoint reachable with zero prior authentication, so it's the one that needs brute-force resistance rather than just general abuse protection. `GET /health` is exempted (`@SkipThrottle()`) since it's designed for frequent automated polling. `ENABLE_RATE_LIMITING` in `.env.example` is *not* wired as an on/off toggle — rate limiting is unconditionally on, a deliberate choice for a security product (opt-out is the wrong default here) | `apps/api/test/rate-limit.e2e-spec.ts` — 5 login attempts succeed (as 401s, wrong password), the 6th gets a real 429 with a `Retry-After` header even when the credentials on that 6th attempt are correct; `/health` confirmed still reachable after login's limit is exhausted |
 
 ## Security Gaps (Honestly, Not Implemented)
 
 Declared somewhere (an env var, an earlier draft of `docs/architecture.md`,
 `SECURITY.md`'s aspirational language) but not actually built:
 
-- **Rate limiting** — `.env.example` declares `ENABLE_RATE_LIMITING`,
-  `RATE_LIMIT_WINDOW_MS`, `RATE_LIMIT_MAX_REQUESTS`. Nothing in
-  `apps/api/src` reads any of them (`grep -rn "RATE_LIMIT" apps/api/src`
-  returns nothing). There is no rate limiting on any endpoint, including
-  `POST /auth/login` — a real gap for a login endpoint specifically
-  (brute-force exposure).
 - **Encryption at rest** — no application-level field encryption; relies
   entirely on whatever the Postgres host provides. Nothing wrong with
   that as a starting point, but it's not "AES-256 for sensitive fields"
@@ -65,7 +60,7 @@ doesn't exist).
 
 | Threat | Mitigation | Residual risk |
 |---|---|---|
-| Credential stuffing / password guessing against `POST /auth/login` | bcrypt (slow hash) makes offline cracking of a stolen hash expensive | **No rate limiting on login** — an attacker can attempt unlimited password guesses online. This is the single highest-priority gap in this section. |
+| Credential stuffing / password guessing against `POST /auth/login` | bcrypt (slow hash) makes offline cracking of a stolen hash expensive; `@nestjs/throttler` caps login at 5 attempts/minute/IP (see Security Controls above) | IP-based limiting is bypassable by an attacker rotating source IPs (a botnet, a proxy pool) — this stops casual/single-source brute force, not a distributed one. No account-level lockout exists as a second layer. |
 | Forged JWT | HMAC-signed (`@nestjs/jwt`), verified by `JwtStrategy` on every request | `JWT_SECRET` has a hard-coded fallback (`auth.module.ts`) if the env var isn't set — a deployment that forgets to set it uses a secret visible in the public source tree. Fail-closed instead (refuse to start) is the fix, not yet made. |
 | Session fixation / token theft | Bearer token over HTTPS (in a real deployment — this sandbox runs plain HTTP locally) | No token binding to IP/user-agent; a stolen token works from anywhere until expiry. Standard JWT trade-off, not unique to this system, but worth naming. |
 
@@ -100,7 +95,7 @@ doesn't exist).
 | Threat | Mitigation | Residual risk |
 |---|---|---|
 | Unbounded file upload | 10MB size cap, 20,000 row cap (`file-guard.ts`) | A zip bomb inside a valid-looking `.xlsx` isn't fully mitigated — `exceljs` doesn't expose a cheap "inspect before decompressing" API, so the compressed-size cap is the practical defense today, not a true streaming byte-budget decompressor. Documented as a known limitation in `import-engine`'s own code comments since Phase 8. |
-| Login brute-force as a resource-exhaustion vector | None | Same gap as the Spoofing section — no rate limiting anywhere. |
+| Login brute-force as a resource-exhaustion vector | 5/min/IP throttle on `POST /auth/login` | Same distributed-source caveat as the Spoofing section. |
 | Unbounded query results | Most list endpoints don't paginate (`GET /risks`, `GET /remediation-initiatives` return everything matching the filter); `GET /audit-events` does paginate (`limit`/`offset`, default 50) | A tenant with a very large Risk/RemediationInitiative table could produce a large, slow response. Not yet a problem at demo-data scale (106 seeded assessment items), worth revisiting before real production data volumes. |
 
 ### Elevation of Privilege
@@ -121,18 +116,19 @@ doesn't exist).
 | A04 | Insecure Design | Tenant isolation and RBAC are structural (every service follows the same validated-scope pattern), not bolted on per-endpoint |
 | A05 | Security Misconfiguration | `JWT_SECRET` fallback (see Spoofing) is the concrete instance of this category in the current codebase |
 | A06 | Vulnerable & Outdated Components | Dependabot + `npm audit --audit-level=high` in CI (Phase 16); GitHub's own banner currently shows 72 open advisories (1 critical, 25 high, 37 moderate, 9 low) repo-wide, un-triaged as of this writing |
-| A07 | Identification & Authentication Failures | No MFA, no rate limiting on login, no session/token revocation on logout — see Security Gaps above |
+| A07 | Identification & Authentication Failures | Login is now rate-limited (5/min/IP); no MFA and no session/token revocation on logout remain open — see Security Gaps above |
 | A08 | Software & Data Integrity Failures | `package-lock.json` committed (reproducible installs); no code-signing or SLSA-style provenance |
 | A09 | Security Logging & Monitoring Failures | Audit logging exists and is append-only; no alerting/monitoring layer on top of it (no SIEM integration, no anomaly detection) |
 | A10 | Server-Side Request Forgery | Not directly applicable — no endpoint accepts and fetches an arbitrary user-supplied URL |
 
 ## Priority Order for Closing Gaps
 
-If picking one thing at a time, in order of actual risk:
+If picking one thing at a time, in order of actual risk. Rate limiting
+on `/auth/login` was #1 here and is now done (`@nestjs/throttler`, 5/min
+/IP, `apps/api/test/rate-limit.e2e-spec.ts`) — struck rather than
+deleted, so the priority history stays visible:
 
-1. **Rate limiting on `/auth/login`** — the highest-likelihood,
-   highest-impact gap (credential stuffing against a live login endpoint
-   with zero throttling).
+1. ~~Rate limiting on `/auth/login`~~ — done.
 2. **Fail-closed on missing `JWT_SECRET`** — refuse to start rather than
    fall back to a value visible in the public repository.
 3. **Token revocation on logout** — even a simple in-memory/Redis

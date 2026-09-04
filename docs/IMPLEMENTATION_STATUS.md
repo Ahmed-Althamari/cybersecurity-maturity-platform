@@ -1,11 +1,12 @@
 # CMMP Implementation Status
 
-Last Updated: 2026-09-04 (Phase 17)
+Last Updated: 2026-09-04 (Phase 17 + post-Phase-17 hardening)
 
 ## Overall Progress
 
 **Phase**: 17 / 17 — all 17 phases from the master prompt have a
-Completed section below.
+Completed section below, plus a "Post-Phase-17 Hardening" section for
+security-gap work done after the master prompt's own scope was covered.
 **Completion**: ~95%. Not 100%: Phase 15's Docker images have still
 never actually been built or run (see that phase's own caveat, restated
 in `docs/DEPLOYMENT.md`), `apps/web` has zero automated tests, and a
@@ -1228,10 +1229,48 @@ sandbox before being pushed. CodeQL/Gitleaks/audit/DAST/Trivy run and
 report for real visibility but aren't blocking yet; promote them once
 they've been observed passing on an actual PR.
 
+## Post-Phase-17 Hardening
+
+Work done after all 17 master-prompt phases were complete, picking up
+the top item from `docs/security-architecture.md`'s own priority list
+rather than inventing new scope.
+
+### Rate limiting on `POST /auth/login`
+`docs/security-architecture.md` named this the single highest-priority
+open gap: a live login endpoint reachable with zero prior authentication
+and zero throttling. Fixed:
+- `@nestjs/throttler`, registered globally (`APP_GUARD`) with an
+  app-wide default (100 req/15min/IP, configurable via
+  `RATE_LIMIT_MAX_REQUESTS`/`RATE_LIMIT_WINDOW_MS` — both were already
+  declared in `.env.example` and unused until now)
+- `POST /auth/login` overrides that default with a much tighter 5
+  attempts/minute/IP via `@Throttle()` — the one endpoint that actually
+  needs brute-force resistance, not just general abuse protection
+- `GET /health` opts out entirely (`@SkipThrottle()`) since it's
+  designed for frequent automated polling, not user traffic
+- `ENABLE_RATE_LIMITING` is deliberately **not** wired as an on/off
+  toggle — rate limiting is unconditionally on; a security product
+  shouldn't default to opt-out on this
+- New `apps/api/test/rate-limit.e2e-spec.ts` — its own unthrottled app
+  instance (every other e2e suite overrides `ThrottlerGuard` to always
+  allow, since they each log in several times per file against
+  fixtures/roles and aren't testing rate limiting), verifying 5 attempts
+  succeed and the 6th gets a real 429 with `Retry-After`, even when that
+  6th attempt uses correct credentials
+- Verified live before writing the regression test: 7 rapid login
+  attempts against a running server returned 401/401/401/401/401/429/429,
+  and `/health` stayed reachable throughout
+- `docs/security-architecture.md`, `SECURITY.md`, `README.md`, and
+  `docs/architecture.md` all updated to move this from "gap" to
+  "implemented" rather than leaving stale claims in place
+- Full verification re-run after this change: `npx turbo run type-check
+  test build` (27/27), `npm run test:e2e` (19/19, including the 2 new
+  rate-limit tests), `npm run lint` clean
+
 ## Next Steps
 
-All 17 phases now have a Completed section above. What's left is real
-work within phases already marked done, roughly in priority order:
+What's left, roughly in priority order (Docker verification and rate
+limiting were the top two open items; rate limiting is now done above):
 
 1. **Actually build and run Phase 15's Docker images.** `docker compose
    build && docker compose up` somewhere with a working daemon (this
@@ -1245,49 +1284,45 @@ work within phases already marked done, roughly in priority order:
    GitHub Actions runner (which does have a working daemon) — worth
    watching for that specifically, since it's the first real
    verification those Dockerfiles will get.
-2. **Rate limiting on `POST /auth/login`.** The single highest-priority
-   security gap identified in `docs/security-architecture.md` — a live
-   login endpoint with zero throttling. `ENABLE_RATE_LIMITING` is
-   already declared in `.env.example`; nothing reads it yet.
-3. **Fail closed on a missing `JWT_SECRET`** (refuse to start rather
+2. **Fail closed on a missing `JWT_SECRET`** (refuse to start rather
    than fall back to the hard-coded value in `auth.module.ts`) and
    **implement real token revocation on logout** (currently a no-op) —
    both called out in `docs/security-architecture.md`'s priority list.
-4. Frontend test coverage — zero automated tests in `apps/web` today.
+3. Frontend test coverage — zero automated tests in `apps/web` today.
    React Testing Library component tests and a persisted Playwright E2E
    suite (the dependency and a `test:e2e` script exist, scaffolded since
    Phase 1, but no spec file has ever been written).
-5. **Multi-assessment rollup**: every `/dashboard/*` endpoint currently
+4. **Multi-assessment rollup**: every `/dashboard/*` endpoint currently
    scopes to *one* assessment (the org's latest submitted one, or an
    explicit `assessmentId`) — a real "organisation-wide" score across
    several concurrently-active assessments (different frameworks, business
    units) would need `@cmmp/scoring-engine`'s `combineScores`, which
    exists but isn't wired into the dashboard yet. Revisit if/when an org
    genuinely has more than one active assessment at a time.
-6. Frontend follow-ups from Phase 10: a framework navigation view, an
+5. Frontend follow-ups from Phase 10: a framework navigation view, an
    assessment-taking flow (`/assessments/:id/items`), a risk register view
    (`/risks` now has a real API), the Excel import wizard's upload/
    preview/column-mapping steps, and extracting the dashboard components
    into `@cmmp/ui` if/when a second app or page needs them (not worth the
    abstraction for one dashboard page yet)
-7. Wire `POST /assessments/:id/import`'s `columnMapping` override — the
+6. Wire `POST /assessments/:id/import`'s `columnMapping` override — the
    library (`ImportOptions.columnMapping`) already supports it, but the
    endpoint only auto-maps columns today; needs a way to accept a manual
    mapping as a form field or a preceding "preview" call, matching the
    import wizard's step 3 in master prompt §14.
-8. Look more closely at the `exceljs` → `uuid` advisory now that
+7. Look more closely at the `exceljs` → `uuid` advisory now that
    `import-engine` genuinely parses untrusted uploads (see Known Issues) —
    confirm whether `exceljs`'s internal `uuid` usage ever hits the
    vulnerable buffer-bounds code path, or upgrade past it.
-9. Before relying on the seeded NIST CSF 2.0 data for anything
+8. Before relying on the seeded NIST CSF 2.0 data for anything
    compliance-facing, diff `packages/database/prisma/fixtures/nist-csf-2.0.json`
    against the official NIST CSWP 29 publication — it was reproduced from
    training-data knowledge, not transcribed from the source document (see
    Phase 5 notes above)
-10. Triage the 72 existing Dependabot advisories GitHub surfaces on every
-    push (1 critical, 25 high, 37 moderate, 9 low) — noted several times
-    across this session but never actually investigated
-11. Extend the dedicated tenant-isolation e2e pattern
+9. Triage the 72 existing Dependabot advisories GitHub surfaces on every
+   push (1 critical, 25 high, 37 moderate, 9 low) — noted several times
+   across this session but never actually investigated
+10. Extend the dedicated tenant-isolation e2e pattern
     (`apps/api/test/tenant-isolation.e2e-spec.ts`) to `Assessment`,
     `Framework`, and `User` explicitly — today only `Risk` has a
     cross-tenant e2e test; the isolation *pattern* is structurally

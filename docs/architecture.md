@@ -391,10 +391,10 @@ scoping on every query, RBAC enforced by `RolesGuard` reading
 handler-level metadata, bcrypt password hashing, JWT bearer auth,
 immutable audit logging, formula/CSV-injection sanitisation on
 spreadsheet import, security response headers
-(`X-Content-Type-Options`, `X-Frame-Options`, `X-XSS-Protection`) and
-CORS restricted to a configured origin. What's *not* real yet despite
-being mentioned in earlier drafts of this doc or in `SECURITY.md`: no
-rate limiting (`ENABLE_RATE_LIMITING` is declared in `.env.example` but
-nothing in the code reads it), no encryption-at-rest configuration
+(`X-Content-Type-Options`, `X-Frame-Options`, `X-XSS-Protection`), CORS
+restricted to a configured origin, and rate limiting (`@nestjs/throttler`
+— an app-wide default plus a tight 5/min/IP limit on login specifically).
+What's *not* real yet despite being mentioned in earlier drafts of this
+doc or in `SECURITY.md`: no encryption-at-rest configuration
 beyond whatever the Postgres host provides, no WAF/ALB (there's no cloud
 deployment at all yet), no secrets manager integration (env vars only).

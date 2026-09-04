@@ -109,8 +109,8 @@ off these.
 ## Configuration
 
 Every variable the running system actually reads (not the full
-`.env.example`, which includes several declared-but-unused ones — SMTP,
-AWS, rate limiting — see `docs/security-architecture.md`'s Security Gaps
+`.env.example`, which includes several still-declared-but-unused ones —
+SMTP, AWS — see `docs/security-architecture.md`'s Security Gaps
 section):
 
 | Variable | Consumed by | Required? |
@@ -119,12 +119,18 @@ section):
 | `JWT_SECRET` | `apps/api/src/auth/auth.module.ts` | Falls back to a hard-coded value if unset — **set this explicitly in any real deployment**, the fallback is visible in the public source tree |
 | `CORS_ORIGIN` | `apps/api/src/main.ts` | Defaults to `http://localhost:3000` |
 | `PORT` | `apps/api/src/main.ts` | Defaults to `3001` |
+| `RATE_LIMIT_WINDOW_MS` | `apps/api/src/app.module.ts` (`ThrottlerModule`) | Defaults to `900000` (15 min) — the app-wide rate-limit window |
+| `RATE_LIMIT_MAX_REQUESTS` | `apps/api/src/app.module.ts` (`ThrottlerModule`) | Defaults to `100` — requests/IP allowed per window app-wide. Login has its own tighter, non-configurable 5/min/IP limit regardless of this value (`auth.controller.ts`) |
 | `ENABLE_SWAGGER` | `apps/api/src/main.ts` | Off unless exactly `"true"` — mounts `/api/docs` (Swagger UI) and `/api/docs-json` (raw OpenAPI). Off by default deliberately; see `docs/security-architecture.md` |
 | `NEXTAUTH_URL` | `apps/web` (NextAuth.js) | Yes |
 | `NEXTAUTH_SECRET` | `apps/web` (NextAuth.js) | Yes |
 | `API_URL` | `apps/web/pages/api/auth/[...nextauth].ts` | Server-side only — see Two Different API URLs above |
 | `NEXT_PUBLIC_API_URL` | `apps/web/lib/api.ts` | Client-side only — see above |
 | `DEMO_USER_PASSWORD` | `packages/database/prisma/seed.ts` | Optional override for the seeded demo users' shared password |
+
+`ENABLE_RATE_LIMITING` (also in `.env.example`) is **not** read as an
+on/off toggle — rate limiting is unconditionally enabled, a deliberate
+choice for a security product (opt-out is the wrong default here).
 
 ## Database Migrations
 
