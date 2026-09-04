@@ -307,6 +307,15 @@ async function main() {
   );
   console.log(`  ${nistFramework.functions.length} functions, ${categoryCount} categories, ${subcategoryCount} subcategories`);
 
+  console.log("Creating default assessment template...");
+  const nistTemplate = await prisma.assessmentTemplate.create({
+    data: {
+      frameworkId: nistFramework.id,
+      name: `${nistFramework.name} - Default Template`,
+      isDefault: true,
+    },
+  });
+
   // ============================================================================
   // ASSESSMENT
   // ============================================================================
@@ -350,6 +359,7 @@ async function main() {
     data: {
       tenantId: tenant.id,
       organisationId: organisation.id,
+      templateId: nistTemplate.id,
       name: "Q3 2026 Cybersecurity Assessment",
       description: "Initial comprehensive cybersecurity maturity assessment against NIST CSF 2.0",
       status: "SUBMITTED",
@@ -378,6 +388,16 @@ async function main() {
     include: { items: true },
   });
   console.log(`  ${assessment.items.length} assessment items created`);
+
+  await prisma.assessmentHistory.create({
+    data: {
+      assessmentId: assessment.id,
+      version: 1,
+      status: assessment.status,
+      currentMaturity: assessment.currentMaturity,
+      targetMaturity: assessment.targetMaturity,
+    },
+  });
 
   const itemsByQuestionId = new Map(assessment.items.map((item) => [item.questionId, item]));
   const plansWithItems = itemPlans

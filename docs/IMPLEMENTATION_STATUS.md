@@ -4,8 +4,8 @@ Last Updated: 2026-09-04
 
 ## Overall Progress
 
-**Phase**: 5 / 17
-**Completion**: ~29%
+**Phase**: 6 / 17
+**Completion**: ~35%
 
 ## Completed ✅
 
@@ -145,6 +145,51 @@ Last Updated: 2026-09-04
       DE 2/11, RS 4/13, RC 2/8), and exercised the framework navigation
       through the running API
 
+### Phase 6: Assessment Engine
+- [x] `AssessmentsModule` (`apps/api/src/assessments`) — `AssessmentsService`/
+      `AssessmentsController`, the first thing other than the seed script
+      that can write `Assessment`/`AssessmentItem`/`AssessmentHistory` rows
+- [x] Assessment creation (`POST /assessments`) — takes an `organisationId` +
+      `frameworkId` (both verified to belong to the caller's tenant), and
+      finds-or-creates that framework's default `AssessmentTemplate` rather
+      than requiring template management as its own separate step. Starts
+      in `DRAFT`.
+- [x] Assessment responses (`POST /assessments/:id/items`) — upserts one
+      `AssessmentItem` per question (unique on `assessmentId`+`questionId`).
+      Validates the question actually belongs to the assessment's own
+      framework (joined through subcategory → category → function →
+      framework) before writing, so a response can't reference another
+      framework's — or another tenant's — subcategory.
+- [x] Draft/submitted states — `DRAFT` auto-transitions to `IN_PROGRESS` on
+      the first recorded response; `POST /assessments/:id/submit` moves to
+      `SUBMITTED` (rejects an assessment with zero responses, and rejects
+      re-submitting one already `SUBMITTED`/`APPROVED`/`ARCHIVED`). Once
+      `SUBMITTED`, both `PATCH /assessments/:id` and `POST .../items` are
+      rejected with 409 — matching how the seed data's own `SUBMITTED`
+      assessment behaves when exercised through the API.
+      `completionPercentage` is recomputed on every item write as
+      `answered / totalQuestionsInFramework`.
+- [x] Assessment history tracking — `POST .../submit` appends a versioned
+      `AssessmentHistory` snapshot (`GET /assessments/:id/history` lists
+      them, newest first). The seed script's own demo assessment now gets
+      the same treatment (version 1) instead of being `SUBMITTED` with no
+      history, and is linked to a real `AssessmentTemplate` for the first
+      time (previously `templateId` was left null).
+- [x] Deliberately NOT computed here: `currentMaturity`/`targetMaturity`/
+      `maturityGap` on `Assessment` stay whatever they were (null for a
+      freshly created one) — the master prompt calls scoring out as its
+      own "standalone scoring service" (§33), so those numbers are Phase
+      7's job, not folded into the response-recording workflow.
+- [x] Unit tests (`assessments.service.spec.ts` — 17 tests): tenant
+      isolation, template reuse-vs-creation, every status-transition guard,
+      the cross-framework question rejection, and history versioning
+      (including the "no history yet" starting-at-1 case)
+- [x] Verified end-to-end against the live PostgreSQL instance: created an
+      assessment via the API, hit the cross-framework-question 400, wrote a
+      real response (confirmed the DRAFT→IN_PROGRESS transition and
+      `completionPercentage`), submitted it, confirmed the history entry,
+      and confirmed editing after submit 409s
+
 ## Known Issues 🐛
 
 - Root `.eslintrc.json` references `eslint-plugin-security`,
@@ -161,13 +206,6 @@ Last Updated: 2026-09-04
   binary; `packages/database`'s own `build` script only runs `tsc`.
 
 ## Not Started ⭕
-
-### Phase 6: Assessment Engine
-- [ ] Assessment model
-- [ ] Assessment creation
-- [ ] Assessment responses
-- [ ] Assessment history tracking
-- [ ] Draft/submitted states
 
 ### Phase 7: Scoring Engine
 - [ ] Maturity level definitions
@@ -417,26 +455,29 @@ they've been observed passing on an actual PR.
 
 ## Next Steps
 
-1. **Begin Phase 6**: Assessment Engine — a real `AssessmentsService`/
-   `AssessmentsController` (create, save-in-progress, submit) instead of the
-   seed script being the only thing that ever writes `AssessmentItem` rows;
-   reuse `@cmmp/framework-engine`'s `flattenFramework` to validate that an
-   incoming response's subcategory code actually belongs to the assessment's
-   framework
-2. **Phase 7** (Scoring Engine) follows naturally once Phase 6 exists: the
-   seed script's weighted-average/gap logic
-   (`FUNCTION_MATURITY_PROFILE`, `riskLevelFromGap` in `seed.ts`) is a
-   reasonable starting point to lift into `@cmmp/scoring-engine` as real,
-   tested logic rather than one-off seed math
-3. Before relying on the seeded NIST CSF 2.0 data for anything
+1. **Begin Phase 7**: Scoring Engine — a standalone `@cmmp/scoring-engine`
+   package (per master prompt §33, "Do not put scoring calculations
+   directly inside React components... create reusable functions and unit
+   tests") that computes item → category → function → framework →
+   organisation maturity, weighted maturity, gap, and trend from the
+   `AssessmentItem` rows Phase 6 now lets you write. The seed script's own
+   weighted-average/gap logic (`FUNCTION_MATURITY_PROFILE`,
+   `riskLevelFromGap` in `seed.ts`) is a reasonable starting point to lift
+   out as real, tested logic rather than one-off seed math. Once it exists,
+   wire `Assessment.currentMaturity`/`targetMaturity`/`maturityGap` to be
+   computed by it (on submit, and/or via a `GET /assessments/:id/results`
+   endpoint per master prompt §32) instead of staying null for
+   API-created assessments as they do today.
+2. Before relying on the seeded NIST CSF 2.0 data for anything
    compliance-facing, diff `packages/database/prisma/fixtures/nist-csf-2.0.json`
    against the official NIST CSWP 29 publication — it was reproduced from
    training-data knowledge, not transcribed from the source document (see
    Phase 5 notes above)
-4. Wire the Next.js frontend to the new `/api/v1/auth/login`,
-   `/api/v1/users`, and `/api/v1/frameworks` endpoints (login page,
-   session/token storage, a framework navigation view)
-5. Fix the repo-wide ESLint plugin gap (see Known Issues)
+3. Wire the Next.js frontend to the new `/api/v1/auth/login`,
+   `/api/v1/users`, `/api/v1/frameworks`, and `/api/v1/assessments`
+   endpoints (login page, session/token storage, a framework navigation
+   view, an assessment-taking flow)
+4. Fix the repo-wide ESLint plugin gap (see Known Issues)
 
 ## Contact & Questions
 
