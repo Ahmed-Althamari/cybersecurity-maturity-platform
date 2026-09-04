@@ -24,6 +24,7 @@ design.
 | **Soft delete** | `deletedAt` timestamp instead of hard `DELETE` across tenant-scoped resources — every read filters `deletedAt: null` | Consistent pattern, unit-tested per-resource (e.g. `risks.service.spec.ts`'s "soft-deletes rather than hard-deletes") |
 | **Rate limiting** | `@nestjs/throttler`, global `APP_GUARD`. App-wide default (100 req/15min/IP, configurable via `RATE_LIMIT_MAX_REQUESTS`/`RATE_LIMIT_WINDOW_MS`) plus a much tighter override on `POST /auth/login` specifically (5/min/IP via `@Throttle()`) — that's the one endpoint reachable with zero prior authentication, so it's the one that needs brute-force resistance rather than just general abuse protection. `GET /health` is exempted (`@SkipThrottle()`) since it's designed for frequent automated polling. `ENABLE_RATE_LIMITING` in `.env.example` is *not* wired as an on/off toggle — rate limiting is unconditionally on, a deliberate choice for a security product (opt-out is the wrong default here) | `apps/api/test/rate-limit.e2e-spec.ts` — 5 login attempts succeed (as 401s, wrong password), the 6th gets a real 429 with a `Retry-After` header even when the credentials on that 6th attempt are correct; `/health` confirmed still reachable after login's limit is exhausted |
 | **Token revocation on logout** | A `RevokedToken` table keyed by `jti` (a unique id added to every JWT at sign time). `POST /auth/logout` upserts a row for *that specific token's* `jti`; `JwtStrategy.validate()` checks it on every authenticated request and rejects with 401 if found. Per-token, not a global "sign out everywhere" — a different session for the same user (a different device, a different tab) is untouched. No pruning job exists for rows past their `expiresAt` yet (see Gaps) | `apps/api/test/token-revocation.e2e-spec.ts` — logs out one of two sessions and confirms the other still works, confirms the same token can't log out twice; `auth.service.spec.ts`/`jwt.strategy.spec.ts` unit-test the upsert and the revocation check directly |
+| **Refresh-token rotation** | `POST /auth/refresh` revokes the token it was called with (same `RevokedToken` mechanism as logout) the moment it mints the new one, so a leaked pre-refresh token can't go on being used indefinitely just because its holder refreshes | `apps/api/test/token-revocation.e2e-spec.ts` — the token used to call `/refresh` 401s immediately afterward while the newly minted one works; `auth.service.spec.ts` asserts the exact revocation call (correct `jti`/`expiresAt`) |
 
 ## Security Gaps (Honestly, Not Implemented)
 
@@ -42,10 +43,6 @@ Declared somewhere (an env var, an earlier draft of `docs/architecture.md`,
   front of. Not a gap in the running system so much as a gap that
   doesn't apply until a real deployment target exists.
 - **MFA** — not implemented. Single-factor password login only.
-- **Refresh-token rotation** — `POST /auth/refresh` mints a new token
-  (with its own fresh `jti`) but never revokes the token it was called
-  with, unlike logout. A leaked token stays valid until its natural
-  24h expiry even after its holder refreshes.
 - **No pruning job for expired `RevokedToken` rows** — a row only needs
   to exist until its `expiresAt` (after that the token would be
   rejected on expiry alone regardless), but nothing deletes old rows —
@@ -121,7 +118,7 @@ doesn't exist).
 | A04 | Insecure Design | Tenant isolation and RBAC are structural (every service follows the same validated-scope pattern), not bolted on per-endpoint |
 | A05 | Security Misconfiguration | `JWT_SECRET` now fails closed in production (see Spoofing); the residual case is a non-production environment mislabeled as such |
 | A06 | Vulnerable & Outdated Components | Dependabot + `npm audit --audit-level=high` in CI (Phase 16); GitHub's own banner currently shows 72 open advisories (1 critical, 25 high, 37 moderate, 9 low) repo-wide, un-triaged as of this writing |
-| A07 | Identification & Authentication Failures | Login is now rate-limited (5/min/IP) and logout now really revokes the token; no MFA and no refresh-token rotation remain open — see Security Gaps above |
+| A07 | Identification & Authentication Failures | Login is now rate-limited (5/min/IP), and logout and refresh both really revoke the token being replaced; no MFA remains open — see Security Gaps above |
 | A08 | Software & Data Integrity Failures | `package-lock.json` committed (reproducible installs); no code-signing or SLSA-style provenance |
 | A09 | Security Logging & Monitoring Failures | Audit logging exists and is append-only; no alerting/monitoring layer on top of it (no SIEM integration, no anomaly detection) |
 | A10 | Server-Side Request Forgery | Not directly applicable — no endpoint accepts and fetches an arbitrary user-supplied URL |
@@ -129,7 +126,7 @@ doesn't exist).
 ## Priority Order for Closing Gaps
 
 If picking one thing at a time, in order of actual risk. The first
-three are done — struck rather than deleted, so the priority history
+four are done — struck rather than deleted, so the priority history
 stays visible:
 
 1. ~~Rate limiting on `/auth/login`~~ — done (`@nestjs/throttler`,
@@ -142,9 +139,10 @@ stays visible:
    multiple instances, unlike an in-memory deny-list), checked in
    `JwtStrategy.validate()` on every request;
    `apps/api/test/token-revocation.e2e-spec.ts`.
-4. **Refresh-token rotation** — `POST /auth/refresh` should revoke the
-   token it was called with (reusing the same `RevokedToken` mechanism),
-   not just mint a new one alongside the still-valid old one.
+4. ~~Refresh-token rotation~~ — done: `refreshToken()` now revokes the
+   token it was called with (via the same `RevokedToken` mechanism)
+   right after minting the replacement, rather than leaving the old one
+   valid alongside the new one; `apps/api/test/token-revocation.e2e-spec.ts`.
 5. **Triage the 72 open Dependabot advisories.**
 6. **Extend the tenant-isolation e2e pattern** to `Assessment`,
    `Framework`, and `User` explicitly, rather than relying on the

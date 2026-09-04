@@ -197,12 +197,13 @@ table on every authenticated request, rejecting a revoked token with 401
 even though it hasn't naturally expired. This is per-token, not a global
 "sign out everywhere" — logging out of one device/tab never touches a
 different session's token, since each login mints its own `jti`.
-`POST /auth/refresh` mints a new token (its own fresh `jti`) but does
-**not** revoke the token it was called with — refresh-token rotation is
-a known, documented gap (`docs/security-architecture.md`). Revoked rows
-have no pruning job; they accumulate past their own `expiresAt` with no
-correctness impact (an expired token is rejected on expiry alone
-regardless) but a real operational one at scale.
+`POST /auth/refresh` mints a new token (its own fresh `jti`) **and**
+revokes the token it was called with, via the same mechanism — so a
+leaked pre-refresh token can't go on being used indefinitely just
+because its holder refreshes regularly. Revoked rows have no pruning
+job; they accumulate past their own `expiresAt` with no correctness
+impact (an expired token is rejected on expiry alone regardless) but a
+real operational one at scale.
 
 ### Tenant isolation
 

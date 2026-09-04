@@ -73,11 +73,10 @@ breadth of coverage, not "nothing left to do."
       still open)
 - [x] Token revocation — done in the Post-Phase-17 Hardening section
       below (`RevokedToken` table keyed by `jti`, checked on every
-      request in `JwtStrategy.validate()`). **Refresh-token rotation
-      specifically is still not done**: `POST /auth/refresh` mints a new
-      token with a fresh `jti` but never revokes the token it was called
-      with — the old token stays valid until it naturally expires, so a
-      leaked token isn't invalidated just because its holder refreshed.
+      request in `JwtStrategy.validate()`), including refresh-token
+      rotation: `POST /auth/refresh` revokes the token it was called
+      with the moment it mints the replacement, so a leaked token isn't
+      left valid just because its holder refreshed.
 - [x] End-to-end verification against a live database — this environment had
       PostgreSQL 16 available; ran the real migration, seeded the database,
       started the API, and confirmed `POST /api/v1/auth/login` issues a
@@ -1384,23 +1383,64 @@ avoided elsewhere):
   A07 row, and the Priority Order list — struck through as done, with
   refresh-token rotation added as the new next item), and this file's
   own Phase 3 checklist item.
-- **Known, documented gap left open on purpose**: `POST /auth/refresh`
-  mints a new token (its own fresh `jti`) but does **not** revoke the
-  token it was called with — refresh-token rotation is real future
-  work, not silently assumed done here (see Next Steps). There is also
-  no pruning job for `RevokedToken` rows past their own `expiresAt` —
-  no correctness impact (an expired token is rejected on expiry alone
-  regardless) but a real operational one at scale.
+- **Known, documented gap left open on purpose**: no pruning job exists
+  for `RevokedToken` rows past their own `expiresAt` — no correctness
+  impact (an expired token is rejected on expiry alone regardless) but
+  a real operational one at scale (see Next Steps).
 - Full verification re-run after this change: `npx turbo run
   type-check test build` (27/27), unit tests (116/116), `npm run
   test:e2e` (21/21) across two consecutive stable runs, `npm run lint`
   clean.
 
+### Refresh-token rotation
+Fourth item from `docs/security-architecture.md`'s priority list, and a
+direct follow-up to the token-revocation work above rather than new
+infrastructure: `POST /auth/refresh` minted a new token but never
+revoked the one it was called with, so a leaked pre-refresh token
+stayed valid until its natural 24h expiry regardless of how often its
+holder refreshed.
+- `AuthService.refreshToken(token)` now calls `this.logout(payload.jti,
+  new Date(payload.exp * 1000))` right after minting the replacement
+  token — reusing the exact same `RevokedToken` upsert path `POST
+  /auth/logout` already uses, not a second mechanism.
+- `validateToken()`'s return type was widened to
+  `JwtPayload & { exp: number }` (it already returned a real `exp`
+  claim at runtime via `jwtService.verify()`; the type just hadn't
+  declared it before, since nothing needed it until now).
+- New unit test (`auth.service.spec.ts`): asserts `refreshToken()`
+  calls `prisma.revokedToken.upsert` with the *original* token's exact
+  `jti`/`expiresAt`. Writing this test surfaced a real gap in the test
+  file's own setup: its hand-constructed `JwtService` had no
+  `signOptions.expiresIn`, so tokens minted in tests carried no `exp`
+  claim at all (`payload.exp` was `undefined`, producing an invalid
+  `Date { NaN }`) — production's `AuthModule` always configures
+  `expiresIn: '24h'`. Fixed by adding the same `signOptions` to the
+  test's `JwtService` construction, matching production rather than
+  masking the gap with a workaround in the app code.
+- New e2e test (`token-revocation.e2e-spec.ts`, third test in that
+  file): logs in, calls `/auth/refresh` with that token, confirms the
+  pre-refresh token now 401s on `/auth/me` while the freshly minted one
+  200s. That file's login budget is now 4 per run (2 + 1 + 1 across its
+  three tests), still comfortably under the real 5/60s throttle.
+- Verified live against a running server with a real seeded account:
+  login → `/auth/me` 200 → `/auth/refresh` → old token retried on
+  `/auth/me` → 401 → new token on `/auth/me` → 200; confirmed via
+  `psql` that the old token's exact `jti` (read back out of the login
+  response's own JWT) landed in `revoked_tokens` with a correct future
+  `expiresAt`.
+- Docs updated in the same pass: `docs/architecture.md`'s Token
+  revocation subsection, `docs/security-architecture.md` (Controls
+  table, Security Gaps list, OWASP A07 row, Priority Order list struck
+  through as done).
+- Full verification re-run after this change: `npx turbo run
+  type-check test build` (27/27), unit tests (117/117), `npm run
+  test:e2e` (22/22), `npm run lint` clean.
+
 ## Next Steps
 
 What's left, roughly in priority order (Docker verification, rate
 limiting, the JWT_SECRET fail-closed fix, and token revocation on
-logout were the top four; all four are now done above):
+logout + refresh were the top four; all four are now done above):
 
 1. **Actually build and run Phase 15's Docker images.** `docker compose
    build && docker compose up` somewhere with a working daemon (this
@@ -1414,55 +1454,47 @@ logout were the top four; all four are now done above):
    GitHub Actions runner (which does have a working daemon) — worth
    watching for that specifically, since it's the first real
    verification those Dockerfiles will get.
-2. **Refresh-token rotation.** `POST /auth/refresh` mints a new token
-   (its own fresh `jti`) but doesn't revoke the token it was called
-   with — the old token stays valid until it naturally expires, so a
-   leaked token isn't invalidated just because its holder refreshed.
-   The new `RevokedToken` table from the logout work above makes this a
-   small follow-up (revoke the old `jti` inside `refreshToken()`) rather
-   than new infrastructure — the last open item from
-   `docs/security-architecture.md`'s priority list.
-3. Frontend test coverage — zero automated tests in `apps/web` today.
+2. Frontend test coverage — zero automated tests in `apps/web` today.
    React Testing Library component tests and a persisted Playwright E2E
    suite (the dependency and a `test:e2e` script exist, scaffolded since
    Phase 1, but no spec file has ever been written).
-4. **Multi-assessment rollup**: every `/dashboard/*` endpoint currently
+3. **Multi-assessment rollup**: every `/dashboard/*` endpoint currently
    scopes to *one* assessment (the org's latest submitted one, or an
    explicit `assessmentId`) — a real "organisation-wide" score across
    several concurrently-active assessments (different frameworks, business
    units) would need `@cmmp/scoring-engine`'s `combineScores`, which
    exists but isn't wired into the dashboard yet. Revisit if/when an org
    genuinely has more than one active assessment at a time.
-5. Frontend follow-ups from Phase 10: a framework navigation view, an
+4. Frontend follow-ups from Phase 10: a framework navigation view, an
    assessment-taking flow (`/assessments/:id/items`), a risk register view
    (`/risks` now has a real API), the Excel import wizard's upload/
    preview/column-mapping steps, and extracting the dashboard components
    into `@cmmp/ui` if/when a second app or page needs them (not worth the
    abstraction for one dashboard page yet)
-6. Wire `POST /assessments/:id/import`'s `columnMapping` override — the
+5. Wire `POST /assessments/:id/import`'s `columnMapping` override — the
    library (`ImportOptions.columnMapping`) already supports it, but the
    endpoint only auto-maps columns today; needs a way to accept a manual
    mapping as a form field or a preceding "preview" call, matching the
    import wizard's step 3 in master prompt §14.
-7. Look more closely at the `exceljs` → `uuid` advisory now that
+6. Look more closely at the `exceljs` → `uuid` advisory now that
    `import-engine` genuinely parses untrusted uploads (see Known Issues) —
    confirm whether `exceljs`'s internal `uuid` usage ever hits the
    vulnerable buffer-bounds code path, or upgrade past it.
-8. Before relying on the seeded NIST CSF 2.0 data for anything
+7. Before relying on the seeded NIST CSF 2.0 data for anything
    compliance-facing, diff `packages/database/prisma/fixtures/nist-csf-2.0.json`
    against the official NIST CSWP 29 publication — it was reproduced from
    training-data knowledge, not transcribed from the source document (see
    Phase 5 notes above)
-9. Triage the 72 existing Dependabot advisories GitHub surfaces on every
+8. Triage the 72 existing Dependabot advisories GitHub surfaces on every
    push (1 critical, 25 high, 37 moderate, 9 low) — noted several times
    across this session but never actually investigated
-10. Extend the dedicated tenant-isolation e2e pattern
-    (`apps/api/test/tenant-isolation.e2e-spec.ts`) to `Assessment`,
-    `Framework`, and `User` explicitly — today only `Risk` has a
-    cross-tenant e2e test; the isolation *pattern* is structurally
-    consistent across every service, but that consistency itself isn't
-    independently e2e-verified per resource yet
-11. No pruning job exists for `RevokedToken` rows past their own
+9. Extend the dedicated tenant-isolation e2e pattern
+   (`apps/api/test/tenant-isolation.e2e-spec.ts`) to `Assessment`,
+   `Framework`, and `User` explicitly — today only `Risk` has a
+   cross-tenant e2e test; the isolation *pattern* is structurally
+   consistent across every service, but that consistency itself isn't
+   independently e2e-verified per resource yet
+10. No pruning job exists for `RevokedToken` rows past their own
     `expiresAt` — no correctness impact today, but a real operational
     one once the table has accumulated enough history at scale.
 

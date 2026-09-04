@@ -36,7 +36,11 @@ describe('AuthService', () => {
       revokedToken: { upsert: jest.fn(), findUnique: jest.fn() },
     };
 
-    jwtService = new JwtService({ secret: 'test-secret' });
+    // signOptions.expiresIn matters here, not just the secret: refreshToken() needs a real
+    // `exp` claim on the token it's revoking (mirrors production's JwtModule.register() in
+    // auth.module.ts) — without it `payload.exp` is undefined and the revoked row's
+    // `expiresAt` would be an invalid Date.
+    jwtService = new JwtService({ secret: 'test-secret', signOptions: { expiresIn: '24h' } });
     authService = new AuthService(jwtService, prisma as unknown as PrismaService);
   });
 
@@ -102,6 +106,22 @@ describe('AuthService', () => {
     // A refreshed token is independently revocable — logging out of one session must never
     // revoke a token minted for a different one.
     expect(refreshed.jti).not.toBe(original.jti);
+  });
+
+  it('revokes the token it was called with when refreshing, so a stale refreshed-away token cannot linger', async () => {
+    const { access_token } = await authService.login({
+      email: 'ciso@example.local',
+      password: 'CorrectHorseBattery1!',
+    });
+    const original = await authService.validateToken(access_token);
+
+    await authService.refreshToken(access_token);
+
+    expect(prisma.revokedToken.upsert).toHaveBeenCalledWith({
+      where: { jti: original.jti },
+      create: { jti: original.jti, expiresAt: new Date(original.exp * 1000) },
+      update: {},
+    });
   });
 
   describe('logout / isRevoked', () => {

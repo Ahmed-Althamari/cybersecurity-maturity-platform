@@ -76,9 +76,9 @@ export class AuthService {
     };
   }
 
-  async validateToken(token: string): Promise<JwtPayload> {
+  async validateToken(token: string): Promise<JwtPayload & { exp: number }> {
     try {
-      return this.jwtService.verify<JwtPayload>(token);
+      return this.jwtService.verify<JwtPayload & { exp: number }>(token);
     } catch {
       throw new UnauthorizedException('Invalid token');
     }
@@ -108,6 +108,12 @@ export class AuthService {
     return revoked !== null;
   }
 
+  /**
+   * Mints a new token AND revokes the one this call was made with, so a
+   * leaked token can't go on being used indefinitely just because its
+   * holder happens to refresh regularly — the old jti stops working the
+   * instant the new one exists, same as logout.
+   */
   async refreshToken(token: string) {
     const payload = await this.validateToken(token);
     const rest: JwtPayload = {
@@ -121,6 +127,7 @@ export class AuthService {
       jti: randomUUID(),
     };
     const newToken = this.jwtService.sign(rest);
+    await this.logout(payload.jti, new Date(payload.exp * 1000));
     return { access_token: newToken };
   }
 }
