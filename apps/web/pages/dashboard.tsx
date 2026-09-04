@@ -49,6 +49,12 @@ export default function DashboardPage({ userEmail, overview, functions, gaps, re
             </div>
             <div className="flex items-center gap-2">
               <Link
+                href="/risks"
+                className="bg-slate-700 hover:bg-slate-600 text-white text-sm font-medium py-2 px-4 rounded-md transition-colors"
+              >
+                Risks
+              </Link>
+              <Link
                 href="/assessments"
                 className="bg-slate-700 hover:bg-slate-600 text-white text-sm font-medium py-2 px-4 rounded-md transition-colors"
               >

@@ -1846,6 +1846,50 @@ UI, backed by a new client-interactive `AssessmentItemsForm` component.
   full create → answer → submit → read-only round trip against a real
   server and database).
 
+### Frontend: risk register view
+Third of the Phase 10 frontend follow-ups. Three new pages: `/risks`
+(list, sort by priority/recent, filter by status, all via query-string
+links rather than client state), `/risks/new` (create form), and
+`/risks/[id]` (view/edit/delete). New `apps/web/lib/roles.ts` — UX-only
+role gating (hide the New/Save/Delete controls a signed-in user's
+`session.roles` couldn't use anyway; the API's `RolesGuard` is the real
+enforcement either way, this just avoids showing a button that would
+403) mirroring the API's own `RISK_WRITE_ROLES`/delete-only role sets.
+- New `apps/web/lib/api.ts` calls/types: `listRisks`, `getRisk`,
+  `createRisk`, `updateRisk`, `deleteRisk`, `RiskRecord`.
+- New `apps/web/components/risks/RiskLevelBadge.tsx` — reuses
+  `maturity-scale.ts`'s existing `riskLevelColor()` from Phase 10
+  rather than inventing a second color mapping; the risk level's own
+  text is always printed inside the badge, never color alone.
+- **A real bug found only by looking at a live screenshot, not by
+  type-checking**: `/risks` showed "No risks match this filter" on
+  first load even though the seeded org has 13 real risks. Root cause:
+  `listRisks`'s query-string builder spread `{ status, riskLevel, sort
+  }` straight into `new URLSearchParams(...)` — and
+  `URLSearchParams`'s object constructor calls `String()` on every
+  value, so an *unset* `status` (`undefined`, meaning "no filter")
+  became the literal query string `status=undefined`, which the API
+  correctly treated as filtering for a status that matches nothing.
+  Every other endpoint in this same file already avoided this via a
+  conditional spread (`...(x ? { x } : {})`); `listRisks` was the one
+  place that didn't, added directly in this pass. Fixed by only adding
+  each param when it's actually set, and audited every other
+  `new URLSearchParams` call site in the file to confirm none of the
+  others have the same bug (they don't).
+- Verified live via a real signed-in Playwright browser session, full
+  CRUD round trip against the real seeded org: opened the (buggy) list
+  first, confirmed the fix made all 13+ real risks render sorted by
+  priority; created a new risk (likelihood 5 × impact 4), confirmed the
+  server-computed inherent risk score (20) matched by hand; edited its
+  impact down to 2 and confirmed the score recomputed to 10 (matching
+  `RisksService`'s documented recompute-on-change behavior); deleted it
+  and confirmed it no longer appears in the list. Test risk fully
+  cleaned up (no leftover row, soft-deleted per the API's own
+  semantics).
+- Full verification: `npx turbo run type-check test build` (27/27),
+  `npm run test:e2e` (42/42), `npm run lint` clean, plus the live
+  browser CRUD verification above.
+
 ## Next Steps
 
 What's left, roughly in priority order. Every item from
@@ -1873,15 +1917,15 @@ punt on the rest pending dedicated major-version-bump work):
    suite (the dependency and a `test:e2e` script exist, scaffolded since
    Phase 1, but no spec file has ever been written).
 3. Remaining frontend follow-ups from Phase 10 (the framework
-   navigation view and the assessment-taking flow are both done — see
-   Post-Phase-17 Feature Work above): a risk register view (`/risks`
-   now has a real API), the Excel import wizard's upload/preview/
-   column-mapping steps, and extracting the dashboard components into
-   `@cmmp/ui` if/when a second app or page needs them (not worth the
-   abstraction for one dashboard page yet). The assessment-taking flow
-   also only covers current/target maturity for now — the extended
-   per-item metadata fields (`rationale`/`evidence`/`owner*`/etc.) have
-   no UI yet, noted in that section's own writeup.
+   navigation view, the assessment-taking flow, and the risk register
+   view are all done — see Post-Phase-17 Feature Work above): the
+   Excel import wizard's upload/preview/column-mapping steps, and
+   extracting the dashboard components into `@cmmp/ui` if/when a
+   second app or page needs them (not worth the abstraction for one
+   dashboard page yet). The assessment-taking flow also only covers
+   current/target maturity for now — the extended per-item metadata
+   fields (`rationale`/`evidence`/`owner*`/etc.) have no UI yet, noted
+   in that section's own writeup.
 4. Wire `POST /assessments/:id/import`'s `columnMapping` override — the
    library (`ImportOptions.columnMapping`) already supports it, but the
    endpoint only auto-maps columns today; needs a way to accept a manual

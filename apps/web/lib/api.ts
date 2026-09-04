@@ -204,6 +204,51 @@ export interface RoadmapStatus {
   buckets: Record<'IMMEDIATE' | 'SHORT_TERM' | 'MEDIUM_TERM' | 'STRATEGIC' | 'UNSCHEDULED', RoadmapInitiative[]>;
 }
 
+export interface RiskRecord {
+  id: string;
+  organisationId: string;
+  title: string;
+  description: string | null;
+  threat: string | null;
+  vulnerability: string | null;
+  likelihood: number;
+  impact: number;
+  inherentRiskScore: number | null;
+  residualRiskScore: number | null;
+  riskLevel: string;
+  owner: string | null;
+  treatment: string;
+  targetDate: string | null;
+  status: string;
+}
+
+export interface CreateRiskInput {
+  organisationId: string;
+  title: string;
+  description?: string;
+  threat?: string;
+  vulnerability?: string;
+  likelihood: number;
+  impact: number;
+  owner?: string;
+  treatment?: string;
+  targetDate?: string;
+}
+
+export interface UpdateRiskInput {
+  title?: string;
+  description?: string;
+  threat?: string;
+  vulnerability?: string;
+  likelihood?: number;
+  impact?: number;
+  residualRiskScore?: number;
+  owner?: string;
+  treatment?: string;
+  status?: string;
+  targetDate?: string;
+}
+
 export interface NavigationNode {
   id: string;
   code: string;
@@ -284,6 +329,38 @@ export function getDashboardGaps(accessToken: string, organisationId: string, as
 export function getDashboardRisks(accessToken: string, organisationId: string, limit = 10) {
   const query = new URLSearchParams({ organisationId, limit: String(limit) });
   return apiFetch<RiskSummary>(`/dashboard/risks?${query}`, accessToken);
+}
+
+export function listRisks(
+  accessToken: string,
+  organisationId: string,
+  options: { status?: string; riskLevel?: string; sort?: 'priority' | 'recent' } = {},
+) {
+  // `new URLSearchParams({ ..., status: undefined })` would otherwise stringify the value as the
+  // literal text "undefined" (URLSearchParams' object constructor calls String() on every value),
+  // sending `status=undefined` and silently matching zero rows server-side instead of "no filter".
+  const params: Record<string, string> = { organisationId };
+  if (options.status) params.status = options.status;
+  if (options.riskLevel) params.riskLevel = options.riskLevel;
+  if (options.sort) params.sort = options.sort;
+  const query = new URLSearchParams(params);
+  return apiFetch<RiskRecord[]>(`/risks?${query}`, accessToken);
+}
+
+export function getRisk(accessToken: string, id: string) {
+  return apiFetch<RiskRecord>(`/risks/${id}`, accessToken);
+}
+
+export function createRisk(accessToken: string, input: CreateRiskInput) {
+  return apiFetch<RiskRecord>('/risks', accessToken, { method: 'POST', body: JSON.stringify(input) });
+}
+
+export function updateRisk(accessToken: string, id: string, input: UpdateRiskInput) {
+  return apiFetch<RiskRecord>(`/risks/${id}`, accessToken, { method: 'PATCH', body: JSON.stringify(input) });
+}
+
+export function deleteRisk(accessToken: string, id: string) {
+  return apiFetch<{ message: string }>(`/risks/${id}`, accessToken, { method: 'DELETE' });
 }
 
 export function getDashboardRoadmap(accessToken: string, organisationId: string) {
