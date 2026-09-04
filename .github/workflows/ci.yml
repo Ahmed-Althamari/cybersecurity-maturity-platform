@@ -70,3 +70,38 @@ jobs:
       - run: npm ci
       - run: npm run db:generate
       - run: npm run build
+
+  e2e:
+    name: API E2E Tests
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: cmmp_user
+          POSTGRES_PASSWORD: cmmp_password
+          POSTGRES_DB: cmmp_db
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U cmmp_user -d cmmp_db"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      DATABASE_URL: postgresql://cmmp_user:cmmp_password@localhost:5432/cmmp_db?schema=public
+      JWT_SECRET: ci-e2e-secret-not-for-production-min-32-chars
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+      - run: npm ci
+      - run: npm run db:generate
+      # apps/api/test/*.e2e-spec.ts boots the real AppModule against this service container —
+      # real PrismaService, real JwtModule, the real global AuditInterceptor — via supertest.
+      # Each spec file creates and tears down its own isolated Tenant/Organisation/User (there's
+      # no tenant-creation API), so this is safe to run against a shared service container.
+      - run: cd packages/database && npx prisma migrate deploy
+      - run: npm run test:e2e

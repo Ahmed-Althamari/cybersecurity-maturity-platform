@@ -1,13 +1,13 @@
 # CMMP Implementation Status
 
-Last Updated: 2026-09-04 (Phase 15)
+Last Updated: 2026-09-04 (Phase 16)
 
 ## Overall Progress
 
-**Phase**: 15 / 17
-**Completion**: ~85% (Docker artifacts written and statically validated, but
-**not** built/run in this session — see the Phase 15 section for why and
-what that means for confidence level)
+**Phase**: 16 / 17
+**Completion**: ~90% (Phase 15's Docker artifacts are still written-but-
+unbuilt — see that phase's caveat; everything else through Phase 16 has
+been verified live)
 
 ## Completed ✅
 
@@ -839,14 +839,99 @@ it in any deployment.
       binary, which isn't installed in this environment (only the
       `docker compose` v2 plugin is); switched to `docker compose`
 
+### Phase 16: CI/CD Security Pipeline
+**Different from every other phase in this session**: the bulk of this
+was already done — well, not by me, and not in this session. The repo
+owner merged PR #1 ("Wire up CI, security scanning, Dependabot, and
+CODEOWNERS") directly to `main` on 2026-09-02, two days before this
+phase started, and this branch had already inherited it (confirmed via
+`git merge-base HEAD origin/main` landing exactly on that commit, and
+`git branch --contains` showing it only on this branch's ancestry). It
+is genuinely solid work — commit messages reference specific real CI
+failures it was adjusted for ("Code scanning is not enabled for this
+repository", "Dependency review is not supported on this repository" —
+both GitHub Advanced Security limitations on a private repo without the
+paid add-on, worked around by archiving SARIF as artifacts instead of
+uploading to the Security tab). So Phase 16 here is verification and
+closing the gaps *this session's own Phases 12-15 opened*, not building
+a pipeline from nothing.
+- [x] GitHub Actions CI workflow (`.github/workflows/ci.yml`) — already
+      existed: separate `lint`/`type-check`/`test`/`build` jobs. Re-ran
+      `npm run lint` for real during this phase and it caught a genuine
+      leftover bug from Phase 13: `audit.interceptor.spec.ts` imported
+      `AUDIT_LOG_KEY` and never used it (an unused-import ESLint error
+      that would have failed CI's `lint` job on this branch). Fixed
+- [x] Added the one real gap: an `e2e` job with a `postgres:16-alpine`
+      service container running Phase 14's `apps/api/test/*.e2e-spec.ts`
+      suite via `npx prisma migrate deploy` + `npm run test:e2e` — the
+      existing `test` job only ever ran the fast, mocked unit-test
+      pipeline task (`turbo run test`), which never touched the e2e
+      suite since `test:e2e` wasn't a registered turbo task before this.
+      Added `test:e2e` to `turbo.json`'s pipeline (`dependsOn: ["^build"]`,
+      `cache: false` — it hits a live, mutable DB) and scoped the new
+      root `npm run test:e2e` script to `--filter=@cmmp/api`, since
+      `apps/web` already had its own (pre-existing, unrelated to this
+      session) `test:e2e: playwright test` script that fails with "No
+      tests found" — matching Phase 14's own honest note that no
+      Playwright suite exists yet. Verified live: `npm run test:e2e`
+      passes all 17 e2e tests against the real local Postgres instance
+- [x] SAST (`security.yml`'s CodeQL job), dependency scanning
+      (`dependabot.yml` — npm workspace-aware, github-actions, and
+      docker ecosystems), secret scanning (`security.yml`'s Gitleaks
+      job), DAST (`dast.yml`, OWASP ZAP baseline, schedule/manual-
+      dispatch only by design — a ZAP scan is too slow/noisy to gate
+      every PR), container scanning (`container-security.yml`, Trivy
+      against both Dockerfiles), and SBOM generation (`security.yml`,
+      weekly CycloneDX) — all already existed, all reviewed this phase,
+      none needed new work
+- [x] Fixed a real, previously-latent bug in `dast.yml` while reviewing
+      it: its own comment said it wasn't wired to PR/push because the API
+      had no `/health` endpoint yet — true when it was written, resolved
+      by Phase 15. But its actual readiness check
+      (`curl -sf http://localhost:3001/api/v1`) was checking a route that
+      doesn't exist (no controller registers the bare prefix root, so
+      that 404s), meaning the wait-for-reachable loop could never
+      succeed and this workflow would always time out after 150s —
+      completely independent of the missing-`/health` reasoning in the
+      comment, and never caught because this workflow has never actually
+      run (schedule/manual-dispatch only, and nothing manually triggered
+      it before now). Pointed the check at the real `/health` endpoint
+      and updated the stale comment; kept the schedule/manual-dispatch-
+      only trigger design as-is (still the right call — that reasoning
+      was independent of the missing-prerequisites one)
+- [x] Security gates — `security.yml`'s `dependency-audit` job runs
+      `npm audit --audit-level=high`, failing the job on high/critical
+      findings; GitHub's own PR banner already separately surfaces 72
+      existing advisories repo-wide (1 critical, 25 high, 37 moderate, 9
+      low) — triaging those is real, unstarted work, not something this
+      phase did
+- [x] Deployment workflow — genuinely **not** built, and deliberately out
+      of scope: there's no target environment (staging/production host,
+      registry credentials, secrets store) for a deploy workflow to
+      target yet. Building one against nothing to deploy to would be
+      exactly the kind of speculative infrastructure this session has
+      avoided elsewhere. Revisit once Phase 15's Docker images have
+      actually been built and run for real somewhere (see that phase's
+      own caveat) and there's a real place to ship them
+- [x] Corrected a stale/inaccurate "Known Issues" entry while re-checking
+      lint for this phase: it claimed `eslint-plugin-security`,
+      `eslint-plugin-react` etc. weren't installed anywhere and that
+      `npm run lint` "currently fails repo-wide" — neither was true
+      by the time this phase checked. See the corrected entry below
 
+## Known Issues 🐛
 
-- Root `.eslintrc.json` references `eslint-plugin-security`,
-  `eslint-plugin-react`, `eslint-plugin-react-hooks`, `eslint-plugin-import`,
-  and `eslint-config-next`, none of which are installed anywhere in the repo
-  (pre-existing since Phase 1 — `npm run lint` currently fails repo-wide,
-  not something introduced in Phase 3). Needs its own fix: either install
-  the missing plugins at the root, or split frontend/backend ESLint configs.
+- **Re-verified during Phase 16**: the actual `npm run lint` (=`turbo run
+  lint`, what CI's lint job runs, what every prior phase in this session
+  has been running) works cleanly — that part of this note was stale/
+  wrong. A *bare* `npx eslint . --ext ts,tsx` run directly at the repo
+  root (something nothing in `package.json` scripts or CI actually does)
+  does resolve its plugins fine, but has no root-level ignore
+  configuration for `dist/`, `node_modules/`, `.next/`, `coverage/`, etc.,
+  so it recurses into build output and complains about generated `.d.ts`
+  files. Low priority — add a root `.eslintignore` (or `ignorePatterns`)
+  if a repo-root lint command ever becomes something people actually run
+  directly, but nothing today depends on it.
 - `packages/database`'s local `prisma` devDependency resolves inconsistently
   under npm workspaces (`@prisma/client`'s `peerDependencies: { prisma: "*" }`
   can pull in a newer major version than the pinned `^5.22.0`, marked
@@ -872,17 +957,6 @@ it in any deployment.
   both in play.
 
 ## Not Started ⭕
-
-### Phase 16: CI/CD Security Pipeline
-- [ ] GitHub Actions CI workflow (.github/workflows/ci.yml)
-- [ ] SAST setup (CodeQL)
-- [ ] Dependency scanning (Dependabot)
-- [ ] Secret scanning (Gitleaks)
-- [ ] DAST setup (OWASP ZAP)
-- [ ] Container scanning (Trivy)
-- [ ] SBOM generation
-- [ ] Security gates configuration
-- [ ] Deployment workflow
 
 ### Phase 17: Documentation
 - [ ] Security architecture document
@@ -1065,49 +1139,56 @@ they've been observed passing on an actual PR.
    `standalone` output inspected file-by-file), but "parses correctly"
    and "boots and serves traffic" are different claims, and only the
    first one has been checked.
-2. **Begin Phase 16**: CI/CD Security Pipeline — a GitHub Actions
-   workflow running `turbo run type-check test build` (and, once a
-   daemon exists in CI, `docker compose build` and an image scan —
-   Trivy or Docker Scout — which Phase 15 explicitly deferred for lack
-   of one here) on every PR, plus SAST (CodeQL), dependency scanning
-   (Dependabot — the repo already surfaces 72 existing advisories per
-   GitHub's own banner on every push, worth triaging), and secret
-   scanning (Gitleaks). The `apps/api/test:e2e` suite from Phase 14
-   needs a real Postgres service in that workflow (a `services:` block
-   in the Actions YAML, not a mock) to run there at all.
-3. Phase 14 left two real gaps worth closing before or alongside Phase
-   16: frontend component tests (React Testing Library — currently zero
-   automated frontend tests) and a persisted Playwright E2E suite
-   (Playwright itself was used interactively in Phase 10 to catch a real
-   rendering bug, but nothing was saved as a runnable spec file).
-4. **Multi-assessment rollup**: every `/dashboard/*` endpoint currently
+2. **Begin Phase 17**: Documentation — the last unstarted phase. An
+   architecture overview doc (the monorepo layout, the framework-
+   agnostic engine design, how scoring/gaps/roadmap-generation chain
+   together), API documentation (OpenAPI/Swagger — NestJS has
+   `@nestjs/swagger` for this, not wired up anywhere yet), a real
+   top-level `README.md` walkthrough (setup, `npm run db:seed`, demo
+   credentials — currently scattered across this doc instead), and
+   deployment docs once Phase 15's images are actually built/run
+   somewhere for real.
+3. `container-security.yml`'s Trivy scan and `dast.yml`'s ZAP scan will
+   both, for the first time, actually exercise Phase 15's rewritten
+   Dockerfiles the next time either runs (a real daemon exists on GitHub
+   Actions runners, unlike this sandbox) — worth watching the next run
+   of either workflow specifically for that, since it's the first real
+   verification those Dockerfiles will get.
+4. Phase 14 left two real gaps worth closing: frontend component tests
+   (React Testing Library — currently zero automated frontend tests) and
+   a persisted Playwright E2E suite (Playwright itself was used
+   interactively in Phase 10 to catch a real rendering bug, but nothing
+   was saved as a runnable spec file).
+5. **Multi-assessment rollup**: every `/dashboard/*` endpoint currently
    scopes to *one* assessment (the org's latest submitted one, or an
    explicit `assessmentId`) — a real "organisation-wide" score across
    several concurrently-active assessments (different frameworks, business
    units) would need `@cmmp/scoring-engine`'s `combineScores`, which
    exists but isn't wired into the dashboard yet. Revisit if/when an org
    genuinely has more than one active assessment at a time.
-5. Frontend follow-ups from Phase 10: a framework navigation view, an
+6. Frontend follow-ups from Phase 10: a framework navigation view, an
    assessment-taking flow (`/assessments/:id/items`), a risk register view
    (`/risks` now has a real API), the Excel import wizard's upload/
    preview/column-mapping steps, and extracting the dashboard components
    into `@cmmp/ui` if/when a second app or page needs them (not worth the
    abstraction for one dashboard page yet)
-6. Wire `POST /assessments/:id/import`'s `columnMapping` override — the
+7. Wire `POST /assessments/:id/import`'s `columnMapping` override — the
    library (`ImportOptions.columnMapping`) already supports it, but the
    endpoint only auto-maps columns today; needs a way to accept a manual
    mapping as a form field or a preceding "preview" call, matching the
    import wizard's step 3 in master prompt §14.
-7. Look more closely at the `exceljs` → `uuid` advisory now that
+8. Look more closely at the `exceljs` → `uuid` advisory now that
    `import-engine` genuinely parses untrusted uploads (see Known Issues) —
    confirm whether `exceljs`'s internal `uuid` usage ever hits the
    vulnerable buffer-bounds code path, or upgrade past it.
-8. Before relying on the seeded NIST CSF 2.0 data for anything
+9. Before relying on the seeded NIST CSF 2.0 data for anything
    compliance-facing, diff `packages/database/prisma/fixtures/nist-csf-2.0.json`
    against the official NIST CSWP 29 publication — it was reproduced from
    training-data knowledge, not transcribed from the source document (see
    Phase 5 notes above)
-9. Fix the repo-wide ESLint plugin gap (see Known Issues)
+10. Triage the 72 existing Dependabot advisories GitHub surfaces on every
+    push (1 critical, 25 high, 37 moderate, 9 low) — noted several times
+    across this session but never actually investigated
 
 ## Contact & Questions
 

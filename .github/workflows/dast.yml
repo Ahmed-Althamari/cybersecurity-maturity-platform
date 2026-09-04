@@ -1,11 +1,13 @@
 name: DAST
 
-# Intentionally NOT wired to pull_request/push yet: the API has no /health
-# endpoint and no generated migration to seed against (see
-# docs/IMPLEMENTATION_STATUS.md, Phase 3 known gaps). Once those land this
-# should also run nightly against a real deployed target rather than a
-# docker-compose-in-CI approximation. Runs on schedule/manual dispatch only
-# so it never blocks a PR merge in the meantime.
+# Intentionally NOT wired to pull_request/push: a ZAP baseline scan is slow
+# and noisy enough that it doesn't belong gating every PR — it belongs
+# nightly against a real deployed target rather than a docker-compose-in-CI
+# approximation. (The API now has a real /health endpoint and a generated
+# migration, per Phase 15/2 of docs/IMPLEMENTATION_STATUS.md, so the
+# compose-in-CI approximation below is at least no longer blocked on
+# missing prerequisites — the design choice to keep this schedule/manual-
+# dispatch-only stands regardless.)
 on:
   schedule:
     # Nightly, 02:00 UTC
@@ -35,9 +37,12 @@ jobs:
           NEXTAUTH_SECRET: ci-dast-secret-not-for-production-min-32-chars
 
       - name: Wait for API to be reachable
+        # /api/v1 alone (no further path) 404s — no controller registers the bare prefix root — so
+        # `curl -sf` against it can never succeed regardless of API health. Use the real /health
+        # endpoint instead (unauthenticated, checks actual DB connectivity, added in Phase 15).
         run: |
           for i in $(seq 1 30); do
-            if curl -sf http://localhost:3001/api/v1 >/dev/null 2>&1; then
+            if curl -sf http://localhost:3001/health >/dev/null 2>&1; then
               echo "API is up"
               exit 0
             fi

@@ -4,7 +4,6 @@ import { of } from 'rxjs';
 
 import { AuditInterceptor } from './audit.interceptor';
 import type { AuditService } from './audit.service';
-import { AUDIT_LOG_KEY } from './decorators/audit-log.decorator';
 
 function makeContext(request: Record<string, unknown>): ExecutionContext {
   return {
