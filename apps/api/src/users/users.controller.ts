@@ -1,6 +1,7 @@
 import { UserRole } from '@cmmp/shared';
 import { Controller, Get, Post, Body, Patch, Param, Delete, UseGuards } from '@nestjs/common';
 
+import { AuditLog } from '../audit/decorators/audit-log.decorator';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
@@ -20,6 +21,7 @@ export class UsersController {
   @Post()
   @UseGuards(RolesGuard)
   @Roles(UserRole.PLATFORM_ADMIN, UserRole.ORGANISATION_ADMIN)
+  @AuditLog('CREATE', 'User')
   async create(
     @Body() createUserDto: CreateUserDto,
     @CurrentUser() user: RequestUser,
@@ -43,6 +45,7 @@ export class UsersController {
   @Patch(':id')
   @UseGuards(RolesGuard)
   @Roles(UserRole.ORGANISATION_ADMIN, UserRole.PLATFORM_ADMIN)
+  @AuditLog('UPDATE', 'User')
   async update(
     @Param('id') id: string,
     @Body() updateUserDto: UpdateUserDto,
@@ -54,6 +57,7 @@ export class UsersController {
   @Delete(':id')
   @UseGuards(RolesGuard)
   @Roles(UserRole.PLATFORM_ADMIN)
+  @AuditLog('DELETE', 'User')
   async remove(
     @Param('id') id: string,
     @CurrentUser() user: RequestUser,
@@ -72,6 +76,7 @@ export class UsersController {
   @Post(':id/roles/:role')
   @UseGuards(RolesGuard)
   @Roles(UserRole.ORGANISATION_ADMIN, UserRole.PLATFORM_ADMIN)
+  @AuditLog('UPDATE', 'User')
   async assignRole(
     @Param('id') id: string,
     @Param('role') role: string,
@@ -83,6 +88,7 @@ export class UsersController {
   @Delete(':id/roles/:role')
   @UseGuards(RolesGuard)
   @Roles(UserRole.ORGANISATION_ADMIN, UserRole.PLATFORM_ADMIN)
+  @AuditLog('UPDATE', 'User')
   async removeRole(
     @Param('id') id: string,
     @Param('role') role: string,

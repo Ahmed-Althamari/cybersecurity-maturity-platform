@@ -17,6 +17,7 @@ import {
 import { FileInterceptor } from '@nestjs/platform-express';
 import { memoryStorage } from 'multer';
 
+import { AuditLog } from '../audit/decorators/audit-log.decorator';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
@@ -44,6 +45,7 @@ export class AssessmentsController {
   @Post()
   @UseGuards(RolesGuard)
   @Roles(...ASSESSMENT_WRITE_ROLES)
+  @AuditLog('CREATE', 'Assessment')
   async create(@Body() dto: CreateAssessmentDto, @CurrentUser() user: RequestUser) {
     return this.assessmentsService.create(user.tenantId, user.sub, dto);
   }
@@ -65,6 +67,7 @@ export class AssessmentsController {
   @Patch(':id')
   @UseGuards(RolesGuard)
   @Roles(...ASSESSMENT_WRITE_ROLES)
+  @AuditLog('UPDATE', 'Assessment')
   async update(@Param('id') id: string, @Body() dto: UpdateAssessmentDto, @CurrentUser() user: RequestUser) {
     return this.assessmentsService.update(id, user.tenantId, user.sub, dto);
   }
@@ -72,6 +75,7 @@ export class AssessmentsController {
   @Delete(':id')
   @UseGuards(RolesGuard)
   @Roles(UserRole.PLATFORM_ADMIN, UserRole.ORGANISATION_ADMIN)
+  @AuditLog('DELETE', 'Assessment')
   async remove(@Param('id') id: string, @CurrentUser() user: RequestUser) {
     return this.assessmentsService.remove(id, user.tenantId);
   }
@@ -104,6 +108,7 @@ export class AssessmentsController {
   @Post(':id/items')
   @UseGuards(RolesGuard)
   @Roles(...ASSESSMENT_WRITE_ROLES)
+  @AuditLog('UPDATE', 'AssessmentItem')
   async upsertItem(@Param('id') id: string, @Body() dto: UpsertAssessmentItemDto, @CurrentUser() user: RequestUser) {
     return this.assessmentsService.upsertItem(id, user.tenantId, user.sub, dto);
   }
@@ -111,6 +116,7 @@ export class AssessmentsController {
   @Post(':id/submit')
   @UseGuards(RolesGuard)
   @Roles(...ASSESSMENT_WRITE_ROLES)
+  @AuditLog('UPDATE', 'Assessment')
   async submit(@Param('id') id: string, @CurrentUser() user: RequestUser) {
     return this.assessmentsService.submit(id, user.tenantId, user.sub);
   }
@@ -118,6 +124,7 @@ export class AssessmentsController {
   @Post(':id/import')
   @UseGuards(RolesGuard)
   @Roles(...ASSESSMENT_WRITE_ROLES)
+  @AuditLog('IMPORT', 'Assessment')
   @UseInterceptors(
     FileInterceptor('file', {
       storage: memoryStorage(),

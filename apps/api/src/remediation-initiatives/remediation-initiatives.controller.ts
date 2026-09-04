@@ -1,6 +1,7 @@
 import { UserRole } from '@cmmp/shared';
 import { BadRequestException, Body, Controller, Delete, Get, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
 
+import { AuditLog } from '../audit/decorators/audit-log.decorator';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
@@ -35,6 +36,7 @@ export class RemediationInitiativesController {
   @Post()
   @UseGuards(RolesGuard)
   @Roles(...REMEDIATION_WRITE_ROLES)
+  @AuditLog('CREATE', 'RemediationInitiative')
   async create(@Body() dto: CreateRemediationInitiativeDto, @CurrentUser() user: RequestUser) {
     return this.remediationInitiativesService.create(user.tenantId, dto);
   }
@@ -42,6 +44,7 @@ export class RemediationInitiativesController {
   @Post('generate')
   @UseGuards(RolesGuard)
   @Roles(...REMEDIATION_WRITE_ROLES)
+  @AuditLog('CREATE', 'RemediationInitiative')
   async generateFromGaps(@Body() dto: GenerateFromGapsDto, @CurrentUser() user: RequestUser) {
     return this.remediationInitiativesService.generateFromGaps(user.tenantId, dto.organisationId, dto.assessmentId, dto.limit);
   }
@@ -64,6 +67,7 @@ export class RemediationInitiativesController {
   @Patch(':id')
   @UseGuards(RolesGuard)
   @Roles(...REMEDIATION_WRITE_ROLES)
+  @AuditLog('UPDATE', 'RemediationInitiative')
   async update(@Param('id') id: string, @Body() dto: UpdateRemediationInitiativeDto, @CurrentUser() user: RequestUser) {
     return this.remediationInitiativesService.update(id, user.tenantId, dto);
   }
@@ -71,6 +75,7 @@ export class RemediationInitiativesController {
   @Delete(':id')
   @UseGuards(RolesGuard)
   @Roles(UserRole.PLATFORM_ADMIN, UserRole.ORGANISATION_ADMIN)
+  @AuditLog('DELETE', 'RemediationInitiative')
   async remove(@Param('id') id: string, @CurrentUser() user: RequestUser) {
     return this.remediationInitiativesService.remove(id, user.tenantId);
   }
@@ -78,6 +83,7 @@ export class RemediationInitiativesController {
   @Post(':id/risks/:riskId')
   @UseGuards(RolesGuard)
   @Roles(...REMEDIATION_WRITE_ROLES)
+  @AuditLog('UPDATE', 'RemediationInitiative')
   async linkRisk(@Param('id') id: string, @Param('riskId') riskId: string, @CurrentUser() user: RequestUser) {
     return this.remediationInitiativesService.linkRisk(id, user.tenantId, riskId);
   }
@@ -85,6 +91,7 @@ export class RemediationInitiativesController {
   @Delete(':id/risks/:riskId')
   @UseGuards(RolesGuard)
   @Roles(...REMEDIATION_WRITE_ROLES)
+  @AuditLog('UPDATE', 'RemediationInitiative')
   async unlinkRisk(@Param('id') id: string, @Param('riskId') riskId: string, @CurrentUser() user: RequestUser) {
     return this.remediationInitiativesService.unlinkRisk(id, user.tenantId, riskId);
   }

@@ -1,11 +1,11 @@
 # CMMP Implementation Status
 
-Last Updated: 2026-09-04 (Phase 12)
+Last Updated: 2026-09-04 (Phase 13)
 
 ## Overall Progress
 
-**Phase**: 12 / 17
-**Completion**: ~70%
+**Phase**: 13 / 17
+**Completion**: ~75%
 
 ## Completed ✅
 
@@ -569,6 +569,87 @@ Last Updated: 2026-09-04 (Phase 12)
       second run created 0 (correctly deduped against the initiatives
       the first run had just created)
 
+### Phase 13: Audit Logging
+- [x] Audit event model — `AuditEvent`/`AuditAction` already existed in
+      the schema from Phase 2 (tenant-scoped, `userId`, `action`,
+      `resource`/`resourceId`, `previousValue`/`newValue` as JSON
+      strings, `ipAddress`/`userAgent`/`correlationId`); this phase is the
+      first thing that actually writes and reads rows through the API
+- [x] Logging interceptor — rather than threading an `AuditService.record()`
+      call into every existing service (Assessments, Risks,
+      RemediationInitiatives, Users, Auth), audit capture is one global
+      `AuditInterceptor` (`APP_INTERCEPTOR`, registered once in the new
+      `AuditModule`) plus a `@AuditLog(action, resource)` decorator on the
+      controller methods worth recording — adding auditing to a future
+      endpoint is one decorator, not a new service dependency. Captures
+      actor (from `request.user`, or from the response body's `user.id`/
+      `user.tenantId` for the one pre-auth case, login), resource id
+      (from the response body's `.id`, falling back to the route's `:id`
+      param), the sanitized request body as `newValue`, IP, user-agent,
+      and a correlation id (reused from an `X-Correlation-Id` request
+      header if present, else generated)
+- [x] Credential redaction — `sanitizeForAudit()` deep-clones any recorded
+      body and replaces `password`/`token`/`secret`/-shaped keys with
+      `[REDACTED]` before it's ever written, so `POST /auth/login` and
+      `POST /users` (both of which carry a plaintext password in the
+      request body) never leak it into the audit trail; verified live
+      that a real login/user-create audit row shows `[REDACTED]`, not the
+      submitted password
+- [x] Immutable audit trail — `AuditService` exposes `record`/`findAll`/
+      `findOne` and deliberately no `update`/`delete`; there is no
+      PATCH/DELETE route on `AuditController` at all. `record()` never
+      throws — a logging failure is caught and logged via `Logger.error`
+      rather than breaking the request it's describing (own trade-off:
+      an audit write can silently fail rather than being guaranteed;
+      acceptable for this stage, a real compliance requirement might want
+      a dead-letter queue instead)
+- [x] Audit log API — `GET /audit-events` (tenant-scoped, filterable by
+      `userId`/`action`/`resource`/`resourceId`/`from`/`to`, paginated via
+      `limit`/`offset`) and `GET /audit-events/:id`, both including the
+      acting user's `id`/`name`/`email`. Read-gated to PLATFORM_ADMIN,
+      ORGANISATION_ADMIN, CISO, AUDITOR, GRC_MANAGER
+- [x] Instrumented every existing mutating endpoint: `POST/PATCH/DELETE
+      /risks`, `/remediation-initiatives` (including `/generate` and the
+      risk-link/unlink endpoints), `/assessments` (including `/items`,
+      `/submit`, `/import`), `/users` (including role assign/remove), and
+      `POST /auth/login` + `/auth/logout`
+- [x] Audit dashboard is **not** built — Phase 13 here is API-only, same
+      backend-first scoping as Phase 12; a dashboard view is a pure
+      frontend read against `GET /audit-events` whenever picked up
+- [x] Unit tests: `sanitize.spec.ts` (redaction, nested objects/arrays,
+      the empty-body → `undefined` case), `audit.service.spec.ts`
+      (record swallows a write failure rather than throwing, tenant
+      scoping and filters, the `from`/`to` date-range filter, 404 on
+      cross-tenant read), `audit.interceptor.spec.ts` (no-op when a
+      handler has no `@AuditLog` metadata, records using the
+      authenticated user + route param id, falls back to the response
+      body's `user` for login and confirms the password is redacted in
+      `newValue`, and skips recording entirely when no actor can be
+      identified) — 15 tests total
+- [x] Verified end-to-end against the live PostgreSQL instance: logged in
+      and created a risk, confirmed both a `LOGIN` and a `CREATE Risk`
+      row appeared with the password redacted; filtered by `action` and
+      `resource`; fetched a single event and confirmed the joined
+      `user` summary; created a `RemediationInitiative` and a `User`
+      (via PLATFORM_ADMIN) and confirmed both showed up correctly
+      attributed with redacted/sanitized `newValue`; confirmed
+      `POST /audit-events` 404s (no write route exists)
+- [x] **Bug found and fixed during this same live verification**: the
+      first version of `AuditController` applied `@Roles(...AUDIT_READ_ROLES)`
+      at the *class* level. `RolesGuard.canActivate()` (from Phase 3)
+      reads role metadata via `this.reflector.get(ROLES_KEY,
+      context.getHandler())` — handler-level only, it never checks the
+      controller class — so the class-level decorator was silently a
+      no-op and every authenticated role, not just the five intended
+      ones, could read the audit log. Confirmed the bug live (ASSESSOR
+      got 200), moved `@Roles()` onto each individual route handler
+      (matching how every other controller in the codebase already does
+      it — this was the one controller written differently), and
+      reconfirmed ASSESSOR/READ_ONLY_VIEWER get 403 while CISO/
+      PLATFORM_ADMIN get 200. Worth a repo-wide grep before trusting any
+      *new* controller's role gating — `RolesGuard` has no safety net for
+      a class-level `@Roles()`, it just silently does nothing
+
 ## Known Issues 🐛
 
 - Root `.eslintrc.json` references `eslint-plugin-security`,
@@ -602,13 +683,6 @@ Last Updated: 2026-09-04 (Phase 12)
   both in play.
 
 ## Not Started ⭕
-
-### Phase 13: Audit Logging
-- [ ] Audit event model
-- [ ] Logging middleware
-- [ ] Immutable audit trail
-- [ ] Audit log API
-- [ ] Audit dashboard
 
 ### Phase 14: Tests
 - [ ] Unit tests (Jest)
@@ -811,17 +885,21 @@ they've been observed passing on an actual PR.
 
 ## Next Steps
 
-1. **Begin Phase 13**: Audit Logging — an immutable `AuditEvent` model plus
-   a NestJS interceptor/middleware that records who did what to which
-   tenant-scoped resource (create/update/delete across Assessments, Risks,
-   RemediationInitiatives at minimum), an append-only write path (no
-   update/delete on audit rows themselves), a query API scoped by
-   tenant/org/actor/date-range, and eventually a dashboard view. This is
-   the first phase that cuts across every existing module rather than
-   adding a new one, so worth deciding up front whether it's a single
-   `@Injectable()` interceptor registered globally (simplest, catches
-   everything uniformly) versus explicit calls inside each service
-   (more control over what's logged, more places to remember to add it).
+1. **Begin Phase 14**: Tests — the codebase has solid unit-test coverage
+   per-module (service-level Jest specs everywhere, 100+ tests across
+   `apps/api`), but nothing yet at the integration or E2E layer: no
+   `apps/api` e2e suite hitting a real (test) database through actual
+   HTTP requests, no frontend component tests, no Playwright E2E flows
+   through the browser, and no dedicated tenant-isolation/authorization
+   test suite that deliberately tries to cross tenant/org boundaries
+   across every resource type in one place (today that coverage is
+   spread thinly across each service's own spec file). Given how much
+   of this session's own bug-catching has come from live curl/Playwright
+   verification rather than the unit suites, formalizing that into a
+   real e2e suite (start Nest with `supertest` against a disposable test
+   DB) would catch the kind of thing unit tests miss — exactly like
+   Phase 13's own class-vs-method `@Roles()` bug, which no unit test
+   caught and only manual live testing did.
 2. **Multi-assessment rollup**: every `/dashboard/*` endpoint currently
    scopes to *one* assessment (the org's latest submitted one, or an
    explicit `assessmentId`) — a real "organisation-wide" score across
