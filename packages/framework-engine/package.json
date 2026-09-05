@@ -14,7 +14,7 @@
   },
   "dependencies": {
     "@cmmp/shared": "*",
-    "zod": "^3.22.4"
+    "zod": "^4.5.4"
   },
   "devDependencies": {
     "@types/jest": "^29.5.8",
