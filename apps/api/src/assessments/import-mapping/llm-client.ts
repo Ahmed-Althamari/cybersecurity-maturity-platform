@@ -2,19 +2,24 @@ import { Logger } from '@nestjs/common';
 
 /**
  * Deliberately provider-agnostic: any OpenAI-compatible `/chat/completions`
- * endpoint works here (OpenRouter, Together, Groq, a self-hosted vLLM/Ollama
- * server), which is what lets `LLM_MODEL` point at an open-weight model —
- * Hermes by default — without this client caring who's actually serving it.
+ * endpoint works here (OpenRouter, Groq, Together, a self-hosted vLLM/Ollama
+ * server) — `LLM_BASE_URL`/`LLM_MODEL` point this at whichever open-weight
+ * model is actually free/available when it runs, without this client caring
+ * who's serving it.
  */
 export interface LlmClient {
   complete(systemPrompt: string, userPrompt: string): Promise<string>;
 }
 
 const DEFAULT_BASE_URL = 'https://openrouter.ai/api/v1';
-// OpenRouter's free tier has carried a no-cost Hermes 3 405B slot; provider catalogs change,
-// so treat this default as a starting point to verify against the current catalog, not a promise
-// — override with LLM_MODEL for whatever's actually free/available when this runs.
-const DEFAULT_MODEL = 'nousresearch/hermes-3-llama-3.1-405b:free';
+// Free-tier catalogs on OpenRouter churn fast enough that hardcoding a specific model (e.g. a
+// named Hermes slot) is a real trap — one such default broke within weeks of being written here.
+// `openrouter/free` is OpenRouter's own router-level entry point: it picks among whatever's
+// currently free rather than naming one model, so it survives that churn. Point LLM_BASE_URL at
+// https://api.groq.com/openai/v1 with an explicit LLM_MODEL (e.g. a current Llama/Mixtral/Qwen
+// model — also genuinely free, no card required) as a fallback if OpenRouter's free tier is
+// rate-limited or unavailable.
+const DEFAULT_MODEL = 'openrouter/free';
 const REQUEST_TIMEOUT_MS = 15_000;
 
 export class HttpLlmClient implements LlmClient {

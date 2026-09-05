@@ -2103,7 +2103,13 @@ see what would happen before committing.
   `LlmClient` interface plus an `HttpLlmClient` targeting any OpenAI-compatible
   `/chat/completions` endpoint (OpenRouter, Together, Groq, or a self-hosted
   Ollama/vLLM later) — `LLM_API_KEY`/`LLM_BASE_URL`/`LLM_MODEL` env vars, defaulting
-  to a free-tier Hermes model via OpenRouter. `resolveLlmClient()` returns `null`
+  to `openrouter/free` (OpenRouter's own router-level free entry point, which
+  picks among whatever's currently free rather than naming one model — a named
+  free Hermes slot was the first default here, and it was delisted from
+  OpenRouter's free tier within weeks of being written, which is exactly the
+  churn this default is chosen to survive; Groq's free tier, real named
+  Llama/Mixtral/Qwen models, no card required, is a documented fallback via the
+  same env vars). `resolveLlmClient()` returns `null`
   (not a throwing stub) when no key is configured, wired through Nest via a
   `LLM_CLIENT` DI token (an interface has no runtime identity Nest can use as a
   token by itself) so the whole feature is optional infrastructure, not a hard
@@ -2257,7 +2263,8 @@ punt on the rest pending dedicated major-version-bump work):
 4. Exercise the new LLM-assisted column-mapping feature
    (`apps/api/src/assessments/import-mapping/`) against a real model —
    this session had no `LLM_API_KEY`, so it's covered by unit tests
-   against a fake client only, never a real OpenRouter/Hermes call.
+   against a fake client only, never a real call to OpenRouter's free
+   tier (or Groq's, as a fallback — see that section's own writeup).
 5. **Get real GitHub Dependabot alert data.** This session triaged what
    `npm audit` could see (30 findings; `multer`'s 5 fixed, see
    Post-Phase-17 Hardening above) but never had tool access to GitHub's
