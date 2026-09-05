@@ -37,7 +37,7 @@ jobs:
             context: services/data-analysis
             dockerfile: services/data-analysis/Dockerfile
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Build image
         uses: docker/build-push-action@v6
