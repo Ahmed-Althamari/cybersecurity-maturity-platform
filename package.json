@@ -30,7 +30,7 @@
     "docker:down": "docker compose down"
   },
   "devDependencies": {
-    "@turbo/gen": "^1.10.1",
+    "@turbo/gen": "^2.10.12",
     "eslint-plugin-import": "^2.29.1",
     "eslint-plugin-react": "^7.33.2",
     "eslint-plugin-react-hooks": "^4.6.0",
