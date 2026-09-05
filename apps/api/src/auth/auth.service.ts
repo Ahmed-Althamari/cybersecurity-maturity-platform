@@ -6,7 +6,11 @@ import * as bcrypt from 'bcryptjs';
 
 import { PrismaService } from '../prisma/prisma.service';
 
+import { ChangePasswordDto } from './dto/change-password.dto';
 import { LoginDto } from './dto/login.dto';
+import type { RequestUser } from './types/authenticated-request';
+
+const SALT_ROUNDS = 12;
 
 export interface JwtPayload {
   sub: string;
@@ -18,6 +22,18 @@ export interface JwtPayload {
   roles: string[];
   /** Unique per issued token — the only thing logout needs to revoke *this* token without touching any other session. */
   jti: string;
+  /**
+   * Millisecond-precision issue time, set explicitly at sign time —
+   * deliberately *not* the standard `iat` claim, which @nestjs/jwt derives
+   * itself at second precision. JwtStrategy compares this against the
+   * user's `passwordChangedAt` (also millisecond-precision) to decide
+   * whether a token predates their last password change; `iat`'s 1-second
+   * resolution isn't fine enough to make that call correctly for a token
+   * issued in the same wall-clock second as the change. Optional so
+   * existing call sites/tokens minted before this field existed don't
+   * need to fabricate one — see JwtStrategy's handling of that case.
+   */
+  issuedAtMs?: number;
 }
 
 @Injectable()
@@ -60,6 +76,7 @@ export class AuthService {
       role: roles[0] ?? 'READ_ONLY_VIEWER',
       roles,
       jti: randomUUID(),
+      issuedAtMs: Date.now(),
     };
 
     return {
@@ -125,9 +142,55 @@ export class AuthService {
       role: payload.role,
       roles: payload.roles,
       jti: randomUUID(),
+      issuedAtMs: Date.now(),
     };
     const newToken = this.jwtService.sign(rest);
     await this.logout(payload.jti, new Date(payload.exp * 1000));
     return { access_token: newToken };
+  }
+
+  /**
+   * Changing your password revokes every OTHER outstanding session for
+   * this user — a stolen/leaked token, a session left open on another
+   * device — without needing a per-session token table to individually
+   * enumerate and revoke them. It works by stamping `passwordChangedAt`;
+   * JwtStrategy rejects any token issued before that stamp on its next
+   * use. The one exception is the caller's own current request: a fresh
+   * token (with a fresh `issuedAtMs`) is minted and returned here so the
+   * session that just changed the password doesn't immediately lock
+   * itself out too.
+   */
+  async changePassword(user: RequestUser, dto: ChangePasswordDto) {
+    const record = await this.prisma.user.findFirst({
+      where: { id: user.sub, tenantId: user.tenantId, isActive: true, deletedAt: null },
+    });
+    if (!record || !record.passwordHash) {
+      throw new UnauthorizedException('Current password is incorrect');
+    }
+
+    const currentPasswordValid = await bcrypt.compare(dto.currentPassword, record.passwordHash);
+    if (!currentPasswordValid) {
+      throw new UnauthorizedException('Current password is incorrect');
+    }
+
+    const newPasswordHash = await bcrypt.hash(dto.newPassword, SALT_ROUNDS);
+    await this.prisma.user.update({
+      where: { id: record.id },
+      data: { passwordHash: newPasswordHash, passwordChangedAt: new Date() },
+    });
+
+    const newToken = this.jwtService.sign({
+      sub: user.sub,
+      email: user.email,
+      name: user.name,
+      tenantId: user.tenantId,
+      organisationId: user.organisationId,
+      role: user.role,
+      roles: user.roles,
+      jti: randomUUID(),
+      issuedAtMs: Date.now(),
+    } satisfies JwtPayload);
+
+    return { access_token: newToken, message: 'Password changed successfully' };
   }
 }

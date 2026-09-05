@@ -5,6 +5,7 @@ import {
   importFromSheet,
   parseCsv,
   parseXlsx,
+  validateFileSignature,
   validateFileUpload,
   type CanonicalColumn,
   type ColumnMapping,
@@ -262,6 +263,16 @@ export class AssessmentsService {
     const fileIssues = validateFileUpload({ filename: file.originalname, mimetype: file.mimetype, size: file.size });
     if (fileIssues.some((issue) => issue.severity === 'error')) {
       throw new BadRequestException({ message: 'Invalid file upload', issues: fileIssues });
+    }
+
+    // Signature/magic-byte check: confirms the upload's actual bytes match
+    // what its extension claims (a real ZIP-backed .xlsx, or genuinely
+    // text-only content for .csv) before handing it to the parser — closes
+    // the "renamed/disguised file" gap that extension/size/MIME metadata
+    // checks alone can't catch.
+    const signatureIssues = validateFileSignature(file.buffer, file.originalname);
+    if (signatureIssues.length > 0) {
+      throw new BadRequestException({ message: 'Invalid file upload', issues: signatureIssues });
     }
 
     const isCsv = file.originalname.toLowerCase().endsWith('.csv');

@@ -2,6 +2,11 @@
 node_modules/
 /.pnp
 .pnp.js
+# This is an npm-workspaces project (see root package.json's "workspaces")
+# -- package-lock.json is the single source of truth for reproducible
+# installs (`npm ci`, used by every Dockerfile and any future CI) and must
+# be committed. It was gitignored from Phase 1 onward, alongside the other
+# package managers' lockfiles below, which this project has never used.
 yarn.lock
 pnpm-lock.yaml
 
@@ -10,6 +15,8 @@ coverage/
 test-results/
 playwright-report/
 apps/web/e2e/.auth/
+blob-report/
+playwright/.cache/
 
 # Production
 build/
