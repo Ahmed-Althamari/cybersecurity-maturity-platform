@@ -1945,6 +1945,63 @@ This closes out every item from Next Steps' "Frontend follow-ups from
 Phase 10" bullet — all four (framework navigation, assessment-taking,
 risk register, Excel import wizard) are now built and live-verified.
 
+### Frontend test coverage: React Testing Library component tests
+`apps/web` had the RTL/Jest dependencies installed since Phase 1
+scaffolding but zero test files and no Jest config. Added both.
+- New `apps/web/jest.config.js` (using `next/jest`, which handles the
+  same SWC transform/CSS/image mocks `next dev`/`next build` use, so
+  component tests see the app the same way it actually runs) and
+  `jest.setup.js` (`@testing-library/jest-dom` matchers).
+- 5 new test files, 17 tests total, all real assertions (not padding):
+  `KpiCard.test.tsx`, `RiskLevelBadge.test.tsx`,
+  `NavigationTree.test.tsx`, `maturity-scale.test.ts` (the pure
+  `maturityBand`/`riskLevelColor` functions), and a page-level test for
+  `RisksPage` covering the empty-filter state, the error state, and the
+  write-role-gated "New Risk" button.
+- **Two real environment gotchas found and fixed, not just "tests
+  pass"**:
+  1. `tsc --noEmit` failed on every `toBeInTheDocument()`/`toHaveStyle()`
+     call — `@testing-library/jest-dom` ships its own types rather than
+     via a separate `@types/*` package, so TypeScript's default
+     "auto-include every `@types/*` package" behavior never picks it up.
+     Fixed with a one-line ambient reference
+     (`apps/web/types/jest.d.ts`), not a broader `tsconfig.json`
+     `types` array (which would have needed every other implicit
+     `@types/*` package listed explicitly too).
+  2. A page-level test (`RisksPage`) needs to import the page file
+     directly — but that page also exports `getServerSideProps`, which
+     imports `lib/auth` → `next-auth/next` → `next-auth/core` →
+     `openid-client` → `jose` (ESM-only) at module load time, which
+     Jest's default transform can't parse, breaking the whole test
+     file with a cryptic `SyntaxError: Unexpected token 'export'`
+     several layers down a dependency chain the test itself never
+     touches. Fixed by mocking `lib/auth` in that one test file rather
+     than widening Jest's `transformIgnorePatterns` project-wide to
+     parse a dependency chain no component test actually exercises.
+  3. **A more serious one, only caught by running the real production
+     build, not `next lint`/`tsc`/`jest` individually**: that same
+     page-level test file was originally colocated at
+     `pages/risks/index.test.tsx`, right next to the page it tests.
+     Next.js's pages-router treats *any* `.tsx` file under `pages/` as
+     a real route by filename alone — it doesn't care about a `.test.`
+     infix — so `next build` tried to compile the test file as the
+     page at `/risks/index.test`, and failed outright on the
+     Jest-only `jest.mock` global (`ReferenceError: jest is not
+     defined`) baked into the webpack bundle. This would have silently
+     broken every future production build the moment a page-level test
+     existed, and neither `tsc --noEmit` nor `jest` alone would have
+     caught it — only `next build` does, since it's specifically
+     `pages/`'s own file-based routing that's unsafe here, not anything
+     TypeScript or Jest checks. Fixed by moving page-level tests to a
+     mirrored `apps/web/__tests__/pages/` tree instead of colocating
+     them — component tests aren't affected (`components/` isn't
+     special to Next's router), so those stay colocated as normal.
+- Full verification: `npx turbo run type-check test build` across the
+  whole monorepo (27/27 — this is exactly what caught gotcha #3 above;
+  running only `apps/web`'s own `test`/`type-check` scripts in
+  isolation would not have), `npm run test:e2e` (42/42, unaffected),
+  `npm run lint` clean.
+
 ## Next Steps
 
 What's left, roughly in priority order. Every item from
