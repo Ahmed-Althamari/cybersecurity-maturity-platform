@@ -1144,7 +1144,8 @@ None currently
 ## Dependencies
 
 ### Critical
-- Node.js 18+
+- Node.js 20.19+ (or 22.12+) — raised from 18+ by the NestJS 12 upgrade
+  below; see that section for exactly why
 - PostgreSQL 15
 - Docker & Docker Compose
 
@@ -2586,6 +2587,206 @@ Once the PR from this reconciliation merges, PR #20 (and the PR #2
 branch beneath it) can be closed as superseded — their unique work is
 now in `main` via this reconciliation, and everything else in them was
 already independently rebuilt here.
+
+## NestJS 10 → 12 Upgrade (2026-09-05)
+
+`apps/api`'s NestJS ecosystem was bumped from 10.2.8 to 12.0.1, skipping
+v11 entirely, matching Dependabot PR #25's real diff (`@nestjs/common`,
+`core`, `platform-express`, `jwt`, `cli`, `testing` → `^12.0.x`;
+`config`, `passport` → `^12.0.0`; `swagger`, `schedule` → `^12.0.1`) —
+versions double-checked against the live npm registry at the time of
+this upgrade, not just Dependabot's diff. `@nestjs/throttler` stayed at
+`^6.5.0` per the task's own instruction; see below for why that's a
+real, currently-unresolved gap rather than a clean bill of health.
+`@types/express` moved `^4.17.21` → `^5.0.6` (Dependabot PR #16's own
+target) in the same PR, since `@nestjs/platform-express@12.0.1` now
+depends on `express@5.2.1` directly (confirmed from its own installed
+`package.json`, not assumed) — the two bumps are coupled and this PR
+does both together rather than separately, per the task's instruction.
+
+**Real breaking changes found and fixed:**
+
+1. **NestJS 12's own packages are pure ESM** (`"type": "module"` in
+   `@nestjs/common`, `core`, `platform-express`, `config`, `jwt`,
+   `passport`, `schedule`, `swagger`, `testing`, `cli` — confirmed by
+   reading each installed package's own `package.json`; `@nestjs/throttler`
+   is the one holdout, still CommonJS). Node's native `require(esm)`
+   interop (stable on Node ≥20.19/≥22.12) means `nest build`'s CommonJS
+   output still runs fine under plain `node dist/main.js` — this is
+   the officially documented, fully-supported way to stay on a CJS
+   application per NestJS's own v12 migration guide
+   (`nest upgrade` deliberately leaves an app's module format alone).
+   But Jest's module loader compiles every file itself rather than
+   delegating to Node's own `require`, so it doesn't get that interop
+   for free: unit and e2e tests failed immediately with `SyntaxError:
+   Cannot use import statement outside a module` the moment they
+   `require`d `@nestjs/common`. Fixed by adding `babel-jest` +
+   `@babel/preset-env` (pinned to `^7.29.7`, matching the `@babel/core`
+   version already pulled in transitively by `ts-jest`/`jest`, since
+   the latest published `@babel/preset-env`/`babel-plugin-transform-import-meta`
+   are now v8-only and would conflict) and a narrowly-scoped
+   `transformIgnorePatterns` (`apps/api/jest.config.js`,
+   `apps/api/test/jest-e2e.json`) that transforms only the specific
+   ESM-only packages actually in this app's dependency graph — not all
+   of `node_modules` — to keep the rest of Jest's default (fast,
+   untransformed) behavior intact. See `apps/api/babel.config.js` for
+   the full writeup.
+2. **`import.meta.url`**, used by several of those packages for
+   optional/lazy `require()` (e.g. `@nestjs/common`'s
+   `loadPackageSync`, used by `ValidationPipe` to lazily load
+   `class-validator`/`class-transformer`; `@nestjs/swagger`'s
+   `swagger-ui.js`), has no direct CommonJS equivalent, so
+   `@babel/preset-env` alone leaves it untouched — a syntax error once
+   transpiled. The obvious fix (the community's
+   `babel-plugin-transform-import-meta`) turned out to be unsafe for
+   this codebase's exact pattern: NestJS's own source does
+   `const require = createRequire(import.meta.url)`, and that plugin's
+   replacement itself calls the bare `require` identifier — which,
+   inside that same `const require = ...` declaration's own
+   initializer, resolves (per `let`/`const` TDZ scoping) to the
+   not-yet-initialized local binding, producing `ReferenceError: Cannot
+   access 'require' before initialization`. Wrote a small, purpose-built
+   plugin instead (`apps/api/babel-plugin-import-meta-url-cjs.js`) that
+   rewrites `import.meta.url` using `module.require(...)` — a property
+   access, immune to identifier shadowing — instead of the bare
+   identifier. Verified directly by transpiling both files with each
+   plugin and comparing the generated code, not just by re-running
+   tests and hoping.
+3. **`@nestjs/throttler@6.5.0` (the latest published version) does not
+   declare peer-dependency support for Nest 12** — its `peerDependencies`
+   cap `@nestjs/common`/`@nestjs/core` at `^11.0.0`. Confirmed this is a
+   real, currently-unreleased gap, not a guess: the throttler
+   maintainers' own GitHub repo already has the fix on `master`
+   (commit `fe3e8a1`, "feat: support nest v12" — commit message reads
+   in full: *"The code is already stable for v12, only the peer range
+   needs updating"*), but it hasn't been published to npm yet (npm's
+   only `dist-tag` for `@nestjs/throttler` is still `6.5.0`). Left
+   unpatched, `npm install` silently resolved this by nesting a
+   duplicate `@nestjs/common@10.4.22`/`@nestjs/core@10.4.22`/
+   `@nestjs/platform-express@10.4.22` tree under
+   `node_modules/@nestjs/throttler` to satisfy the stale peer range —
+   a real risk (the `ThrottlerGuard`'s injected `Reflector` and
+   friends would come from a different `@nestjs/core` instance than
+   the rest of the app, which is exactly the kind of cross-version
+   class-identity mismatch that can produce a very confusing runtime
+   DI failure). Fixed with an npm `overrides` entry (root
+   `package.json`) forcing `@nestjs/throttler`'s own
+   `@nestjs/common`/`@nestjs/core` resolution to the same `^12.0.1`
+   used everywhere else in the tree — `npm ls` now shows a single,
+   fully deduped NestJS 12 install with no nested copies. **This is a
+   deliberate, informed override of an upstream package's declared
+   peer range, based on the maintainers' own confirmation that the
+   code itself needs no change** — not a guess, but flagged here for a
+   human to revisit once `@nestjs/throttler` actually publishes a
+   version with the corrected peer range (drop the override then).
+4. **A real DI regression in `apps/api/src/data-analysis` (the newer
+   Data Analysis feature, merged into `main` separately from this
+   task)**, found only by running the full e2e suite (unit tests alone
+   never boot the complete `AppModule` graph, so they never caught
+   this): every `JwtAuthGuard`-protected route in the whole app failed
+   to boot with `Nest can't resolve dependencies of the JwtAuthGuard
+   (?)... make sure that the argument AuthModuleOptions ... is
+   available in the DataAnalysisModule module`. Confirmed this was a
+   genuine Nest-12-introduced regression, not a pre-existing bug,
+   by checking out real `origin/main` (Nest 10) into a separate git
+   worktree and running the identical e2e test there — it passed
+   clean. Root cause: `JwtAuthGuard` (`AuthGuard('jwt')` from
+   `@nestjs/passport`) is applied via `@UseGuards()` with no explicit
+   provider registration of its own in any module, so NestJS's DI
+   container resolves its single shared instance through whichever
+   module it happens to encounter first while walking the whole app's
+   module graph — and `DataAnalysisModule` doesn't import
+   `PassportModule`/`AuthModule` at all (nor does any other feature
+   module — this was always latent, just never the module Nest picked
+   as the guard's "owner" until something shifted in v12's module-graph
+   traversal order). Fixed at the root rather than papering over the
+   one module that happened to trip it: `AuthModule` is now `@Global()`
+   and exports `PassportModule` (previously it exported `AuthService`
+   and `JwtModule` only) — `AuthModuleOptions` (`PassportModule`'s own
+   provider) is now visible everywhere in the app regardless of which
+   module ends up "owning" `JwtAuthGuard`'s shared instance, so this
+   can't silently break again the next time NestJS's internals shift
+   the traversal order. `apps/api/src/auth/auth.module.ts` has the full
+   comment.
+5. **Node.js engines** — NestJS 12 requires Node ≥20.19 (or ≥22.12) to
+   run (the `require(esm)` interop above). Root `package.json`'s
+   `engines.node` moved from `>=18.0.0` to `>=20.0.0`. CI's
+   `NODE_VERSION: '20'` (`.github/workflows/ci.yml`,
+   `.github/workflows/security.yml`, `.github/workflows/dast.yml`) was
+   already correctly pinned and needed no change; `infrastructure/Dockerfile.api`
+   already moved to `node:26-alpine` in PR #28, also already ahead of
+   the new floor. Nothing else in CI config was touched.
+
+**Confirmed NOT an issue:** `@nestjs/config`'s `ConfigModule.forRoot({
+isGlobal: true, envFilePath: '.env' })` call in `app.module.ts` is
+unchanged and type-checks clean — v12's Standard-Schema-based
+`validationSchema` option (replacing Joi-specific validation) is a new
+addition, not a breaking change to the options this app actually uses.
+`RolesGuard` and `AuditInterceptor` (the other two custom
+guard/interceptor this task specifically asked to be checked) needed
+no changes at all — both passed their existing unit and e2e coverage
+unmodified once the above fixes landed.
+
+**Express 5 investigation:** `@nestjs/platform-express@12.0.1` depends
+on `express@5.2.1` (confirmed from the installed package's own
+`package.json`, matching the note above). Checked every direct Express
+API usage outside NestJS's own abstractions across `apps/api/src` —
+`main.ts`'s security-headers middleware is `helmet()`, applied via
+`app.use()`; there is no hand-rolled req/res middleware left to check
+against Express 5's request/response changes (an earlier hand-rolled
+version existed before the branch-reconciliation merge above, but it
+was already replaced by `helmet` as part of that reconciliation, before
+this task started). The handful of files importing `Request`/`Response`
+types from `express` (`auth/types/authenticated-request.ts`,
+`audit/audit.interceptor.ts`, several controllers) only read standard,
+version-stable fields (`req.ip`, `req.headers`, `req.body`,
+`req.params`) — nothing touching `req.query`'s Express-5 getter-only
+change, no `res.send(status)` legacy calls, no `app.del()`, and no
+wildcard/optional route patterns (`*`, `:id?`) that would break under
+Express 5's `path-to-regexp@8` route-matching rewrite. No code changes
+were needed beyond the `@types/express` bump itself.
+
+**A pre-existing quirk, not caused by this upgrade, found while setting
+up local e2e verification:** `resolveJwtSecret()`
+(`apps/api/src/auth/jwt-secret.ts`) is called both at eager
+module-decorator-evaluation time (`AuthModule`'s
+`JwtModule.register({ secret: resolveJwtSecret() })`, used for
+signing) and at lazy provider-construction time (`JwtStrategy`'s
+constructor, used for verifying). If `JWT_SECRET` is supplied via a
+`.env` file loaded by `ConfigModule` during bootstrap (rather than as a
+real process environment variable present from process start), those
+two evaluations can observe different values — tokens get signed with
+the insecure fallback constant but verified against the real `.env`
+value, so every authenticated request 401s. This never affects CI or
+production (both set `JWT_SECRET` as a real environment variable, never
+via a `.env` file — confirmed from `.github/workflows/ci.yml`), and
+predates this upgrade entirely; it only surfaced here because local
+verification initially used a `.env` file for convenience. Worth a
+human's separate look since it's a real footgun for local dev, but out
+of scope for this PR.
+
+**Verification:** `npx prisma generate --schema
+packages/database/prisma/schema.prisma` (to rule out the stale-client
+false-failure mode), then `npx turbo run type-check` (clean, zero
+errors, all 15 tasks), `npx turbo run test build lint` (clean, all 29
+tasks — 170 `apps/api` unit tests, plus every other workspace's own
+suite), `apps/api`'s full e2e suite against a real local Postgres 16
+(`npm run test:e2e --workspace=@cmmp/api`, with `DATABASE_URL`/
+`JWT_SECRET` set as real shell environment variables — see the quirk
+above — 48/48 passing, up from the 17 recorded after the branch
+reconciliation above since the reconciliation's own newly-added
+integration specs are counted individually here), and `apps/web`'s
+Playwright suite (`npx playwright test`, 10/10 passing, confirming
+nothing broke through the shared API contract). See the pull request
+description for the exact commands.
+
+**Left for human review:** the `@nestjs/throttler` peer-range override
+above (drop it once `@nestjs/throttler` publishes a release with the
+corrected peer range — no urgency, but it's the one piece of this
+upgrade resting on an informed judgment call about an upstream
+package rather than a clean, already-published fix) and the
+pre-existing `.env`-timing JWT-secret quirk noted above (unrelated to
+this upgrade, but a real footgun worth its own fix).
 
 ## Contact & Questions
 
