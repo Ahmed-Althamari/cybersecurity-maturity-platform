@@ -2160,6 +2160,58 @@ see what would happen before committing.
   test:e2e` for `@cmmp/api` (42/42), and a full Playwright run against a real
   build — **10/10 passing**, including the new import spec.
 
+### LLM client rework: any wire format, a real fallback chain, Claude as a paid tier
+Follow-up to the section above, from a live `WebSearch` check plus a direct ask to
+support "any AI model format," not just OpenAI-shaped ones:
+- **A real bug caught by that search**: the default model (a named free Hermes slot
+  on OpenRouter) had already been delisted from OpenRouter's free tier within weeks
+  of being written. Switched the default to `openrouter/free` — OpenRouter's own
+  router-level free entry point, which picks among whatever's currently free
+  instead of naming one model that can be delisted out from under it.
+- `llm-client.ts` now supports two wire formats behind the same `LlmClient`
+  interface — `OpenAiCompatibleClient` (unchanged, raw `fetch`, any
+  OpenAI-shaped `/chat/completions` endpoint) and a new `AnthropicMessagesClient`
+  using the **official `@anthropic-ai/sdk`** (Claude doesn't speak the OpenAI wire
+  format, and the project's `claude-api` skill is explicit that Claude calls go
+  through the official SDK, not raw HTTP, whenever one exists for the language).
+  Structured JSON comes from `output_config.format` (a plain JSON Schema) rather
+  than the SDK's Zod-based `zodOutputFormat()` helper — that helper is typed
+  against zod's newer `zod/v4` core specifically, a different type identity than
+  the classic `zod` import already used everywhere else in this repo, and it
+  type-checked under a plain `tsc` run but failed under `ts-jest` (a real,
+  reproduced tooling inconsistency, not a hunch) — not worth the friction for a
+  schema this loose, when the actual per-key/value validation already lives one
+  layer up in `ImportMappingSuggesterService.parseAndValidate` regardless of
+  which client produced the text.
+- **A real, ordered fallback chain** (`FallbackLlmClient`): tries each configured
+  provider in sequence, only advancing on an actual failure (error/timeout), and
+  propagates the last error only once every provider in the chain has failed —
+  at which point the existing catch-in-`suggestMapping` degrades to auto-mapping
+  as it always did. Configured via numbered env slots —
+  `LLM_PROVIDER_<n>_API_KEY`/`_FORMAT`/`_BASE_URL`/`_MODEL` (n = 1-5) — where
+  slots 1-3 have sensible defaults for their remaining fields (1: OpenRouter free,
+  2: Groq free, 3: Claude Opus 5 — the `claude-api` skill's non-negotiable default
+  model absent an explicit request for a different one) so setting just the three
+  API keys is enough to get a three-provider free→free→paid chain with zero other
+  config; slots 4-5 exist for a fully custom provider and need every field spelled
+  out explicitly. Exactly one configured slot returns that client directly (no
+  pointless single-entry chain); zero slots still returns `null`, same
+  graceful-degradation contract as before.
+- 14 new unit tests (`llm-client.spec.ts`): `FallbackLlmClient` trying the next
+  client only on failure and never calling a later one once an earlier one
+  succeeds; `OpenAiCompatibleClient` posting the right shape and surfacing a
+  non-2xx status; `AnthropicMessagesClient` extracting the text block and
+  rejecting a contentless (e.g. refused) response; and `resolveLlmClient`'s env-var
+  scanning — zero slots, one slot (direct, unwrapped), multiple slots (wrapped in
+  a chain), an explicit format override on a defaulted slot, and a slot beyond the
+  defaulted ones (4/5) that's skipped when nothing overrides its format but
+  activates once all three fields are given explicitly.
+- Full verification: `npx turbo run type-check test build lint` (all green),
+  `npm run test:e2e` for `@cmmp/api` (42/42, unaffected). Still no real
+  `LLM_API_KEY`/`ANTHROPIC_API_KEY` available in this sandbox to exercise an
+  actual model call end-to-end for any of the three providers — same standing gap
+  as the section above, now spanning three providers instead of one.
+
 ### UI polish: shared navigation, consistent chrome, and two real CSS bugs
 Every top-level page (dashboard, risks, assessments, frameworks) had hand-rolled
 its own header, and only `dashboard.tsx`'s actually linked to the other three —
@@ -2262,9 +2314,10 @@ punt on the rest pending dedicated major-version-bump work):
    it.
 4. Exercise the new LLM-assisted column-mapping feature
    (`apps/api/src/assessments/import-mapping/`) against a real model —
-   this session had no `LLM_API_KEY`, so it's covered by unit tests
-   against a fake client only, never a real call to OpenRouter's free
-   tier (or Groq's, as a fallback — see that section's own writeup).
+   this session had no `LLM_API_KEY`/`ANTHROPIC_API_KEY` for any of the
+   three configured providers (OpenRouter free, Groq free, Claude), so
+   it's covered by unit tests against fakes/mocks only, never a real
+   call to any of them — see that section's own writeup.
 5. **Get real GitHub Dependabot alert data.** This session triaged what
    `npm audit` could see (30 findings; `multer`'s 5 fixed, see
    Post-Phase-17 Hardening above) but never had tool access to GitHub's
