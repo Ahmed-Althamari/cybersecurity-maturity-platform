@@ -15,18 +15,19 @@
     "start": "turbo run start",
     "test": "turbo run test",
     "test:watch": "turbo run test:watch",
+    "test:e2e": "turbo run test:e2e --filter=@cmmp/api",
     "lint": "turbo run lint",
     "type-check": "turbo run type-check",
     "clean": "turbo run clean && rm -rf node_modules",
     "format": "prettier --write \"**/*.{ts,tsx,js,jsx,json,md}\"",
     "db:generate": "npx prisma generate --schema packages/database/prisma/schema.prisma",
     "db:migrate": "cd packages/database && npx prisma migrate deploy",
-    "db:seed": "cd packages/database && npx prisma db seed",
+    "db:seed": "npm run build --workspace=@cmmp/framework-engine --workspace=@cmmp/database && cd packages/database && npx prisma db seed",
     "db:studio": "cd packages/database && npx prisma studio",
     "security:audit": "npm audit --audit-level=moderate",
-    "docker:build": "docker-compose build",
-    "docker:up": "docker-compose up -d",
-    "docker:down": "docker-compose down"
+    "docker:build": "docker compose build",
+    "docker:up": "docker compose up -d",
+    "docker:down": "docker compose down"
   },
   "devDependencies": {
     "@turbo/gen": "^1.10.1",
@@ -54,5 +55,8 @@
   },
   "dependencies": {
     "@prisma/client": "^5.22.0"
+  },
+  "overrides": {
+    "multer": "^2.3.0"
   }
 }

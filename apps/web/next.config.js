@@ -2,6 +2,9 @@
 const nextConfig = {
   reactStrictMode: true,
   swcMinify: true,
+  // Traces only the dependencies each page actually needs into .next/standalone, so the
+  // production Docker image doesn't have to carry the full node_modules tree.
+  output: "standalone",
   compiler: {
     removeConsole: process.env.NODE_ENV === "production",
   },

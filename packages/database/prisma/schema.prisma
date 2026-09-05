@@ -686,6 +686,25 @@ model Benchmark {
 }
 
 // ============================================================================
+// AUTHENTICATION
+// ============================================================================
+
+/// Tracks JWTs revoked before their natural expiry (i.e. via logout).
+/// A row only needs to exist until `expiresAt` — after that the token
+/// itself would be rejected on expiry alone. No FK to User: a JWT
+/// outlives nothing about the user record, and looking a revocation up
+/// only ever needs the token's own `jti` claim.
+model RevokedToken {
+  id        String   @id @default(uuid())
+  jti       String   @unique
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  @@index([expiresAt])
+  @@map("revoked_tokens")
+}
+
+// ============================================================================
 // AUDIT LOGGING
 // ============================================================================
 

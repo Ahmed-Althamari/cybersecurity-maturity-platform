@@ -1,0 +1,41 @@
+import { MAX_FILE_SIZE_BYTES } from '@cmmp/import-engine';
+import { BadRequestException, Body, Controller, Post, UploadedFile, UseGuards, UseInterceptors } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
+import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
+import { memoryStorage } from 'multer';
+
+import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+
+import { AnalysisMode, DataAnalysisService } from './data-analysis.service';
+
+const VALID_MODES: AnalysisMode[] = ['local', 'ai'];
+
+/**
+ * A new, isolated feature — not part of the assessments/risks/frameworks domain, and not
+ * gated by @Roles: any authenticated tenant user can analyze a spreadsheet they upload here,
+ * same as they could open it in a spreadsheet tool themselves.
+ */
+@ApiTags('Data Analysis')
+@ApiBearerAuth()
+@Controller('data-analysis')
+@UseGuards(JwtAuthGuard)
+export class DataAnalysisController {
+  constructor(private dataAnalysisService: DataAnalysisService) {}
+
+  @Post('analyze')
+  @UseInterceptors(
+    FileInterceptor('file', {
+      storage: memoryStorage(),
+      limits: { fileSize: MAX_FILE_SIZE_BYTES },
+    }),
+  )
+  async analyze(@UploadedFile() file: Express.Multer.File, @Body('mode') mode?: string, @Body('question') question?: string) {
+    if (!file) {
+      throw new BadRequestException('No file uploaded (expected a multipart field named "file")');
+    }
+    if (!VALID_MODES.includes(mode as AnalysisMode)) {
+      throw new BadRequestException(`mode must be one of ${VALID_MODES.join(', ')}`);
+    }
+    return this.dataAnalysisService.analyze(file, mode as AnalysisMode, question);
+  }
+}

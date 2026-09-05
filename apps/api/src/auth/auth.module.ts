@@ -6,19 +6,20 @@ import { PrismaModule } from '../prisma/prisma.module';
 
 import { AuthController } from './auth.controller';
 import { AuthService } from './auth.service';
+import { resolveJwtSecret } from './jwt-secret';
+import { RevokedTokenCleanupService } from './revoked-token-cleanup.service';
 import { JwtStrategy } from './strategies/jwt.strategy';
-
 
 @Module({
   imports: [
     PassportModule.register({ defaultStrategy: 'jwt' }),
     JwtModule.register({
-      secret: process.env.JWT_SECRET || 'your-secret-key-change-in-production',
+      secret: resolveJwtSecret(),
       signOptions: { expiresIn: '24h' },
     }),
     PrismaModule,
   ],
-  providers: [AuthService, JwtStrategy],
+  providers: [AuthService, JwtStrategy, RevokedTokenCleanupService],
   controllers: [AuthController],
   exports: [AuthService, JwtModule],
 })

@@ -12,6 +12,7 @@
     "clean": "rm -rf dist"
   },
   "dependencies": {
+    "@cmmp/scoring-engine": "*",
     "@cmmp/shared": "*",
     "exceljs": "^4.4.0",
     "papaparse": "^5.4.1",

@@ -1,33 +1,17 @@
-version: '3.8'
-
 services:
   postgres:
-    image: postgres:15-alpine
+    image: postgres:16-alpine
     container_name: cmmp-postgres
     environment:
-      POSTGRES_USER: cmmp_user
-      POSTGRES_PASSWORD: cmmp_password
-      POSTGRES_DB: cmmp_db
+      POSTGRES_USER: ${POSTGRES_USER:-cmmp_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-cmmp_password}
+      POSTGRES_DB: ${POSTGRES_DB:-cmmp_db}
     ports:
       - "5432:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
-      - ./infrastructure/init-db.sql:/docker-entrypoint-initdb.d/init.sql
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U cmmp_user -d cmmp_db"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-    networks:
-      - cmmp-network
-
-  redis:
-    image: redis:7-alpine
-    container_name: cmmp-redis
-    ports:
-      - "6379:6379"
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-cmmp_user} -d ${POSTGRES_DB:-cmmp_db}"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -42,20 +26,19 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
-      redis:
+      data-analysis:
         condition: service_healthy
     environment:
-      NODE_ENV: development
-      DATABASE_URL: postgresql://cmmp_user:cmmp_password@postgres:5432/cmmp_db?schema=public
-      REDIS_URL: redis://redis:6379
-      NEXTAUTH_SECRET: dev-secret-not-for-production
-      NEXTAUTH_URL: http://localhost:3000
+      NODE_ENV: production
+      PORT: 3001
+      DATABASE_URL: postgresql://${POSTGRES_USER:-cmmp_user}:${POSTGRES_PASSWORD:-cmmp_password}@postgres:5432/${POSTGRES_DB:-cmmp_db}?schema=public
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET must be set (see .env.example) — refusing to fall back to a shared default in a container build}
+      CORS_ORIGIN: ${NEXTAUTH_URL:-http://localhost:3000}
+      # Internal-network address of the isolated data-analysis service below — never the host-published
+      # form, since this service is never published on a host port at all.
+      DATA_ANALYSIS_SERVICE_URL: http://data-analysis:8000
     ports:
       - "3001:3001"
-    volumes:
-      - .:/app
-      - /app/node_modules
-    command: npm run dev
     networks:
       - cmmp-network
 
@@ -65,19 +48,48 @@ services:
       dockerfile: ./infrastructure/Dockerfile.web
     container_name: cmmp-web
     depends_on:
-      - api
+      api:
+        condition: service_healthy
     environment:
-      NODE_ENV: development
-      NEXT_PUBLIC_API_URL: http://localhost:3001
-      NEXTAUTH_URL: http://localhost:3000
-      NEXTAUTH_SECRET: dev-secret-not-for-production
+      NODE_ENV: production
+      # Server-side (NextAuth's own login proxy, apps/web/pages/api/auth/[...nextauth].ts) — resolved
+      # inside the compose network, so it must be the service name, never localhost.
+      API_URL: http://api:3001
+      # Client-side (apps/web/lib/api.ts, runs in the browser) — must be reachable from the host,
+      # so this is deliberately the published port, not the internal service name.
+      NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:3001}
+      NEXTAUTH_URL: ${NEXTAUTH_URL:-http://localhost:3000}
+      NEXTAUTH_SECRET: ${NEXTAUTH_SECRET:?NEXTAUTH_SECRET must be set (see .env.example)}
     ports:
       - "3000:3000"
-    volumes:
-      - .:/app
-      - /app/node_modules
-      - /app/.next
-    command: npm run dev
+    networks:
+      - cmmp-network
+
+  # Isolated data-analysis feature (services/data-analysis/) — a separate Python/FastAPI process,
+  # not part of apps/api's Node runtime, so its pandas/PandasAI/AutoViz dependency tree never
+  # touches the main API image. apps/api proxies to it over this internal network only; it's
+  # never published on a host port. See apps/api/src/data-analysis/data-analysis.service.ts.
+  data-analysis:
+    build:
+      context: ./services/data-analysis
+      dockerfile: ./Dockerfile
+    container_name: cmmp-data-analysis
+    environment:
+      # Optional LLM provider chain for "ai" mode — see llm-client.ts's env var scheme. Unset by
+      # default: "local" (AutoViz, zero LLM calls) always works; "ai" mode returns a clear 503
+      # until at least one LLM_PROVIDER_<n>_API_KEY is configured here.
+      LLM_PROVIDER_1_API_KEY: ${LLM_PROVIDER_1_API_KEY:-}
+      LLM_PROVIDER_1_FORMAT: ${LLM_PROVIDER_1_FORMAT:-}
+      LLM_PROVIDER_1_BASE_URL: ${LLM_PROVIDER_1_BASE_URL:-}
+      LLM_PROVIDER_1_MODEL: ${LLM_PROVIDER_1_MODEL:-}
+      LLM_PROVIDER_2_API_KEY: ${LLM_PROVIDER_2_API_KEY:-}
+      LLM_PROVIDER_2_FORMAT: ${LLM_PROVIDER_2_FORMAT:-}
+      LLM_PROVIDER_2_BASE_URL: ${LLM_PROVIDER_2_BASE_URL:-}
+      LLM_PROVIDER_2_MODEL: ${LLM_PROVIDER_2_MODEL:-}
+      LLM_PROVIDER_3_API_KEY: ${LLM_PROVIDER_3_API_KEY:-}
+      LLM_PROVIDER_3_FORMAT: ${LLM_PROVIDER_3_FORMAT:-}
+      LLM_PROVIDER_3_BASE_URL: ${LLM_PROVIDER_3_BASE_URL:-}
+      LLM_PROVIDER_3_MODEL: ${LLM_PROVIDER_3_MODEL:-}
     networks:
       - cmmp-network
 

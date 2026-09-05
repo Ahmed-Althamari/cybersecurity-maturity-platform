@@ -7,6 +7,9 @@ pnpm-lock.yaml
 
 # Testing
 coverage/
+test-results/
+playwright-report/
+apps/web/e2e/.auth/
 
 # Production
 build/
@@ -40,9 +43,6 @@ lerna-debug.log*
 .DS_Store
 Thumbs.db
 
-# Docker
-.dockerignore
-
 # Security
 .env.production
 *.pem
@@ -65,3 +65,10 @@ temp/
 # Database
 data/
 pgdata/
+
+# Python (services/data-analysis)
+__pycache__/
+*.pyc
+.pytest_cache/
+services/*/venv/
+services/*/.venv/

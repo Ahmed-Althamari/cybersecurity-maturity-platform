@@ -1,14 +1,90 @@
 // prisma/seed.ts
 // Seed script for CMMP database
 
+import { buildFrameworkCreateInput, frameworkTreeInclude } from "@cmmp/database";
+import { parseFrameworkDefinition } from "@cmmp/framework-engine";
 import { PrismaClient, MaturityLevel, RiskLevel, ControlStatus } from "@prisma/client";
 import * as bcrypt from "bcryptjs";
+
+import nistCsf2Definition from "./fixtures/nist-csf-2.0.json";
 
 const prisma = new PrismaClient();
 
 // Local-development-only demo password. Never used in production: production
 // deployments must create users with their own credentials via the API.
 const DEMO_PASSWORD = process.env.DEMO_USER_PASSWORD || "DemoPassword123!";
+
+// ============================================================================
+// SAMPLE ASSESSMENT DATA GENERATION
+// ============================================================================
+// Deterministic pseudo-random generator (mulberry32) so re-running the seed
+// produces the same "realistic" (non-uniform) spread of scores every time,
+// per the master prompt's guidance to avoid perfect/uniform sample data.
+function mulberry32(seed: number) {
+  return function random() {
+    seed |= 0;
+    seed = (seed + 0x6d2b79f5) | 0;
+    let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+const rand = mulberry32(42);
+
+function clamp(value: number, lo: number, hi: number): number {
+  return Math.max(lo, Math.min(hi, value));
+}
+
+// Per master prompt §36: non-uniform current maturity per function, target
+// maturity in the 3.5-4.5 range.
+const FUNCTION_MATURITY_PROFILE: Record<string, { current: number; target: number }> = {
+  GV: { current: 2.2, target: 4.0 },
+  ID: { current: 3.1, target: 4.0 },
+  PR: { current: 2.8, target: 4.2 },
+  DE: { current: 2.4, target: 3.8 },
+  RS: { current: 2.1, target: 3.6 },
+  RC: { current: 1.9, target: 3.5 },
+};
+
+const MATURITY_LEVEL_BY_SCORE = [
+  MaturityLevel.NOT_APPLICABLE,
+  MaturityLevel.INITIAL,
+  MaturityLevel.DEVELOPING,
+  MaturityLevel.DEFINED,
+  MaturityLevel.MANAGED,
+  MaturityLevel.OPTIMISED,
+];
+function levelFromScore(score: number): MaturityLevel {
+  return MATURITY_LEVEL_BY_SCORE[clamp(Math.round(score), 1, 5)];
+}
+
+function riskLevelFromGap(gap: number): RiskLevel {
+  if (gap >= 2.2) return RiskLevel.CRITICAL;
+  if (gap >= 1.6) return RiskLevel.HIGH;
+  if (gap >= 0.9) return RiskLevel.MEDIUM;
+  if (gap >= 0.3) return RiskLevel.LOW;
+  return RiskLevel.MINIMAL;
+}
+
+function controlStatusFromScore(score: number): ControlStatus {
+  if (score < 1.8) return rand() < 0.15 ? ControlStatus.BLOCKED : rand() < 0.6 ? ControlStatus.NOT_STARTED : ControlStatus.IN_PROGRESS;
+  if (score < 3.2) return rand() < 0.5 ? ControlStatus.IN_PROGRESS : ControlStatus.NOT_STARTED;
+  if (score < 4.2) return rand() < 0.75 ? ControlStatus.COMPLETED : ControlStatus.IN_PROGRESS;
+  return ControlStatus.COMPLETED;
+}
+
+interface AssessmentItemPlan {
+  questionId: string;
+  functionCode: string;
+  subcategoryCode: string;
+  subcategoryName: string;
+  currentScore: number;
+  targetScore: number;
+  riskLevel: RiskLevel;
+  businessCriticality: number;
+  controlStatus: ControlStatus;
+  weight: number;
+}
 
 async function main() {
   console.log("🌱 Starting database seed...");
@@ -213,313 +289,182 @@ async function main() {
   // ============================================================================
   // FRAMEWORK - NIST CSF 2.0
   // ============================================================================
+  // Loaded from prisma/fixtures/nist-csf-2.0.json and validated through
+  // @cmmp/framework-engine (the Phase 4 loader) rather than hand-built via
+  // ad hoc Prisma calls — this is the complete 6 function / 22 category /
+  // 106 subcategory NIST CSF 2.0 hierarchy, one assessment question per
+  // subcategory, persisted as a single nested transaction.
   console.log("Creating NIST CSF 2.0 framework...");
+  const nistDefinition = parseFrameworkDefinition(nistCsf2Definition);
   const nistFramework = await prisma.framework.create({
+    data: buildFrameworkCreateInput(tenant.id, nistDefinition),
+    include: frameworkTreeInclude,
+  });
+  const categoryCount = nistFramework.functions.reduce((sum, fn) => sum + fn.categories.length, 0);
+  const subcategoryCount = nistFramework.functions.reduce(
+    (sum, fn) => sum + fn.categories.reduce((s, c) => s + c.subcategories.length, 0),
+    0,
+  );
+  console.log(`  ${nistFramework.functions.length} functions, ${categoryCount} categories, ${subcategoryCount} subcategories`);
+
+  console.log("Creating default assessment template...");
+  const nistTemplate = await prisma.assessmentTemplate.create({
     data: {
-      tenantId: tenant.id,
-      name: "NIST Cybersecurity Framework 2.0",
-      slug: "nist-csf-2.0",
-      description: "NIST Cybersecurity Framework version 2.0",
-      version: "2.0",
-      frameWorkType: "NIST_CSF",
-      isActive: true,
+      frameworkId: nistFramework.id,
+      name: `${nistFramework.name} - Default Template`,
+      isDefault: true,
     },
   });
-
-  // Create NIST Functions
-  console.log("Creating NIST Functions...");
-  const functions = [
-    { code: "GV", name: "Govern", description: "Establish the vision and strategy" },
-    { code: "ID", name: "Identify", description: "Develop understanding of cybersecurity risk" },
-    { code: "PR", name: "Protect", description: "Develop and implement safeguards" },
-    { code: "DE", name: "Detect", description: "Develop and implement detection procedures" },
-    { code: "RS", name: "Respond", description: "Develop response procedures" },
-    { code: "RC", name: "Recover", description: "Develop recovery procedures" },
-  ];
-
-  const createdFunctions = await Promise.all(
-    functions.map((fn, idx) =>
-      prisma.function.create({
-        data: {
-          frameworkId: nistFramework.id,
-          code: fn.code,
-          name: fn.name,
-          description: fn.description,
-          displayOrder: idx,
-        },
-      })
-    )
-  );
-
-  // Create sample categories for Govern function
-  console.log("Creating sample NIST categories...");
-  const governFunction = createdFunctions.find((f) => f.code === "GV");
-  const categories = [
-    {
-      code: "GV.RM",
-      name: "Risk Management Strategy",
-      description: "Risk management strategy development and execution",
-    },
-    {
-      code: "GV.SC",
-      name: "Supply Chain Risk Management",
-      description: "Manage supply chain risk",
-    },
-    {
-      code: "GV.RO",
-      name: "Roles, Responsibilities, and Authorities",
-      description: "Define roles, responsibilities, and authorities",
-    },
-  ];
-
-  const createdCategories = await Promise.all(
-    categories.map((cat, idx) =>
-      prisma.category.create({
-        data: {
-          functionId: governFunction!.id,
-          code: cat.code,
-          name: cat.name,
-          description: cat.description,
-          displayOrder: idx,
-        },
-      })
-    )
-  );
-
-  // Create sample subcategories
-  console.log("Creating sample NIST subcategories...");
-  const rmCategory = createdCategories.find((c) => c.code === "GV.RM");
-  const subcategories = [
-    {
-      code: "GV.RM-01",
-      name: "Risk Management Process Governance",
-      description: "Establish and execute risk management processes",
-    },
-    {
-      code: "GV.RM-02",
-      name: "Risk Identification",
-      description: "Identify cybersecurity risks",
-    },
-    {
-      code: "GV.RM-03",
-      name: "Risk Analysis",
-      description: "Analyze cybersecurity risks",
-    },
-  ];
-
-  const createdSubcategories = await Promise.all(
-    subcategories.map((subcat, idx) =>
-      prisma.subcategory.create({
-        data: {
-          categoryId: rmCategory!.id,
-          code: subcat.code,
-          name: subcat.name,
-          description: subcat.description,
-          displayOrder: idx,
-        },
-      })
-    )
-  );
-
-  // Create assessment questions
-  console.log("Creating assessment questions...");
-  const questions = [
-    {
-      question: "Has the organization established cybersecurity risk management objectives?",
-      guidance: "Document how risk management aligns with organizational objectives",
-    },
-    {
-      question:
-        "Does the organization have documented processes to identify cybersecurity risks?",
-      guidance:
-        "Include risk identification methodologies and frequency of identification activities",
-    },
-    {
-      question:
-        "Are identified cybersecurity risks formally analyzed and prioritized?",
-      guidance: "Document risk analysis frameworks and prioritization criteria",
-    },
-  ];
-
-  const createdQuestions = await Promise.all(
-    questions.map((q, idx) =>
-      prisma.assessmentQuestion.create({
-        data: {
-          subcategoryId: createdSubcategories[idx].id,
-          question: q.question,
-          guidance: q.guidance,
-        },
-      })
-    )
-  );
-
-  // Create sample categories for other functions
-  console.log("Creating additional NIST categories...");
-  for (const func of createdFunctions) {
-    if (func.code !== "GV") {
-      await prisma.category.create({
-        data: {
-          functionId: func.id,
-          code: `${func.code}.XX`,
-          name: `${func.name} - Sample Category`,
-          description: `Sample category for ${func.name}`,
-        },
-      });
-    }
-  }
 
   // ============================================================================
   // ASSESSMENT
   // ============================================================================
+  // One assessment item per NIST CSF 2.0 subcategory question, with a
+  // realistic (non-uniform) spread of current/target maturity per function —
+  // see FUNCTION_MATURITY_PROFILE above.
+  console.log("Generating sample assessment responses...");
+  const itemPlans: AssessmentItemPlan[] = [];
+  for (const fn of nistFramework.functions) {
+    const profile = FUNCTION_MATURITY_PROFILE[fn.code] ?? { current: 2.5, target: 4.0 };
+    for (const category of fn.categories) {
+      for (const subcategory of category.subcategories) {
+        const question = subcategory.assessmentQuestions[0];
+        if (!question) continue;
+
+        const currentScore = clamp(profile.current + (rand() - 0.5) * 1.6, 1, 5);
+        const targetScore = clamp(profile.target + (rand() - 0.5) * 0.6, currentScore + 0.2, 5);
+
+        itemPlans.push({
+          questionId: question.id,
+          functionCode: fn.code,
+          subcategoryCode: subcategory.code,
+          subcategoryName: subcategory.name,
+          currentScore,
+          targetScore,
+          riskLevel: riskLevelFromGap(targetScore - currentScore),
+          businessCriticality: clamp(Math.round(3 + (rand() - 0.5) * 4), 1, 5),
+          controlStatus: controlStatusFromScore(currentScore),
+          weight: Number((0.8 + rand() * 0.4).toFixed(2)),
+        });
+      }
+    }
+  }
+
+  const totalWeight = itemPlans.reduce((sum, item) => sum + item.weight, 0);
+  const weightedCurrent = itemPlans.reduce((sum, item) => sum + item.currentScore * item.weight, 0) / totalWeight;
+  const weightedTarget = itemPlans.reduce((sum, item) => sum + item.targetScore * item.weight, 0) / totalWeight;
+
   console.log("Creating sample assessment...");
   const assessment = await prisma.assessment.create({
     data: {
       tenantId: tenant.id,
       organisationId: organisation.id,
+      templateId: nistTemplate.id,
       name: "Q3 2026 Cybersecurity Assessment",
-      description: "Initial comprehensive cybersecurity maturity assessment",
+      description: "Initial comprehensive cybersecurity maturity assessment against NIST CSF 2.0",
       status: "SUBMITTED",
       assessmentDate: new Date("2026-08-30"),
-      currentMaturity: 2.7,
-      targetMaturity: 3.8,
-      maturityGap: 1.1,
-      completionPercentage: 95,
+      currentMaturity: Number(weightedCurrent.toFixed(2)),
+      targetMaturity: Number(weightedTarget.toFixed(2)),
+      maturityGap: Number((weightedTarget - weightedCurrent).toFixed(2)),
+      completionPercentage: Math.round(94 + rand() * 5),
       createdById: assessorUser.id,
       updatedById: assessorUser.id,
+      items: {
+        create: itemPlans.map((item) => ({
+          questionId: item.questionId,
+          currentMaturity: levelFromScore(item.currentScore),
+          targetMaturity: levelFromScore(item.targetScore),
+          weight: item.weight,
+          riskLevel: item.riskLevel,
+          businessCriticality: item.businessCriticality,
+          controlStatus: item.controlStatus,
+          rationale: `Maturity assessed against NIST CSF 2.0 ${item.subcategoryCode}: ${item.subcategoryName}`,
+          ownerName: "IT Security Team",
+          ownerEmail: "security@example.com",
+        })),
+      },
+    },
+    include: { items: true },
+  });
+  console.log(`  ${assessment.items.length} assessment items created`);
+
+  await prisma.assessmentHistory.create({
+    data: {
+      assessmentId: assessment.id,
+      version: 1,
+      status: assessment.status,
+      currentMaturity: assessment.currentMaturity,
+      targetMaturity: assessment.targetMaturity,
     },
   });
 
-  // Create assessment responses
-  console.log("Creating assessment responses...");
-  const assessmentItems = await Promise.all(
-    createdQuestions.map((q, idx) =>
-      prisma.assessmentItem.create({
-        data: {
-          assessmentId: assessment.id,
-          questionId: q.id,
-          currentMaturity: ["DEVELOPING", "DEFINED", "INITIAL"][idx] as MaturityLevel,
-          targetMaturity: "DEFINED",
-          weight: 1.0,
-          riskLevel: ["MEDIUM", "LOW", "HIGH"][idx] as RiskLevel,
-          businessCriticality: [4, 5, 3][idx],
-          controlStatus: "IN_PROGRESS" as ControlStatus,
-          rationale: `Assessment of ${q.question}`,
-          ownerName: "IT Security Team",
-          ownerEmail: "security@example.com",
-        },
-      })
-    )
-  );
+  const itemsByQuestionId = new Map(assessment.items.map((item) => [item.questionId, item]));
+  const plansWithItems = itemPlans
+    .map((plan) => ({ plan, item: itemsByQuestionId.get(plan.questionId) }))
+    .filter((entry): entry is { plan: AssessmentItemPlan; item: (typeof assessment.items)[number] } => Boolean(entry.item));
 
   // ============================================================================
   // RISKS
   // ============================================================================
+  // Not every maturity gap becomes a tracked Risk — only the highest-gap
+  // subcategories do, the way a real risk register stays curated rather
+  // than mirroring the full assessment 1:1.
   console.log("Creating sample risks...");
-  const riskData = [
-    {
-      title: "Inadequate Risk Management Process",
-      description: "Risk management processes are not fully formalized",
-      threat: "Unmanaged cybersecurity risks",
-      riskLevel: RiskLevel.HIGH,
-      assessmentItemId: assessmentItems[0].id,
-    },
-    {
-      title: "Lack of Formal Risk Identification",
-      description: "Risk identification is ad-hoc rather than systematic",
-      threat: "Risks are missed during assessment",
-      riskLevel: RiskLevel.MEDIUM,
-      assessmentItemId: assessmentItems[1].id,
-    },
-    {
-      title: "Limited Risk Analysis Capability",
-      description: "Risk analysis lacks maturity and formalization",
-      threat: "Poor risk prioritization",
-      riskLevel: RiskLevel.MEDIUM,
-      assessmentItemId: assessmentItems[2].id,
-    },
-  ];
+  const gapOf = (plan: AssessmentItemPlan) => plan.targetScore - plan.currentScore;
+  const riskCandidates = [...plansWithItems].sort((a, b) => gapOf(b.plan) - gapOf(a.plan)).slice(0, 12);
 
   const createdRisks = await Promise.all(
-    riskData.map((risk) =>
-      prisma.risk.create({
+    riskCandidates.map(({ plan, item }) => {
+      const likelihood = clamp(Math.round(5 - plan.currentScore), 1, 5);
+      const impact = plan.businessCriticality;
+      return prisma.risk.create({
         data: {
           tenantId: tenant.id,
           organisationId: organisation.id,
-          title: risk.title,
-          description: risk.description,
-          threat: risk.threat,
-          likelihood: 4,
-          impact: 4,
-          inherentRiskScore: 16,
-          residualRiskScore: 12,
-          riskLevel: risk.riskLevel,
+          title: `Maturity gap: ${plan.subcategoryCode}`,
+          description: plan.subcategoryName,
+          threat: `Unmet NIST CSF 2.0 outcome in the ${plan.functionCode} function (${plan.subcategoryCode})`,
+          likelihood,
+          impact,
+          inherentRiskScore: likelihood * impact,
+          residualRiskScore: Math.max(1, likelihood * impact - 4),
+          riskLevel: plan.riskLevel,
           owner: "Chief Risk Officer",
           status: "OPEN",
-          assessmentItemId: risk.assessmentItemId,
+          assessmentItemId: item.id,
         },
-      })
-    )
+      });
+    }),
   );
 
   // ============================================================================
   // REMEDIATION INITIATIVES
   // ============================================================================
   console.log("Creating remediation initiatives...");
-  const initiatives = [
-    {
-      title: "Formalize Risk Management Process",
-      description: "Establish and document comprehensive risk management process",
-      priority: 1,
-      complexity: 3,
-      targetMaturity: MaturityLevel.DEFINED,
-      estimatedCost: 50000,
-      targetCompletionDate: new Date("2026-11-30"),
-      riskIds: [createdRisks[0].id],
-    },
-    {
-      title: "Implement Systematic Risk Identification",
-      description: "Develop and implement systematic risk identification methodology",
-      priority: 2,
-      complexity: 3,
-      targetMaturity: MaturityLevel.DEFINED,
-      estimatedCost: 30000,
-      targetCompletionDate: new Date("2026-12-31"),
-      riskIds: [createdRisks[1].id],
-    },
-    {
-      title: "Enhance Risk Analysis Capabilities",
-      description: "Build capability for consistent risk analysis and prioritization",
-      priority: 3,
-      complexity: 2,
-      targetMaturity: MaturityLevel.MANAGED,
-      estimatedCost: 25000,
-      targetCompletionDate: new Date("2027-01-31"),
-      riskIds: [createdRisks[2].id],
-    },
-  ];
-
   await Promise.all(
-    initiatives.map((init) =>
-      prisma.remediationInitiative.create({
+    createdRisks.slice(0, 6).map((risk, idx) => {
+      const { plan } = riskCandidates[idx];
+      return prisma.remediationInitiative.create({
         data: {
           tenantId: tenant.id,
           organisationId: organisation.id,
-          title: init.title,
-          description: init.description,
-          priority: init.priority,
-          complexity: init.complexity,
-          currentMaturity: MaturityLevel.INITIAL,
-          targetMaturity: init.targetMaturity,
-          estimatedCost: init.estimatedCost,
-          targetCompletionDate: init.targetCompletionDate,
+          title: `Close gap: ${plan.subcategoryCode}`,
+          description: `Address: ${plan.subcategoryName}`,
+          priority: idx + 1,
+          complexity: clamp(Math.round(1 + rand() * 2), 1, 3),
+          currentMaturity: levelFromScore(plan.currentScore),
+          targetMaturity: levelFromScore(plan.targetScore),
+          estimatedCost: Math.round((15000 + rand() * 65000) / 5000) * 5000,
+          targetCompletionDate: new Date(2026, 9 + idx, 30),
           status: "PLANNED",
           owner: "Head of Security",
           risks: {
-            connect: init.riskIds.map((id) => ({ id })),
+            connect: [{ id: risk.id }],
           },
         },
-      })
-    )
+      });
+    }),
   );
 
   // ============================================================================

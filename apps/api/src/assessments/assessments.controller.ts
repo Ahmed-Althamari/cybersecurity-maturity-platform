@@ -1,0 +1,171 @@
+import { MAX_FILE_SIZE_BYTES } from '@cmmp/import-engine';
+import { UserRole } from '@cmmp/shared';
+import {
+  BadRequestException,
+  Body,
+  Controller,
+  Delete,
+  Get,
+  Param,
+  Patch,
+  Post,
+  Query,
+  UploadedFile,
+  UseGuards,
+  UseInterceptors,
+} from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
+import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
+import { memoryStorage } from 'multer';
+
+import { AuditLog } from '../audit/decorators/audit-log.decorator';
+import { CurrentUser } from '../auth/decorators/current-user.decorator';
+import { Roles } from '../auth/decorators/roles.decorator';
+import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { RolesGuard } from '../auth/guards/roles.guard';
+import type { RequestUser } from '../auth/types/authenticated-request';
+
+import { AssessmentsService, parseColumnMappingOverride } from './assessments.service';
+import { CreateAssessmentDto } from './dto/create-assessment.dto';
+import { UpdateAssessmentDto } from './dto/update-assessment.dto';
+import { UpsertAssessmentItemDto } from './dto/upsert-assessment-item.dto';
+
+const ASSESSMENT_WRITE_ROLES = [
+  UserRole.PLATFORM_ADMIN,
+  UserRole.ORGANISATION_ADMIN,
+  UserRole.CISO,
+  UserRole.GRC_MANAGER,
+  UserRole.ASSESSOR,
+];
+
+@ApiTags('Assessments')
+@ApiBearerAuth()
+@Controller('assessments')
+@UseGuards(JwtAuthGuard)
+export class AssessmentsController {
+  constructor(private assessmentsService: AssessmentsService) {}
+
+  @Post()
+  @UseGuards(RolesGuard)
+  @Roles(...ASSESSMENT_WRITE_ROLES)
+  @AuditLog('CREATE', 'Assessment')
+  async create(@Body() dto: CreateAssessmentDto, @CurrentUser() user: RequestUser) {
+    return this.assessmentsService.create(user.tenantId, user.sub, dto);
+  }
+
+  @Get()
+  async findAll(
+    @CurrentUser() user: RequestUser,
+    @Query('organisationId') organisationId?: string,
+    @Query('status') status?: string,
+  ) {
+    return this.assessmentsService.findAll(user.tenantId, organisationId, status);
+  }
+
+  @Get(':id')
+  async findOne(@Param('id') id: string, @CurrentUser() user: RequestUser) {
+    return this.assessmentsService.findOne(id, user.tenantId);
+  }
+
+  @Patch(':id')
+  @UseGuards(RolesGuard)
+  @Roles(...ASSESSMENT_WRITE_ROLES)
+  @AuditLog('UPDATE', 'Assessment')
+  async update(@Param('id') id: string, @Body() dto: UpdateAssessmentDto, @CurrentUser() user: RequestUser) {
+    return this.assessmentsService.update(id, user.tenantId, user.sub, dto);
+  }
+
+  @Delete(':id')
+  @UseGuards(RolesGuard)
+  @Roles(UserRole.PLATFORM_ADMIN, UserRole.ORGANISATION_ADMIN)
+  @AuditLog('DELETE', 'Assessment')
+  async remove(@Param('id') id: string, @CurrentUser() user: RequestUser) {
+    return this.assessmentsService.remove(id, user.tenantId);
+  }
+
+  @Get(':id/history')
+  async history(@Param('id') id: string, @CurrentUser() user: RequestUser) {
+    return this.assessmentsService.history(id, user.tenantId);
+  }
+
+  @Get(':id/results')
+  async getResults(@Param('id') id: string, @CurrentUser() user: RequestUser) {
+    return this.assessmentsService.getResults(id, user.tenantId);
+  }
+
+  @Get(':id/gaps')
+  async getGaps(
+    @Param('id') id: string,
+    @CurrentUser() user: RequestUser,
+    @Query('depth') depth?: string,
+    @Query('limit') limit?: string,
+    @Query('minGap') minGap?: string,
+  ) {
+    return this.assessmentsService.getGaps(id, user.tenantId, {
+      depth: depth !== undefined ? Number(depth) : undefined,
+      limit: limit !== undefined ? Number(limit) : undefined,
+      minGap: minGap !== undefined ? Number(minGap) : undefined,
+    });
+  }
+
+  @Post(':id/items')
+  @UseGuards(RolesGuard)
+  @Roles(...ASSESSMENT_WRITE_ROLES)
+  @AuditLog('UPDATE', 'AssessmentItem')
+  async upsertItem(@Param('id') id: string, @Body() dto: UpsertAssessmentItemDto, @CurrentUser() user: RequestUser) {
+    return this.assessmentsService.upsertItem(id, user.tenantId, user.sub, dto);
+  }
+
+  @Post(':id/submit')
+  @UseGuards(RolesGuard)
+  @Roles(...ASSESSMENT_WRITE_ROLES)
+  @AuditLog('UPDATE', 'Assessment')
+  async submit(@Param('id') id: string, @CurrentUser() user: RequestUser) {
+    return this.assessmentsService.submit(id, user.tenantId, user.sub);
+  }
+
+  @Post(':id/import/preview')
+  @UseGuards(RolesGuard)
+  @Roles(...ASSESSMENT_WRITE_ROLES)
+  @UseInterceptors(
+    FileInterceptor('file', {
+      storage: memoryStorage(),
+      limits: { fileSize: MAX_FILE_SIZE_BYTES },
+    }),
+  )
+  async previewImport(
+    @Param('id') id: string,
+    @UploadedFile() file: Express.Multer.File,
+    @CurrentUser() user: RequestUser,
+    @Query('worksheet') worksheet?: string,
+  ) {
+    if (!file) {
+      throw new BadRequestException('No file uploaded (expected a multipart field named "file")');
+    }
+    return this.assessmentsService.previewImport(id, user.tenantId, file, worksheet);
+  }
+
+  @Post(':id/import')
+  @UseGuards(RolesGuard)
+  @Roles(...ASSESSMENT_WRITE_ROLES)
+  @AuditLog('IMPORT', 'Assessment')
+  @UseInterceptors(
+    FileInterceptor('file', {
+      storage: memoryStorage(),
+      limits: { fileSize: MAX_FILE_SIZE_BYTES },
+    }),
+  )
+  async importFile(
+    @Param('id') id: string,
+    @UploadedFile() file: Express.Multer.File,
+    @CurrentUser() user: RequestUser,
+    @Query('worksheet') worksheet?: string,
+    @Body('columnMapping') columnMappingJson?: string,
+  ) {
+    if (!file) {
+      throw new BadRequestException('No file uploaded (expected a multipart field named "file")');
+    }
+    const columnMapping = parseColumnMappingOverride(columnMappingJson);
+    return this.assessmentsService.importFile(id, user.tenantId, user.sub, file, worksheet, columnMapping);
+  }
+}

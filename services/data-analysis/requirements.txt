@@ -1,0 +1,16 @@
+# Versions pinned to what was verified installable together in a clean Python 3.11 venv during
+# development (see docs/IMPLEMENTATION_STATUS.md) — pandasai 3.0.0 is a ground-up rewrite of
+# earlier 1.x/2.x releases, so anything older speaks a different, incompatible API.
+fastapi==0.141.1
+uvicorn[standard]==0.52.4
+python-multipart==0.0.32
+pandas==2.3.3
+openpyxl==3.1.5
+pandasai==3.0.0
+pandasai-litellm==0.0.1
+litellm==1.99.0
+autoviz==0.1.807
+ipython==9.17.1
+matplotlib==3.7.4
+httpx==0.28.1
+pytest==8.3.4

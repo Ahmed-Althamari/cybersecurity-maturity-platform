@@ -12,6 +12,7 @@
     "clean": "rm -rf dist"
   },
   "dependencies": {
+    "@cmmp/framework-engine": "*",
     "@cmmp/shared": "*"
   },
   "devDependencies": {
