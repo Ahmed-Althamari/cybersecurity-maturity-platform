@@ -1,8 +1,11 @@
+import { Boxes } from 'lucide-react';
 import type { GetServerSideProps } from 'next';
 import Head from 'next/head';
 import Link from 'next/link';
 import React from 'react';
 
+import { AppHeader } from '../../components/layout/AppHeader';
+import { EmptyState } from '../../components/layout/EmptyState';
 import { ApiError, listFrameworks, type FrameworkSummary } from '../../lib/api';
 import { getAuthSession } from '../../lib/auth';
 
@@ -18,25 +21,16 @@ export default function FrameworksPage({ frameworks, errorMessage }: FrameworksP
         <title>Frameworks - CMMP</title>
       </Head>
       <div className="min-h-screen bg-gradient-to-b from-slate-900 to-slate-800">
+        <AppHeader />
         <div className="container mx-auto px-4 py-8">
-          <div className="flex items-center justify-between mb-8">
-            <div>
-              <h1 className="text-3xl font-bold text-white">Frameworks</h1>
-              <p className="text-slate-400 text-sm mt-1">Every framework loaded for your tenant.</p>
-            </div>
-            <Link
-              href="/dashboard"
-              className="bg-slate-700 hover:bg-slate-600 text-white text-sm font-medium py-2 px-4 rounded-md transition-colors"
-            >
-              Back to Dashboard
-            </Link>
+          <div className="mb-8">
+            <h1 className="text-3xl font-bold text-white">Frameworks</h1>
+            <p className="text-slate-400 text-sm mt-1">Every framework loaded for your tenant.</p>
           </div>
 
           {errorMessage && <div className="bg-red-950/40 border border-red-800 text-red-300 rounded-lg p-4 mb-6">{errorMessage}</div>}
 
-          {frameworks.length === 0 && !errorMessage && (
-            <div className="bg-slate-800 rounded-lg p-8 border border-slate-700 text-center text-slate-400">No frameworks loaded yet.</div>
-          )}
+          {frameworks.length === 0 && !errorMessage && <EmptyState icon={Boxes} title="No frameworks loaded yet." />}
 
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
             {frameworks.map((framework) => (

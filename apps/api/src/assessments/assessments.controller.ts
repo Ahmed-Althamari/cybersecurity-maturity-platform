@@ -25,7 +25,7 @@ import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import type { RequestUser } from '../auth/types/authenticated-request';
 
-import { AssessmentsService } from './assessments.service';
+import { AssessmentsService, parseColumnMappingOverride } from './assessments.service';
 import { CreateAssessmentDto } from './dto/create-assessment.dto';
 import { UpdateAssessmentDto } from './dto/update-assessment.dto';
 import { UpsertAssessmentItemDto } from './dto/upsert-assessment-item.dto';
@@ -124,6 +124,27 @@ export class AssessmentsController {
     return this.assessmentsService.submit(id, user.tenantId, user.sub);
   }
 
+  @Post(':id/import/preview')
+  @UseGuards(RolesGuard)
+  @Roles(...ASSESSMENT_WRITE_ROLES)
+  @UseInterceptors(
+    FileInterceptor('file', {
+      storage: memoryStorage(),
+      limits: { fileSize: MAX_FILE_SIZE_BYTES },
+    }),
+  )
+  async previewImport(
+    @Param('id') id: string,
+    @UploadedFile() file: Express.Multer.File,
+    @CurrentUser() user: RequestUser,
+    @Query('worksheet') worksheet?: string,
+  ) {
+    if (!file) {
+      throw new BadRequestException('No file uploaded (expected a multipart field named "file")');
+    }
+    return this.assessmentsService.previewImport(id, user.tenantId, file, worksheet);
+  }
+
   @Post(':id/import')
   @UseGuards(RolesGuard)
   @Roles(...ASSESSMENT_WRITE_ROLES)
@@ -139,10 +160,12 @@ export class AssessmentsController {
     @UploadedFile() file: Express.Multer.File,
     @CurrentUser() user: RequestUser,
     @Query('worksheet') worksheet?: string,
+    @Body('columnMapping') columnMappingJson?: string,
   ) {
     if (!file) {
       throw new BadRequestException('No file uploaded (expected a multipart field named "file")');
     }
-    return this.assessmentsService.importFile(id, user.tenantId, user.sub, file, worksheet);
+    const columnMapping = parseColumnMappingOverride(columnMappingJson);
+    return this.assessmentsService.importFile(id, user.tenantId, user.sub, file, worksheet, columnMapping);
   }
 }

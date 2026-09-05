@@ -1,9 +1,10 @@
 import type { GetServerSideProps } from 'next';
 import Head from 'next/head';
-import Link from 'next/link';
 import { useRouter } from 'next/router';
 import React, { useState } from 'react';
 
+import { AppHeader } from '../../components/layout/AppHeader';
+import { BackLink } from '../../components/layout/BackLink';
 import { RiskLevelBadge } from '../../components/risks/RiskLevelBadge';
 import { ApiError, deleteRisk, getRisk, updateRisk, type RiskRecord } from '../../lib/api';
 import { getAuthSession } from '../../lib/auth';
@@ -37,6 +38,7 @@ export default function RiskDetailPage({ risk, accessToken, canEdit, canDelete, 
   if (!risk) {
     return (
       <div className="min-h-screen bg-gradient-to-b from-slate-900 to-slate-800">
+        <AppHeader />
         <div className="container mx-auto px-4 py-8">
           {errorMessage && <div className="bg-red-950/40 border border-red-800 text-red-300 rounded-lg p-4">{errorMessage}</div>}
         </div>
@@ -75,10 +77,9 @@ export default function RiskDetailPage({ risk, accessToken, canEdit, canDelete, 
         <title>{risk.title} - CMMP</title>
       </Head>
       <div className="min-h-screen bg-gradient-to-b from-slate-900 to-slate-800">
+        <AppHeader />
         <div className="container mx-auto px-4 py-8 max-w-2xl">
-          <Link href="/risks" className="text-slate-400 hover:text-white text-sm">
-            ← Risk Register
-          </Link>
+          <BackLink href="/risks">Risk Register</BackLink>
           <div className="flex items-center justify-between mt-1 mb-8">
             <h1 className="text-3xl font-bold text-white">{risk.title}</h1>
             <RiskLevelBadge riskLevel={risk.riskLevel} />

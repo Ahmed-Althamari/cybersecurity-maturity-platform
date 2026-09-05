@@ -1,5 +1,16 @@
 import { frameworkTreeInclude, toFrameworkDefinition } from '@cmmp/database';
-import { buildErrorReportCsv, importFromCsv, importFromXlsx, validateFileUpload, type ValidatedRow } from '@cmmp/import-engine';
+import {
+  buildErrorReportCsv,
+  CANONICAL_COLUMNS,
+  importFromSheet,
+  parseCsv,
+  parseXlsx,
+  validateFileUpload,
+  type CanonicalColumn,
+  type ColumnMapping,
+  type RawSheet,
+  type ValidatedRow,
+} from '@cmmp/import-engine';
 import { analyzeGaps, scoreFramework, type AnalyzeGapsOptions, type ScoredItem } from '@cmmp/scoring-engine';
 import { MaturityLevel as SharedMaturityLevel } from '@cmmp/shared';
 import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
@@ -9,6 +20,36 @@ import { PrismaService } from '../prisma/prisma.service';
 import { CreateAssessmentDto } from './dto/create-assessment.dto';
 import { UpdateAssessmentDto } from './dto/update-assessment.dto';
 import { UpsertAssessmentItemDto } from './dto/upsert-assessment-item.dto';
+import { ImportMappingSuggesterService } from './import-mapping/mapping-suggester.service';
+
+const CANONICAL_COLUMN_SET = new Set<string>(CANONICAL_COLUMNS);
+
+/** Parses and validates a user-supplied column-mapping override — an unknown canonical key or a non-string value is rejected outright rather than silently ignored, since this came from a request body, not a trusted default. */
+export function parseColumnMappingOverride(raw: string | undefined): ColumnMapping | undefined {
+  if (!raw) {
+    return undefined;
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    throw new BadRequestException('columnMapping must be valid JSON');
+  }
+  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+    throw new BadRequestException('columnMapping must be a JSON object');
+  }
+  const mapping: ColumnMapping = {};
+  for (const [key, value] of Object.entries(parsed as Record<string, unknown>)) {
+    if (!CANONICAL_COLUMN_SET.has(key)) {
+      throw new BadRequestException(`columnMapping has an unknown field: ${key}`);
+    }
+    if (typeof value !== 'string') {
+      throw new BadRequestException(`columnMapping.${key} must be a string`);
+    }
+    mapping[key as CanonicalColumn] = value;
+  }
+  return mapping;
+}
 
 /**
  * Prisma generates its own `$Enums.MaturityLevel` (from the schema) which
@@ -38,7 +79,10 @@ const assessmentDetailInclude = {
 
 @Injectable()
 export class AssessmentsService {
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private mappingSuggester: ImportMappingSuggesterService,
+  ) {}
 
   async create(tenantId: string, userId: string, dto: CreateAssessmentDto) {
     const organisation = await this.prisma.organisation.findFirst({
@@ -213,7 +257,21 @@ export class AssessmentsService {
    * in the response (plus a downloadable CSV error report) instead of
    * disappearing.
    */
-  async importFile(assessmentId: string, tenantId: string, userId: string, file: Express.Multer.File, worksheetName?: string) {
+  /** Shared by `importFile` and `previewImport` — parses the upload into a `RawSheet` regardless of .csv/.xlsx, after the same file-guard checks either caller needs. */
+  private async parseUploadedSheet(file: Express.Multer.File, worksheetName?: string): Promise<{ sheet: RawSheet; sheetNames: string[] }> {
+    const fileIssues = validateFileUpload({ filename: file.originalname, mimetype: file.mimetype, size: file.size });
+    if (fileIssues.some((issue) => issue.severity === 'error')) {
+      throw new BadRequestException({ message: 'Invalid file upload', issues: fileIssues });
+    }
+
+    const isCsv = file.originalname.toLowerCase().endsWith('.csv');
+    if (isCsv) {
+      return { sheet: parseCsv(file.buffer.toString('utf-8')), sheetNames: [] };
+    }
+    return parseXlsx(file.buffer, worksheetName);
+  }
+
+  private async assertEditableAssessment(assessmentId: string, tenantId: string) {
     const assessment = await this.findOrThrow(assessmentId, tenantId);
     if (!EDITABLE_STATUSES.includes(assessment.status)) {
       throw new ConflictException(`Assessment cannot be edited while in '${assessment.status}' status`);
@@ -221,16 +279,49 @@ export class AssessmentsService {
     if (!assessment.template) {
       throw new ConflictException('Assessment has no framework template to import responses against');
     }
+    return { ...assessment, template: assessment.template };
+  }
 
-    const fileIssues = validateFileUpload({ filename: file.originalname, mimetype: file.mimetype, size: file.size });
-    if (fileIssues.some((issue) => issue.severity === 'error')) {
-      throw new BadRequestException({ message: 'Invalid file upload', issues: fileIssues });
-    }
+  /**
+   * Parses the upload and returns the auto-detected (+ LLM-suggested, when configured) column
+   * mapping and validation counts, without writing anything — lets the import wizard show the
+   * user what will happen and let them correct a mapping before committing to `importFile`.
+   */
+  async previewImport(assessmentId: string, tenantId: string, file: Express.Multer.File, worksheetName?: string) {
+    await this.assertEditableAssessment(assessmentId, tenantId);
+    const { sheet, sheetNames } = await this.parseUploadedSheet(file, worksheetName);
 
-    const isCsv = file.originalname.toLowerCase().endsWith('.csv');
-    const importResult = isCsv
-      ? importFromCsv(file.buffer.toString('utf-8'))
-      : (await importFromXlsx(file.buffer, worksheetName)).result;
+    const autoResult = importFromSheet(sheet);
+    const llmSuggested = await this.mappingSuggester.suggestMapping(sheet.headers, sheet.rows, autoResult.unmappedColumns);
+    const finalResult =
+      Object.keys(llmSuggested).length > 0 ? importFromSheet(sheet, { columnMapping: llmSuggested }) : autoResult;
+
+    return {
+      sheetNames,
+      headers: sheet.headers,
+      columnMapping: finalResult.columnMapping,
+      unmappedColumns: finalResult.unmappedColumns,
+      llmConfigured: this.mappingSuggester.isConfigured,
+      llmSuggestedColumns: Object.keys(llmSuggested) as CanonicalColumn[],
+      totalRows: finalResult.totalRows,
+      validCount: finalResult.valid.length,
+      warningCount: finalResult.warnings.length,
+      invalidCount: finalResult.invalid.length,
+      duplicateCount: finalResult.duplicates.length,
+    };
+  }
+
+  async importFile(
+    assessmentId: string,
+    tenantId: string,
+    userId: string,
+    file: Express.Multer.File,
+    worksheetName?: string,
+    columnMappingOverride?: ColumnMapping,
+  ) {
+    const assessment = await this.assertEditableAssessment(assessmentId, tenantId);
+    const { sheet } = await this.parseUploadedSheet(file, worksheetName);
+    const importResult = importFromSheet(sheet, { columnMapping: columnMappingOverride });
 
     // `warning` rows are importable — the flagged issue (e.g. a sanitised
     // formula cell, an unparseable due date) has already been handled or

@@ -21,6 +21,11 @@ import RisksPage from '../../../pages/risks/index';
 // colocated as normal.
 jest.mock('../../../lib/auth', () => ({ getAuthSession: jest.fn() }));
 
+// RisksPage now renders the shared AppHeader, which reads the active route via next/router's
+// useRouter() to highlight the current nav item — real only inside a Next app, not a bare RTL
+// render, so it needs the same kind of mock as lib/auth above.
+jest.mock('next/router', () => ({ useRouter: () => ({ pathname: '/risks' }) }));
+
 const risk: RiskRecord = {
   id: 'risk-1',
   organisationId: 'org-1',

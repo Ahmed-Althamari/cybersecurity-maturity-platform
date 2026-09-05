@@ -3,7 +3,16 @@ import Head from 'next/head';
 import Link from 'next/link';
 import React, { useState } from 'react';
 
-import { ApiError, getAssessment, importAssessmentFile, type ImportResult } from '../../../lib/api';
+import { AppHeader } from '../../../components/layout/AppHeader';
+import { BackLink } from '../../../components/layout/BackLink';
+import {
+  ApiError,
+  getAssessment,
+  importAssessmentFile,
+  previewAssessmentImport,
+  type ImportPreviewResult,
+  type ImportResult,
+} from '../../../lib/api';
 import { getAuthSession } from '../../../lib/auth';
 
 interface ImportPageProps {
@@ -14,7 +23,7 @@ interface ImportPageProps {
   errorMessage: string | null;
 }
 
-type Step = 'select' | 'uploading' | 'result';
+type Step = 'select' | 'previewing' | 'preview' | 'importing' | 'result';
 
 function downloadErrorReport(csv: string, assessmentName: string) {
   const blob = new Blob([csv], { type: 'text/csv' });
@@ -26,30 +35,54 @@ function downloadErrorReport(csv: string, assessmentName: string) {
   URL.revokeObjectURL(url);
 }
 
+/** Every canonical column the preview mentions, mapped ones first (each in the order the API returned them), then the rest still unmapped. */
+function orderedColumns(preview: ImportPreviewResult): string[] {
+  return [...Object.keys(preview.columnMapping), ...preview.unmappedColumns];
+}
+
 export default function ImportPage({ assessmentId, assessmentName, editable, accessToken, errorMessage }: ImportPageProps) {
   const [step, setStep] = useState<Step>('select');
   const [file, setFile] = useState<File | null>(null);
+  const [preview, setPreview] = useState<ImportPreviewResult | null>(null);
+  const [mapping, setMapping] = useState<Record<string, string>>({});
   const [result, setResult] = useState<ImportResult | null>(null);
-  const [uploadError, setUploadError] = useState<string | null>(null);
+  const [stepError, setStepError] = useState<string | null>(null);
 
-  async function handleUpload() {
+  async function handlePreview() {
     if (!file) return;
-    setStep('uploading');
-    setUploadError(null);
+    setStep('previewing');
+    setStepError(null);
     try {
-      const response = await importAssessmentFile(accessToken, assessmentId, file);
+      const response = await previewAssessmentImport(accessToken, assessmentId, file);
+      setPreview(response);
+      setMapping(response.columnMapping);
+      setStep('preview');
+    } catch (err) {
+      setStepError(err instanceof ApiError ? err.message : 'Could not read this file.');
+      setStep('select');
+    }
+  }
+
+  async function handleImport() {
+    if (!file) return;
+    setStep('importing');
+    setStepError(null);
+    try {
+      const response = await importAssessmentFile(accessToken, assessmentId, file, mapping);
       setResult(response);
       setStep('result');
     } catch (err) {
-      setUploadError(err instanceof ApiError ? err.message : 'Import failed.');
-      setStep('select');
+      setStepError(err instanceof ApiError ? err.message : 'Import failed.');
+      setStep('preview');
     }
   }
 
   function handleReset() {
     setFile(null);
+    setPreview(null);
+    setMapping({});
     setResult(null);
-    setUploadError(null);
+    setStepError(null);
     setStep('select');
   }
 
@@ -59,10 +92,9 @@ export default function ImportPage({ assessmentId, assessmentName, editable, acc
         <title>Import - {assessmentName || 'Assessment'} - CMMP</title>
       </Head>
       <div className="min-h-screen bg-gradient-to-b from-slate-900 to-slate-800">
+        <AppHeader />
         <div className="container mx-auto px-4 py-8 max-w-2xl">
-          <Link href={`/assessments/${assessmentId}/items`} className="text-slate-400 hover:text-white text-sm">
-            ← {assessmentName || 'Assessment'}
-          </Link>
+          <BackLink href={`/assessments/${assessmentId}/items`}>{assessmentName || 'Assessment'}</BackLink>
           <h1 className="text-3xl font-bold text-white mt-1 mb-8">Import from Excel/CSV</h1>
 
           {errorMessage && <div className="bg-red-950/40 border border-red-800 text-red-300 rounded-lg p-4 mb-6">{errorMessage}</div>}
@@ -78,8 +110,8 @@ export default function ImportPage({ assessmentId, assessmentName, editable, acc
               <p className="text-slate-300 text-sm">
                 Upload a <code className="text-slate-200">.xlsx</code>, <code className="text-slate-200">.xls</code>, or{' '}
                 <code className="text-slate-200">.csv</code> file. Columns are matched automatically by name (e.g. a
-                &quot;Current Score&quot; column maps to Current Maturity) — there&apos;s no manual column-mapping step yet, and
-                the import runs immediately on upload rather than showing a preview first.
+                &quot;Current Score&quot; column maps to Current Maturity); you&apos;ll get a chance to review and fix the
+                mapping before anything is written.
               </p>
               <input
                 type="file"
@@ -87,18 +119,95 @@ export default function ImportPage({ assessmentId, assessmentName, editable, acc
                 onChange={(e) => setFile(e.target.files?.[0] ?? null)}
                 className="block w-full text-sm text-slate-300 file:mr-4 file:py-2 file:px-4 file:rounded-md file:border-0 file:bg-slate-700 file:text-white file:text-sm hover:file:bg-slate-600"
               />
-              {uploadError && <p className="text-sm text-red-400">{uploadError}</p>}
+              {stepError && <p className="text-sm text-red-400">{stepError}</p>}
               <button
-                onClick={handleUpload}
+                onClick={handlePreview}
                 disabled={!file}
                 className="bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white text-sm font-medium py-2 px-4 rounded-md transition-colors"
               >
-                Upload &amp; Import
+                Preview Import
               </button>
             </div>
           )}
 
-          {step === 'uploading' && (
+          {step === 'previewing' && (
+            <div className="bg-slate-800 rounded-lg p-8 border border-slate-700 text-center text-slate-400">Reading file…</div>
+          )}
+
+          {step === 'preview' && preview && (
+            <div className="space-y-4">
+              <div className="bg-slate-800 rounded-lg p-6 border border-slate-700">
+                <div className="flex items-center justify-between mb-4">
+                  <h2 className="text-white font-semibold">Review Column Mapping</h2>
+                  {preview.llmConfigured && (
+                    <span className="text-xs bg-indigo-950/60 border border-indigo-800 text-indigo-300 px-2 py-1 rounded-full">
+                      AI-assisted mapping enabled
+                    </span>
+                  )}
+                </div>
+                <p className="text-slate-400 text-sm mb-4">
+                  {preview.totalRows} rows found. {preview.validCount} valid, {preview.warningCount} with warnings,{' '}
+                  {preview.invalidCount} invalid, {preview.duplicateCount} duplicate — based on the mapping below. Adjust any
+                  field, then confirm to actually import.
+                </p>
+                <div className="space-y-2">
+                  {orderedColumns(preview).map((column) => {
+                    const suggested = preview.llmSuggestedColumns.includes(column);
+                    return (
+                      <div key={column} className="flex items-center gap-3">
+                        <label htmlFor={`mapping-${column}`} className="w-48 shrink-0 text-sm text-slate-300">
+                          {column.replace(/_/g, ' ')}
+                          {suggested && <span className="ml-1.5 text-xs text-indigo-400" title="Suggested by the mapping assistant">✨</span>}
+                        </label>
+                        <select
+                          id={`mapping-${column}`}
+                          value={mapping[column] ?? ''}
+                          onChange={(e) =>
+                            setMapping((prev) => {
+                              const next = { ...prev };
+                              if (e.target.value) {
+                                next[column] = e.target.value;
+                              } else {
+                                delete next[column];
+                              }
+                              return next;
+                            })
+                          }
+                          className="flex-1 rounded-md bg-slate-900 border border-slate-600 px-3 py-1.5 text-sm text-white"
+                        >
+                          <option value="">— not mapped —</option>
+                          {preview.headers.map((header) => (
+                            <option key={header} value={header}>
+                              {header}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {stepError && <p className="text-sm text-red-400">{stepError}</p>}
+
+              <div className="flex items-center gap-3">
+                <button
+                  onClick={handleImport}
+                  className="bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium py-2 px-4 rounded-md transition-colors"
+                >
+                  Confirm &amp; Import
+                </button>
+                <button
+                  onClick={handleReset}
+                  className="bg-slate-700 hover:bg-slate-600 text-white text-sm font-medium py-2 px-4 rounded-md transition-colors"
+                >
+                  Choose a Different File
+                </button>
+              </div>
+            </div>
+          )}
+
+          {step === 'importing' && (
             <div className="bg-slate-800 rounded-lg p-8 border border-slate-700 text-center text-slate-400">Importing…</div>
           )}
 

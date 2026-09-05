@@ -1,9 +1,10 @@
 import type { GetServerSideProps } from 'next';
 import Head from 'next/head';
-import Link from 'next/link';
 import React from 'react';
 
 import { NavigationTree } from '../../components/frameworks/NavigationTree';
+import { AppHeader } from '../../components/layout/AppHeader';
+import { BackLink } from '../../components/layout/BackLink';
 import { ApiError, getFramework, getFrameworkNavigation, type FrameworkSummary, type NavigationNode } from '../../lib/api';
 import { getAuthSession } from '../../lib/auth';
 
@@ -20,12 +21,11 @@ export default function FrameworkDetailPage({ framework, navigation, errorMessag
         <title>{framework ? `${framework.name} - CMMP` : 'Framework - CMMP'}</title>
       </Head>
       <div className="min-h-screen bg-gradient-to-b from-slate-900 to-slate-800">
+        <AppHeader />
         <div className="container mx-auto px-4 py-8">
           <div className="flex items-center justify-between mb-8">
             <div>
-              <Link href="/frameworks" className="text-slate-400 hover:text-white text-sm">
-                ← Frameworks
-              </Link>
+              <BackLink href="/frameworks">Frameworks</BackLink>
               <h1 className="text-3xl font-bold text-white mt-1">{framework?.name ?? 'Framework'}</h1>
               {framework && (
                 <p className="text-slate-400 text-sm mt-1">

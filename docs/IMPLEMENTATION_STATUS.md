@@ -2095,6 +2095,127 @@ it in CI.
   clean `node dist/main` + `npm run start` + `npx playwright test` run
   against a genuinely fresh build: **9/9 passing**.
 
+### LLM-assisted column mapping + import wizard preview step
+Closes the `columnMapping` override gap flagged above: `POST /assessments/:id/import`
+only ever auto-mapped columns, with no way to pass a manual override and no way to
+see what would happen before committing.
+- `apps/api/src/assessments/import-mapping/llm-client.ts`: a provider-agnostic
+  `LlmClient` interface plus an `HttpLlmClient` targeting any OpenAI-compatible
+  `/chat/completions` endpoint (OpenRouter, Together, Groq, or a self-hosted
+  Ollama/vLLM later) — `LLM_API_KEY`/`LLM_BASE_URL`/`LLM_MODEL` env vars, defaulting
+  to a free-tier Hermes model via OpenRouter. `resolveLlmClient()` returns `null`
+  (not a throwing stub) when no key is configured, wired through Nest via a
+  `LLM_CLIENT` DI token (an interface has no runtime identity Nest can use as a
+  token by itself) so the whole feature is optional infrastructure, not a hard
+  dependency — the platform works identically with or without a key set.
+- `ImportMappingSuggesterService` (`mapping-suggester.service.ts`): given the
+  file's headers, a few sample rows, and the canonical columns `autoMapColumns`
+  couldn't resolve, asks the LLM for a JSON mapping and validates every suggestion
+  before trusting it — a suggested field must actually be one of the unmapped
+  canonical columns, and its value must be one of the file's real headers, or it's
+  dropped. Any client error, timeout (15s), or unparseable response degrades to an
+  empty mapping rather than failing the import — this is a best-effort assist,
+  never a blocker. 8 unit tests with a fake `LlmClient` cover the accept/reject/
+  degrade paths, including a model that ignores "JSON only" instructions and wraps
+  its answer in prose.
+- New `POST /assessments/:id/import/preview` endpoint: parses the upload, auto-maps,
+  asks the mapping assistant to fill any gaps, and returns the resulting mapping +
+  validation counts (total/valid/warning/invalid/duplicate) — without writing
+  anything to the database. `POST /assessments/:id/import` (the real one) now
+  accepts an optional `columnMapping` form field (a JSON object, validated against
+  the real canonical-column list and rejected with a clear `BadRequestException`
+  if it names an unknown field or a non-string value) that overrides auto-mapping.
+- Frontend (`assessments/[id]/import.tsx`): the wizard gained a step between
+  "select file" and "see results" — upload triggers a preview call, then an
+  editable table shows every canonical column with a `<select>` of the file's
+  actual headers, pre-filled from auto-mapping and any LLM suggestion (marked with
+  a ✨ and a "AI-assisted mapping enabled" badge when the assistant is configured).
+  The user can correct any field before confirming, at which point the real import
+  runs against exactly the mapping shown.
+- Small accessibility fix that doubled as a testability fix: `risks/new.tsx` and
+  `risks/[id].tsx`'s form `<label>`s had no `htmlFor`/`id` pairing (unlike
+  `auth/signin.tsx`, which already did this correctly) — `getByLabel()` can't
+  resolve an unassociated label in Playwright or a screen reader alike. Wired up
+  `htmlFor`/`id` on every field in both forms.
+- New e2e spec `e2e/import.spec.ts`: since there's no UI to create an assessment
+  (only `POST /assessments`), it creates its own DRAFT fixture by calling the real
+  API directly — getting its access token from NextAuth's own `/api/auth/session`
+  endpoint via `page.request` (which reuses the browser context's session cookie)
+  rather than logging in again, since the login endpoint's real 5/min throttle is
+  shared across the whole suite and was already fully spent by `global-setup` +
+  `auth.spec.ts`. Deletes the fixture assessment afterward.
+- No real `LLM_API_KEY` was available in this sandbox to exercise an actual model
+  call end-to-end; `isConfigured` reports `false` and the suggester short-circuits
+  to auto-mapping-only in every test and local run here. The client, prompt, and
+  response-validation logic are covered by the 8 unit tests against a fake client
+  instead — genuinely exercising the real endpoint is the one piece a future
+  session with real credentials should do before calling this fully proven.
+- Full verification: `npx turbo run type-check test build lint` (29/29), `npm run
+  test:e2e` for `@cmmp/api` (42/42), and a full Playwright run against a real
+  build — **10/10 passing**, including the new import spec.
+
+### UI polish: shared navigation, consistent chrome, and two real CSS bugs
+Every top-level page (dashboard, risks, assessments, frameworks) had hand-rolled
+its own header, and only `dashboard.tsx`'s actually linked to the other three —
+navigating from Risks to Frameworks meant a detour back through the dashboard.
+- New `apps/web/components/layout/AppHeader.tsx`: one persistent top bar (logo,
+  active-aware nav to Dashboard/Risks/Assessments/Frameworks via `lucide-react`
+  icons, user email, sign out) used on every signed-in page, including
+  detail/sub-pages — which keep their own `BackLink` breadcrumb underneath it
+  (`components/layout/BackLink.tsx`) rather than losing the global nav entirely,
+  a standard app-bar-plus-breadcrumb layout. `components/layout/EmptyState.tsx`
+  replaces five near-duplicate "nothing here" `<div>`s with one consistent,
+  icon-led empty state.
+- **Two real, pre-existing cosmetic bugs found while doing this, not introduced
+  by it** — both from `globals.css`'s unused shadcn/ui scaffolding (CSS variables
+  and base-layer heading/link styles nothing in the app actually opted into):
+  1. A blanket `a { @apply underline underline-offset-4; }` base rule meant every
+     single link in the app — nav items, "New Risk", entire card-as-link rows —
+     rendered underlined, since not one of them overrides it. Removed; this is an
+     app UI, not prose content that needs inline-link affordance.
+  2. `h2 { @apply border-b pb-2 ...; }` put an unwanted horizontal rule under
+     every in-page `<h2>` (framework card titles, "Function Detail", "Import
+     Results", "Review Column Mapping", the landing page's "Welcome to CMMP") —
+     intended for a docs-style page with real section dividers, not small card
+     headings. Removed the border, kept the rest.
+  Both were visible in every screenshot taken before this pass and in none after
+  — confirmed via live Playwright screenshots of the dashboard, risks, frameworks,
+  and framework-detail pages before/after.
+- Existing Recharts-based dashboard charts (`FunctionGapBarChart`,
+  `MaturityDistributionChart`, etc.) were left untouched — they already follow
+  good practice (direct labels, a recessive grid, status-reserved colors, a
+  single hue per series) and needed no changes. One thing checked and ruled
+  out, not fixed: a screenshot taken immediately on page navigation sometimes
+  shows the two bar charts empty (axes only, no bars) — confirmed via a
+  side-by-side screenshot with a 1-second settle delay that this is purely a
+  `ResponsiveContainer`-measures-after-first-paint timing artifact of
+  screenshotting instantly, not a real bug a person browsing normally would ever
+  see (or that existed before this session's changes — the same components,
+  untouched).
+- Full verification: `npx turbo run type-check test build lint` (29/29 — the RTL
+  page test needed a `next/router` mock added alongside its existing `lib/auth`
+  mock, since `AppHeader` calls `useRouter()` to highlight the active nav item),
+  and a full Playwright run against a genuinely fresh build — **10/10 passing**.
+
+### NIST CSF 2.0 fixture data: partial verification against the official structure
+Next Steps previously flagged that `packages/database/prisma/fixtures/nist-csf-2.0.json`
+was reproduced from training-data knowledge, never actually checked against NIST's
+own CSWP 29 publication. `WebFetch` was blocked in this sandbox for every domain
+tried (`nist.gov`, `csrc.nist.gov`, `csf.tools`, even `wikipedia.org` — general
+egress, not a NIST-specific block), but `WebSearch` worked and returned enough of
+the official structure, corroborated across two independent searches, to check the
+taxonomy level that matters most for navigation, scoring, and rollups:
+- All 6 Functions (GV, ID, PR, DE, RS, RC) — codes and names match.
+- All 22 Categories' codes, names, and per-Function counts (GV=6, ID=3, PR=5,
+  DE=2, RS=4, RC=2) match exactly, Govern's included (GV.OC, GV.RM, GV.RR, GV.PO,
+  GV.OV, GV.SC — the one set not in the first search's summarized answer, checked
+  again explicitly).
+- **Not verified**: the outcome-statement text of the 106 individual Subcategories
+  — that needs the actual CSWP 29 PDF/JSON content fetched, which this session's
+  network access couldn't reach. A future session with working `WebFetch` access
+  to NIST's own reference tool (or the PDF) should finish this before treating the
+  fixture as compliance-grade at the Subcategory level.
+
 ## Next Steps
 
 What's left, roughly in priority order. Every item from
@@ -2119,25 +2240,24 @@ punt on the rest pending dedicated major-version-bump work):
    verification those Dockerfiles will get.
 2. All four Phase 10 frontend follow-ups (framework navigation,
    assessment-taking, risk register, Excel import wizard) are now done
-   — see Post-Phase-17 Feature Work above. What's left from that same
-   area: extracting the dashboard components into `@cmmp/ui` if/when a
-   second app or page needs them (not worth the abstraction for one
-   dashboard page yet); the assessment-taking flow only covers
-   current/target maturity, not the extended per-item metadata fields
-   (`rationale`/`evidence`/`owner*`/etc.), no UI yet; and item 3 below,
-   which the import wizard deliberately didn't solve.
-3. Wire `POST /assessments/:id/import`'s `columnMapping` override — the
-   library (`ImportOptions.columnMapping`) already supports it, but the
-   endpoint only auto-maps columns today; needs a way to accept a manual
-   mapping as a form field or a preceding "preview" call, matching the
-   import wizard's step 3 in master prompt §14. The new import wizard UI
-   is explicit with users that this step doesn't exist yet rather than
-   pretending otherwise — see that section's own writeup.
-4. Before relying on the seeded NIST CSF 2.0 data for anything
-   compliance-facing, diff `packages/database/prisma/fixtures/nist-csf-2.0.json`
-   against the official NIST CSWP 29 publication — it was reproduced from
-   training-data knowledge, not transcribed from the source document (see
-   Phase 5 notes above)
+   — see Post-Phase-17 Feature Work above, and the import wizard's
+   `columnMapping` override + preview step (also flagged here previously)
+   is done too. What's left from that same area: extracting the
+   dashboard components into `@cmmp/ui` if/when a second app or page
+   needs them (not worth the abstraction for one dashboard page yet);
+   the assessment-taking flow only covers current/target maturity, not
+   the extended per-item metadata fields (`rationale`/`evidence`/
+   `owner*`/etc.), no UI yet.
+3. Finish the NIST CSF 2.0 fixture verification — the Function/Category
+   taxonomy is now confirmed against the official structure (see
+   Post-Phase-17 Feature Work above), but the 106 Subcategories'
+   outcome-statement text is still unverified; this session's `WebFetch`
+   couldn't reach NIST's own reference tool or the CSWP 29 PDF to check
+   it.
+4. Exercise the new LLM-assisted column-mapping feature
+   (`apps/api/src/assessments/import-mapping/`) against a real model —
+   this session had no `LLM_API_KEY`, so it's covered by unit tests
+   against a fake client only, never a real OpenRouter/Hermes call.
 5. **Get real GitHub Dependabot alert data.** This session triaged what
    `npm audit` could see (30 findings; `multer`'s 5 fixed, see
    Post-Phase-17 Hardening above) but never had tool access to GitHub's

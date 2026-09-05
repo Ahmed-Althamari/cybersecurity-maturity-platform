@@ -1,9 +1,12 @@
+import { FileSpreadsheet } from 'lucide-react';
 import type { GetServerSideProps } from 'next';
 import Head from 'next/head';
 import Link from 'next/link';
 import React from 'react';
 
 import { AssessmentItemsForm } from '../../../components/assessments/AssessmentItemsForm';
+import { AppHeader } from '../../../components/layout/AppHeader';
+import { BackLink } from '../../../components/layout/BackLink';
 import { ApiError, getAssessment, getFrameworkTree, type FrameworkTreeFunction } from '../../../lib/api';
 import { getAuthSession } from '../../../lib/auth';
 
@@ -36,20 +39,20 @@ export default function AssessmentItemsPage({
         <title>{assessmentName ? `${assessmentName} - CMMP` : 'Assessment - CMMP'}</title>
       </Head>
       <div className="min-h-screen bg-gradient-to-b from-slate-900 to-slate-800">
+        <AppHeader />
         <div className="container mx-auto px-4 py-8">
           <div className="mb-8 flex items-start justify-between">
             <div>
-              <Link href="/assessments" className="text-slate-400 hover:text-white text-sm">
-                ← Assessments
-              </Link>
+              <BackLink href="/assessments">Assessments</BackLink>
               <h1 className="text-3xl font-bold text-white mt-1">{assessmentName}</h1>
               <p className="text-slate-400 text-sm mt-1">Status: {status}</p>
             </div>
             {editable && (
               <Link
                 href={`/assessments/${assessmentId}/import`}
-                className="bg-slate-700 hover:bg-slate-600 text-white text-sm font-medium py-2 px-4 rounded-md transition-colors"
+                className="flex items-center gap-1.5 bg-slate-700 hover:bg-slate-600 text-white text-sm font-medium py-2 px-4 rounded-md transition-colors"
               >
+                <FileSpreadsheet className="h-4 w-4" />
                 Import from Excel/CSV
               </Link>
             )}

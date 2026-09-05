@@ -1,9 +1,10 @@
 import type { GetServerSideProps } from 'next';
 import Head from 'next/head';
-import Link from 'next/link';
 import { useRouter } from 'next/router';
 import React, { useState } from 'react';
 
+import { AppHeader } from '../../components/layout/AppHeader';
+import { BackLink } from '../../components/layout/BackLink';
 import { ApiError, createRisk } from '../../lib/api';
 import { getAuthSession } from '../../lib/auth';
 import { hasAnyRole, RISK_WRITE_ROLES } from '../../lib/roles';
@@ -51,10 +52,9 @@ export default function NewRiskPage({ organisationId, accessToken }: NewRiskPage
         <title>New Risk - CMMP</title>
       </Head>
       <div className="min-h-screen bg-gradient-to-b from-slate-900 to-slate-800">
+        <AppHeader />
         <div className="container mx-auto px-4 py-8 max-w-xl">
-          <Link href="/risks" className="text-slate-400 hover:text-white text-sm">
-            ← Risk Register
-          </Link>
+          <BackLink href="/risks">Risk Register</BackLink>
           <h1 className="text-3xl font-bold text-white mt-1 mb-8">New Risk</h1>
 
           <form onSubmit={handleSubmit} className="space-y-4 bg-slate-800 rounded-lg p-6 border border-slate-700">

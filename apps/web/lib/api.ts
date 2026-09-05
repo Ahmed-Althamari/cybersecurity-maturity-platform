@@ -343,15 +343,42 @@ export interface ImportResult {
   errorReportCsv: string;
 }
 
-/**
- * POST /assessments/:id/import runs the real import immediately — there's no separate preview/
- * dry-run mode on the API today, and no way to pass a manual columnMapping override (the DTO
- * only auto-maps). Documented as a known, deliberate gap rather than faked with a fictitious
- * preview step client-side.
- */
-export function importAssessmentFile(accessToken: string, assessmentId: string, file: File) {
+export interface ImportPreviewResult {
+  sheetNames: string[];
+  headers: string[];
+  columnMapping: Record<string, string>;
+  unmappedColumns: string[];
+  /** Whether an LLM mapping assistant is configured server-side at all (an API key is set) — independent of whether it actually suggested anything for this file. */
+  llmConfigured: boolean;
+  /** Canonical columns the LLM assistant resolved that plain alias-matching didn't. */
+  llmSuggestedColumns: string[];
+  totalRows: number;
+  validCount: number;
+  warningCount: number;
+  invalidCount: number;
+  duplicateCount: number;
+}
+
+/** Dry-runs an import (parses, auto-maps, and — when an LLM mapping assistant is configured — asks it to resolve any columns auto-mapping couldn't) without writing anything, so the wizard can show the user what will happen and let them fix the mapping first. */
+export function previewAssessmentImport(accessToken: string, assessmentId: string, file: File, worksheet?: string) {
   const formData = new FormData();
   formData.append('file', file);
+  const query = worksheet ? `?worksheet=${encodeURIComponent(worksheet)}` : '';
+  return apiFetchFormData<ImportPreviewResult>(`/assessments/${assessmentId}/import/preview${query}`, accessToken, formData);
+}
+
+/** `columnMapping` overrides auto-detection for the named canonical columns; pass the (possibly user-edited) mapping from `previewAssessmentImport` to import against exactly what was shown. */
+export function importAssessmentFile(
+  accessToken: string,
+  assessmentId: string,
+  file: File,
+  columnMapping?: Record<string, string>,
+) {
+  const formData = new FormData();
+  formData.append('file', file);
+  if (columnMapping) {
+    formData.append('columnMapping', JSON.stringify(columnMapping));
+  }
   return apiFetchFormData<ImportResult>(`/assessments/${assessmentId}/import`, accessToken, formData);
 }
 

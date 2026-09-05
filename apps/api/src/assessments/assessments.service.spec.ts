@@ -2,7 +2,8 @@ import { BadRequestException, ConflictException, NotFoundException } from '@nest
 
 import { PrismaService } from '../prisma/prisma.service';
 
-import { AssessmentsService } from './assessments.service';
+import { AssessmentsService, parseColumnMappingOverride } from './assessments.service';
+import type { ImportMappingSuggesterService } from './import-mapping/mapping-suggester.service';
 
 type MockModel = Record<string, jest.Mock>;
 
@@ -34,6 +35,7 @@ const scoreableFramework = {
 
 describe('AssessmentsService', () => {
   let service: AssessmentsService;
+  let mappingSuggester: { isConfigured: boolean; suggestMapping: jest.Mock };
   let prisma: {
     organisation: MockModel;
     framework: MockModel;
@@ -57,7 +59,8 @@ describe('AssessmentsService', () => {
       $transaction: jest.fn((operations: unknown[]) => Promise.all(operations)),
     };
 
-    service = new AssessmentsService(prisma as unknown as PrismaService);
+    mappingSuggester = { isConfigured: false, suggestMapping: jest.fn().mockResolvedValue({}) };
+    service = new AssessmentsService(prisma as unknown as PrismaService, mappingSuggester as unknown as ImportMappingSuggesterService);
   });
 
   describe('create', () => {
@@ -438,5 +441,88 @@ describe('AssessmentsService', () => {
       expect(result.warningCount).toBe(0);
       expect(result.invalidCount).toBe(1);
     });
+
+    it('accepts a caller-supplied columnMapping override for a header autoMapColumns would not have recognised', async () => {
+      prisma.assessment.findFirst.mockResolvedValueOnce(baseAssessment);
+      prisma.assessmentQuestion.findMany.mockResolvedValueOnce([{ id: 'question-1', subcategory: { code: 'GV.RM-01' } }]);
+      prisma.assessmentQuestion.count.mockResolvedValueOnce(1);
+      prisma.assessmentItem.count.mockResolvedValueOnce(1);
+
+      const csv = ['Control_ID,Maturity Score (Now)', 'GV.RM-01,DEVELOPING'].join('\n');
+
+      const result = await service.importFile('a1', 'tenant-a', 'user-1', csvFile(csv), undefined, {
+        Current_Maturity: 'Maturity Score (Now)',
+      });
+
+      expect(result.importedCount).toBe(1);
+      expect(result.columnMapping.Current_Maturity).toBe('Maturity Score (Now)');
+    });
+  });
+
+  describe('previewImport', () => {
+    function csvFile(content: string): Express.Multer.File {
+      const buffer = Buffer.from(content, 'utf-8');
+      return { originalname: 'assessment.csv', mimetype: 'text/csv', size: buffer.length, buffer } as Express.Multer.File;
+    }
+
+    const baseAssessment = { id: 'a1', status: 'DRAFT', template: { frameworkId: 'fw-a' } };
+
+    it('never writes to the database', async () => {
+      prisma.assessment.findFirst.mockResolvedValueOnce(baseAssessment);
+
+      await service.previewImport('a1', 'tenant-a', csvFile('Control_ID,Current_Maturity\nGV.RM-01,DEVELOPING'));
+
+      expect(prisma.assessmentItem.upsert).not.toHaveBeenCalled();
+      expect(prisma.assessment.update).not.toHaveBeenCalled();
+    });
+
+    it('reports the LLM as unconfigured and skips calling it when nothing is unmapped', async () => {
+      prisma.assessment.findFirst.mockResolvedValueOnce(baseAssessment);
+      mappingSuggester.isConfigured = false;
+
+      const result = await service.previewImport('a1', 'tenant-a', csvFile('Control_ID,Current_Maturity\nGV.RM-01,DEVELOPING'));
+
+      expect(result.llmConfigured).toBe(false);
+      expect(result.llmSuggestedColumns).toEqual([]);
+      expect(result.unmappedColumns).not.toContain('Control_ID');
+    });
+
+    it('merges an LLM-suggested mapping into the final result when one is returned', async () => {
+      prisma.assessment.findFirst.mockResolvedValueOnce(baseAssessment);
+      mappingSuggester.isConfigured = true;
+      mappingSuggester.suggestMapping.mockResolvedValueOnce({ Current_Maturity: 'Maturity Score (Now)' });
+
+      const result = await service.previewImport('a1', 'tenant-a', csvFile('Control_ID,Maturity Score (Now)\nGV.RM-01,DEVELOPING'));
+
+      expect(result.llmSuggestedColumns).toEqual(['Current_Maturity']);
+      expect(result.columnMapping.Current_Maturity).toBe('Maturity Score (Now)');
+      expect(result.unmappedColumns).not.toContain('Current_Maturity');
+    });
+  });
+});
+
+describe('parseColumnMappingOverride', () => {
+  it('returns undefined for an absent override', () => {
+    expect(parseColumnMappingOverride(undefined)).toBeUndefined();
+  });
+
+  it('parses a valid override', () => {
+    expect(parseColumnMappingOverride('{"Current_Maturity": "Score"}')).toEqual({ Current_Maturity: 'Score' });
+  });
+
+  it('rejects invalid JSON', () => {
+    expect(() => parseColumnMappingOverride('not json')).toThrow(BadRequestException);
+  });
+
+  it('rejects a JSON array', () => {
+    expect(() => parseColumnMappingOverride('[]')).toThrow(BadRequestException);
+  });
+
+  it('rejects an unknown canonical column', () => {
+    expect(() => parseColumnMappingOverride('{"Not_A_Real_Column": "X"}')).toThrow(BadRequestException);
+  });
+
+  it('rejects a non-string value', () => {
+    expect(() => parseColumnMappingOverride('{"Current_Maturity": 5}')).toThrow(BadRequestException);
   });
 });
