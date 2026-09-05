@@ -53,7 +53,7 @@
     "prisma": true
   },
   "dependencies": {
-    "@prisma/client": "^5.22.0"
+    "@prisma/client": "^7.10.0"
   },
   "overrides": {
     "multer": "^2.3.0",

@@ -32,7 +32,7 @@
   },
   "dependencies": {
     "@cmmp/framework-engine": "*",
-    "@prisma/client": "^5.22.0",
+    "@prisma/client": "^7.10.0",
     "bcryptjs": "^3.0.3"
   }
 }
