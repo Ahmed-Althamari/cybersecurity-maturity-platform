@@ -4,7 +4,7 @@
 # @cmmp/* workspace dependencies of its own (verified via
 # `turbo prune @cmmp/web --docker`), so the pruned tree is just this one
 # app. The runtime stage copies Next's `output: "standalone"` bundle
-# (apps/web/next.config.js), which traces only the dependencies each page
+# (apps/web/next.config.mjs), which traces only the dependencies each page
 # actually needs — the final image never carries the monorepo's full
 # node_modules.
 #
@@ -36,7 +36,7 @@ RUN addgroup --system --gid 1001 nodejs && adduser --system --uid 1001 nextjs
 COPY --from=installer --chown=nextjs:nodejs /app/apps/web/.next/standalone ./
 COPY --from=installer --chown=nextjs:nodejs /app/apps/web/.next/static ./apps/web/.next/static
 COPY --from=installer --chown=nextjs:nodejs /app/apps/web/public ./apps/web/public
-# next.config.js's own NEXTAUTH_SECRET check never runs for this server —
+# next.config.mjs's own NEXTAUTH_SECRET check never runs for this server —
 # output: "standalone" resolves that file at build time and never re-requires
 # it, so check-env.js (a separate, tiny script, not traced/bundled by Next)
 # is copied in and run explicitly by CMD below instead.

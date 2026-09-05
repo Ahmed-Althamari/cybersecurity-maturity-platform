@@ -1,7 +1,5 @@
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 
-import type { PaginatedInitiatives, RiskRecord } from '../../../lib/api';
-
 // See apps/web/__tests__/pages/risks/index.test.tsx for why this lives outside pages/ and why
 // next/router needs mocking (AppHeader reads the active route via useRouter()) and lib/auth does
 // too (getServerSideProps -> lib/auth -> next-auth/next -> next-auth/core -> openid-client -> jose
@@ -19,6 +17,7 @@ jest.mock('../../../lib/api', () => ({
 }));
 
 import { linkInitiative, listInitiatives, unlinkInitiative } from '../../../lib/api';
+import type { PaginatedInitiatives, RiskRecord } from '../../../lib/api';
 import RiskDetailPage from '../../../pages/risks/[id]';
 
 const mockListInitiatives = listInitiatives as jest.Mock;

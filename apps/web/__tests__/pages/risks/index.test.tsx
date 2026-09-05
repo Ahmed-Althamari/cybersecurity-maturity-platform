@@ -1,7 +1,6 @@
 import { render, screen, within } from '@testing-library/react';
 
 import type { RiskRecord } from '../../../lib/api';
-
 import RisksPage from '../../../pages/risks/index';
 
 // This page also exports getServerSideProps, which imports lib/auth -> next-auth/next ->

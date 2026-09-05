@@ -1,6 +1,6 @@
 # CMMP Implementation Status
 
-Last Updated: 2026-09-05 (branch reconciliation — see "Branch Reconciliation" below)
+Last Updated: 2026-09-05 (Next.js 14 → 16 upgrade — see that section below)
 
 ## Overall Progress
 
@@ -2423,13 +2423,15 @@ punt on the rest pending dedicated major-version-bump work):
    see at all). Whoever has GitHub UI/API access should pull the real
    list before assuming the `npm audit`-visible findings are the whole
    picture.
-6. The large, deliberately-deferred major-version bumps themselves:
-   Next.js 14→16 (`apps/web`, user-facing, worth prioritizing first) and
-   the NestJS 10→12 ecosystem (`@nestjs/core`/`platform-express`/
-   `common`/`config`/`swagger`/`testing`/`cli`, `turbo`). Both need their
-   own scoped PR with real testing afterward (a browser pass for
-   Next.js, the full test suite plus manual verification for NestJS) —
-   not something to do blind in an autonomous pass.
+6. ~~The large, deliberately-deferred major-version bumps themselves:
+   Next.js 14→16 (`apps/web`, user-facing) and the NestJS 10→12
+   ecosystem.~~ Both done — see "NestJS 10 → 12 Upgrade" and "Next.js 14
+   → 16 Upgrade" above, each in its own PR with real testing (a browser
+   pass for Next.js, the full test suite plus manual verification for
+   NestJS). One follow-up each: `eslint-plugin-react`'s ESLint 10
+   compatibility (blocking `apps/web`'s ESLint pin from moving off the
+   9.x line — see the Next.js writeup) and `@nestjs/throttler`'s peer
+   range (see the NestJS writeup).
 
 ## Branch Reconciliation (2026-09-05)
 
@@ -2787,6 +2789,163 @@ upgrade resting on an informed judgment call about an upstream
 package rather than a clean, already-published fix) and the
 pre-existing `.env`-timing JWT-secret quirk noted above (unrelated to
 this upgrade, but a real footgun worth its own fix).
+
+## Next.js 14 → 16 Upgrade (2026-09-05)
+
+`apps/web`'s Next.js was bumped from 14.0.2 straight to 16.3.4 (skipping
+15 entirely, matching the "prioritize first" instruction from the Next
+Steps list above and Dependabot PR #19's real target), with React left
+at 18.2.0 rather than bumped to 19 — Next 16.3.4's own `peerDependencies`
+list `react`/`react-dom` as `^18.2.0 || 19.0.0-rc-... || ^19.0.0`, so 18
+is still a fully supported peer, and keeping it minimizes this PR's
+blast radius (no React 19 behavioral changes — stricter `useEffect`
+cleanup timing, `ref` as a prop, etc. — layered onto a bundler-major-version
+change in the same diff). `next-auth@4`, all `@radix-ui/*` packages, and
+`recharts@2` all continued working unmodified against React 18 (verified
+by the full test/e2e run below, not just "it installed").
+
+**Real breaking changes found and fixed:**
+
+1. **`next lint` was removed in Next 16** (confirmed by inspecting the
+   published tarball's `dist/cli` — no `next-lint` file, unlike 14/15).
+   `apps/web/package.json`'s `lint` script now calls `eslint .` directly,
+   matching `apps/api`'s existing pattern of not going through a
+   framework-specific wrapper.
+2. **`eslint-config-next` is flat-config-only as of its own v16.0.0**
+   (`peerDependencies.eslint` went from `^7.23.0 || ^8.0.0 || ^9.0.0` at
+   15.5.0 to a bare `>=9.0.0` at 16.0.0; its published package is now an
+   array of flat config objects, not the legacy shareable-string format
+   `.eslintrc.json`'s `extends` expects) — a real, mandatory ESLint 9
+   migration bundled into what looks like a framework bump. Rather than
+   force the whole monorepo onto ESLint 9 (this repo's root
+   `.eslintrc.json` is shared, and `apps/api`'s own lint script depends
+   on it staying on ESLint 8/`.eslintrc.json`, which `eslint-config-next`
+   no longer supports at all), the two apps were decoupled:
+   - `apps/web` gets its own `eslint.config.mjs` (flat config, its own
+     nested `eslint@^9.39.5` + `eslint-config-next@^16.3.4` +
+     `eslint-plugin-security@^4.0.1` devDependencies — `npm`'s workspace
+     resolution nests these under `apps/web/node_modules` automatically
+     since nothing else needs ESLint 9), built on
+     `eslint-config-next/core-web-vitals` (matching the old
+     `"next/core-web-vitals"` `extends` entry) plus this app's own
+     custom rule overrides ported over rule-for-rule
+     (`@typescript-eslint/no-explicit-any`, `no-unused-vars`,
+     `import/order`, `eslint-plugin-security`'s recommended set with the
+     same two rules turned off). One real gotcha: `eslint-config-next`'s
+     TypeScript-rule config object is scoped to `files: ['**/*.ts',
+     '**/*.tsx']` only, so a rule override with no matching `files`
+     restriction of its own (e.g. one meant to apply repo-wide) fails
+     with "could not find plugin" for any non-TS file the override also
+     touches — the `@typescript-eslint/*` overrides needed the same
+     `files` scoping to land in the right config object.
+   - **ESLint 10 (now `latest`, GA'd since this repo's Next 14 baseline)
+     was tried first and reverted**: `eslint-plugin-react` (pulled in
+     transitively by `eslint-config-next`, latest published version
+     7.37.5) throws `contextOrFilename.getFilename is not a function`
+     under ESLint 10 — it still calls the legacy `context.getFilename()`
+     API that ESLint 10 finally removed (deprecated since ESLint 8,
+     scheduled for removal for years). `eslint-config-next@16.3.4`'s own
+     peer range (`>=9.0.0`) doesn't prevent this — it's an *indirect*
+     dependency that hasn't caught up yet. Pinned to the ESLint 9 line
+     (`^9.39.5`, currently npm's `maintenance` dist-tag, not `latest`)
+     instead, which works cleanly with the exact same plugin versions.
+     Worth revisiting once `eslint-plugin-react` ships an ESLint
+     10-compatible release.
+   - `apps/api` and the repo root keep `.eslintrc.json` and ESLint 8
+     completely unchanged — but with `"next/core-web-vitals"`,
+     `plugin:react/recommended`, and all `react`/`react-hooks` rules
+     removed from it. Those were never applicable to `apps/api` (a
+     NestJS backend with zero JSX) in the first place; they only existed
+     there because the two apps used to share one root config. Now that
+     `apps/web` has moved to its own dedicated config, keeping
+     React-specific rules on a backend-only lint pass was dead weight —
+     and, after this bump, actively broken (root-hoisted
+     `eslint-config-next` no longer resolves from `apps/api`'s directory
+     once it's nested under `apps/web/node_modules` instead, since
+     nothing else in the workspace needs it). `eslint-plugin-react`/
+     `eslint-plugin-react-hooks` were dropped from the root
+     `package.json` devDependencies as now-unused.
+   - One new rule surfaced by the bundled `eslint-plugin-react-hooks`
+     jumping from `^4.6.0` (root's old pin) to whatever
+     `eslint-config-next@16` bundles (`^7.0.0`, actually resolved to
+     7.1.1): `react-hooks/set-state-in-effect`, which flags
+     `apps/web/pages/risks/[id].tsx`'s `setInitiativesLoading(true)`
+     called synchronously at the top of a data-fetching effect — a
+     completely standard loading-flag pattern, not a real bug (the
+     effect's own dependency array doesn't include the flag it sets, so
+     there's no cascading re-render loop). Downgraded to `warn` in
+     `apps/web/eslint.config.mjs`, matching `exhaustive-deps`'s existing
+     advisory-not-blocking severity in this same config, rather than
+     rewriting a correct pattern to satisfy a new, opinionated
+     React-Compiler-era rule.
+   - Two pre-existing `import/order` violations surfaced once
+     `eslint-plugin-import` moved from root's old `^2.29.1` pin to
+     `eslint-config-next`'s own `^2.32.0`: a stray blank line inside a
+     single-group import block
+     (`__tests__/pages/risks/index.test.tsx`), and a same-module
+     type-only import declared far from its value-import counterpart
+     across a block of `jest.mock()` calls
+     (`__tests__/pages/risks/risk-detail-initiative-picker.test.tsx`,
+     fixed by merging the type import into the later value import from
+     the same path rather than reordering the mocks — Jest hoists
+     `jest.mock()` calls above all imports at transform time regardless
+     of source order, so where the type import physically sits doesn't
+     change test behavior).
+3. **`next.config.js` renamed to `next.config.mjs`.** The file already
+   used ESM `import`/`export default` syntax (needed for the
+   `PHASE_PRODUCTION_BUILD` check), which Next 16 now warns about
+   loudly (`MODULE_TYPELESS_PACKAGE_JSON`, "Reparsing as ES module...
+   incurs a performance overhead") instead of silently accepting.
+   Renaming avoids that reparse entirely; setting
+   `"type": "module"` on `apps/web/package.json` instead was rejected
+   since it would also force `jest.config.js` and other plain-CommonJS
+   tooling files in the same directory to be treated as ESM. Comment
+   references in `infrastructure/Dockerfile.web` and
+   `apps/web/scripts/check-env.js` updated to match; neither file
+   `COPY`s or requires it by exact name, so nothing else needed to
+   change.
+4. **`swcMinify: true` removed from `next.config.mjs`** — flagged as an
+   "Unrecognized key" warning at build time (SWC minification has been
+   the unconditional default since Next 13; the option was fully dropped
+   in 16, not just defaulted).
+5. **`tsconfig.json`'s `jsx` option changed from `"preserve"` to
+   `"react-jsx"`.** Next 16's build step now mandates this (it rewrote
+   the file itself, mid-build, the first time this wasn't caught
+   proactively — reverted that auto-rewrite, which also reformatted
+   unrelated array fields onto multiple lines, and applied just the one
+   semantic line intentionally instead).
+
+**Build output verified for real, not just "it compiled":** `next
+build` now runs on Turbopack by default (Next 16's own default bundler,
+printed as `▲ Next.js 16.3.4 (Turbopack)` in the build log) and produces
+the same `output: "standalone"` shape as before
+(`.next/standalone/apps/web/{server.js,node_modules,package.json}`) —
+checked by actually starting `node server.js` (with `.next/static` and
+`public` copied alongside it, matching what
+`infrastructure/Dockerfile.web` does) against a real local Postgres 16
+and the real `apps/api` build, not a mock.
+
+**Verification:** `npx prisma generate`, then `npx turbo run type-check
+lint --filter=@cmmp/web --filter=@cmmp/api` (clean, 9/9 tasks — confirms
+the `apps/api` lint decoupling above didn't regress it), `npx turbo run
+test --filter=@cmmp/web` (23/23 unit tests) and `--filter=@cmmp/api`
+(170/170 unit tests, unaffected by this PR but re-run to confirm the
+root `.eslintrc.json` edit didn't break anything else), `apps/api`'s
+full e2e suite against real Postgres (`npm run test:e2e
+--workspace=@cmmp/api`, 48/48 passing), and — the first real browser
+pass either major-version bump in this doc has had — `apps/web`'s
+Playwright suite running actual Chromium against the real standalone
+production server and real API (`npx playwright test`, all 10 specs
+passing: sign-in, dashboard, frameworks navigation, the import wizard,
+and the risk register's full CRUD lifecycle), plus a manual
+screenshot-driven pass confirming the dashboard's charts, KPI cards, and
+dark theme all render correctly with no console errors beyond one
+harmless missing-favicon 404 (this repo's `apps/web/public/` is empty).
+
+**Left for human review:** reverting the ESLint 9 pin to `latest` (10.x)
+once `eslint-plugin-react` publishes a release compatible with it — not
+urgent, ESLint 9 remains on npm's own `maintenance` track, just not the
+newest line anymore.
 
 ## Contact & Questions
 
