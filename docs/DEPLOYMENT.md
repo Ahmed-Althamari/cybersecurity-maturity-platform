@@ -57,8 +57,12 @@ npm run docker:build   # docker compose build
 npm run docker:up      # docker compose up -d
 ```
 
-Three services: `postgres` (16-alpine, named volume `pgdata`), `api`
-(:3001), `web` (:3000). `docker-compose.yml` reads `JWT_SECRET` and
+Four services: `postgres` (16-alpine, named volume `pgdata`), `api`
+(:3001), `web` (:3000), and `data-analysis` (the isolated Python/FastAPI
+microservice behind the Data Analysis feature — see
+`docs/architecture.md`'s "Data Analysis Service" section; :8000
+internally, never published on a host port, reachable only from `api`).
+`docker-compose.yml` reads `JWT_SECRET` and
 `NEXTAUTH_SECRET` from the root `.env` with **no fallback** —
 `${VAR:?...}` syntax means compose refuses to start rather than silently
 using a shared default value baked into version control (the previous
@@ -127,6 +131,8 @@ section):
 | `API_URL` | `apps/web/pages/api/auth/[...nextauth].ts` | Server-side only — see Two Different API URLs above |
 | `NEXT_PUBLIC_API_URL` | `apps/web/lib/api.ts` | Client-side only — see above |
 | `DEMO_USER_PASSWORD` | `packages/database/prisma/seed.ts` | Optional override for the seeded demo users' shared password |
+| `LLM_PROVIDER_<n>_API_KEY`/`_FORMAT`/`_BASE_URL`/`_MODEL` (n = 1-5) | `apps/api/src/assessments/import-mapping/llm-client.ts` and `services/data-analysis/analysis/llm_client.py` (independently, same scheme) | Optional — powers the import wizard's LLM-assisted column mapping and the Data Analysis feature's "ai" mode. Unset entirely: both features degrade gracefully (plain auto-mapping; a clear 503 from "ai" mode) rather than failing |
+| `DATA_ANALYSIS_SERVICE_URL` | `apps/api/src/data-analysis/data-analysis.service.ts` | Defaults to `http://localhost:8000`; `docker-compose.yml` overrides it to `http://data-analysis:8000` (the internal service name) automatically |
 
 `ENABLE_RATE_LIMITING` (also in `.env.example`) is **not** read as an
 on/off toggle — rate limiting is unconditionally enabled, a deliberate
@@ -151,10 +157,11 @@ interactive and meant for local schema iteration only).
 - **`security.yml`** — CodeQL (SAST), Gitleaks (secret scanning),
   `npm audit --audit-level=high`, a weekly CycloneDX SBOM. Runs on PRs
   to `main`/`develop`, pushes to `main`, and weekly on schedule.
-- **`container-security.yml`** — builds both Dockerfiles for real (a
-  GitHub Actions runner has a working Docker daemon, unlike this
-  session's sandbox) and scans with Trivy. Runs on push to `main` when
-  Docker/app files change, plus weekly.
+- **`container-security.yml`** — builds all three application
+  Dockerfiles (`api`, `web`, `data-analysis`) for real (a GitHub Actions
+  runner has a working Docker daemon, unlike this session's sandbox) and
+  scans each with Trivy. Runs on push to `main` when Docker/app files
+  change, plus weekly.
 - **`dast.yml`** — OWASP ZAP baseline scan against a `docker compose up`
   stack. Schedule/manual-dispatch only, deliberately not wired to every
   PR (a ZAP scan is too slow/noisy to gate every merge).

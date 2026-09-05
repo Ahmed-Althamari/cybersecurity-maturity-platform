@@ -44,10 +44,33 @@ generating a prioritised remediation roadmap.
                   └────────────────────────┘
 ```
 
-There is no Redis, message queue, or object storage in the running
-system today. `packages/reporting`, `packages/security`, and
-`packages/ui` exist as workspace packages but nothing currently imports
-them — they're unused scaffolding, not wired into either app.
+`apps/api` also reaches one more service, over REST rather than Prisma —
+see its own diagram in "Data Analysis Service" below for the full
+picture:
+
+```
+apps/api ──REST, internal Docker network only──▶ services/data-analysis (Python/FastAPI, :8000)
+                                                     │
+                                                     │ "ai" mode only — "local" mode never does this
+                                                     ▼
+                                                  Configured LLM provider chain
+                                                  (LLM_PROVIDER_<n>_* env vars —
+                                                   OpenRouter free → Groq free → Claude, or any subset)
+```
+
+There is no Redis or object storage in the running system today.
+`packages/reporting`, `packages/security`, and `packages/ui` exist as
+workspace packages but nothing currently imports them — they're unused
+scaffolding, not wired into either app. `services/data-analysis` is the
+one deliberate exception to "everything talks to Postgres through
+apps/api": it's a separate, stateless Python microservice with no
+database access of its own and no knowledge of tenancy/auth — it exists
+purely to isolate PandasAI/AutoViz's Python dependency tree from the
+Node API, is reachable only from `apps/api` on the internal
+Docker-Compose network (never published on a host port, never called
+directly by `apps/web`), and its own "ai" mode is the only path in the
+whole system that sends data to an external network endpoint (the
+configured LLM provider) — see "Data Analysis Service" below.
 
 ## Monorepo Layout
 
@@ -76,6 +99,10 @@ packages/
   reporting/          Present but unused — no app imports it
   security/           Present but unused — no app imports it
   ui/                 Present but unused — no app imports it
+services/
+  data-analysis/     Standalone Python/FastAPI microservice — not an
+                      npm workspace, a different language runtime
+                      entirely. See "Data Analysis Service" below.
 ```
 
 **Why separate `scoring-engine` from the API service layer**: master
@@ -120,6 +147,15 @@ apps/api/src/
   audit/                  Global AuditInterceptor + @AuditLog decorator;
                           turns any decorated controller method into an
                           immutable AuditEvent row
+  data-analysis/          A new, deliberately isolated module — just a
+                          controller + service that proxies an
+                          authenticated multipart upload to
+                          services/data-analysis over HTTP and
+                          translates its response status codes. Owns no
+                          Prisma models, no business logic of its own,
+                          not imported by (or importing) any other
+                          feature module. See "Data Analysis Service"
+                          below.
 test/                    apps/api/test/*.e2e-spec.ts — real AppModule,
                           real Postgres, via supertest (see Phase 14)
 ```
@@ -143,6 +179,7 @@ hand-written list it can't drift). The shape, by controller:
 | `RemediationInitiativesController` | `/api/v1/remediation-initiatives` | bearer token; writes role-gated |
 | `DashboardController` | `/api/v1/dashboard` | bearer token only — any authenticated role can read |
 | `AuditController` | `/api/v1/audit-events` | bearer token; read itself is role-gated |
+| `DataAnalysisController` | `/api/v1/data-analysis` | bearer token only — any authenticated role; no `@Roles` gate, same as Dashboard |
 
 ### Role gating (as implemented, not as originally planned)
 
@@ -238,37 +275,62 @@ Credentials provider, Tailwind, Recharts for charts.
 ```
 apps/web/
   pages/
-    index.tsx              Landing
-    dashboard.tsx           The one real dashboard page — KPI cards,
-                            radar chart, gap bar chart, heatmap, top-gaps
-                            table, maturity distribution
-    auth/signin.tsx         Login form
-    api/auth/[...nextauth].ts  NextAuth config — calls the real
-                            POST /api/v1/auth/login server-side
-  components/dashboard/     KpiCard, MaturityRadarChart,
-                            FunctionGapBarChart, FunctionDetailCards,
-                            MaturityHeatmap, TopGapsTable,
-                            MaturityDistributionChart
+    index.tsx                  Landing
+    dashboard.tsx               KPI cards, radar chart, gap bar chart,
+                                heatmap, top-gaps table, maturity
+                                distribution — reads all six
+                                /dashboard/* endpoints
+    assessments/index.tsx       Assessment list
+    assessments/[id]/items.tsx  Assessment-taking flow — per-question
+                                current/target maturity recording
+    assessments/[id]/import.tsx Excel/CSV import wizard — upload,
+                                LLM-assisted-or-auto column-mapping
+                                review/edit step, import, results
+    frameworks/index.tsx        Framework list
+    frameworks/[id].tsx         Framework navigation tree
+    risks/index.tsx             Risk register list
+    risks/[id].tsx               Risk detail/edit
+    risks/new.tsx                Risk creation form
+    data-analysis/index.tsx     New, isolated: upload any spreadsheet,
+                                pick "local" (AutoViz, zero LLM calls) or
+                                "ai" (PandasAI) mode, view results — see
+                                docs/architecture.md's "Data Analysis
+                                Service" section
+    auth/signin.tsx             Login form
+    api/auth/[...nextauth].ts   NextAuth config — calls the real
+                                POST /api/v1/auth/login server-side
+  components/
+    layout/                     AppHeader (shared nav across every
+                                signed-in page), BackLink, EmptyState
+    dashboard/                  KpiCard, MaturityRadarChart,
+                                FunctionGapBarChart, FunctionDetailCards,
+                                MaturityHeatmap, TopGapsTable,
+                                MaturityDistributionChart
+    assessments/, frameworks/, risks/   Per-feature components (e.g.
+                                NavigationTree)
   lib/
-    api.ts                  Typed client — NEXT_PUBLIC_API_URL + /api/v1
-    maturity-scale.ts        Shared status colours, risk-level colours,
-                            maturity banding (dataviz-skill-validated palette)
-  public/                    Exists (Phase 15 fix — didn't before), currently empty
+    api.ts                      Typed client — NEXT_PUBLIC_API_URL + /api/v1
+    maturity-scale.ts            Shared status colours, risk-level colours,
+                                maturity banding (dataviz-skill-validated palette)
+  e2e/                          Playwright specs — auth, dashboard,
+                                risks, frameworks, import
+  public/                        Exists (Phase 15 fix — didn't before), currently empty
 ```
 
-**What exists**: login, one full dashboard page reading all six
-`/dashboard/*` endpoints. **What doesn't**: a framework navigation view,
-an assessment-taking flow (`/assessments/:id/items`), a risk register
-page, the Excel import wizard's UI (upload/preview/column-mapping steps
-— the API supports the underlying flow, nothing calls it from a page),
-and an organisation picker (the dashboard reads whichever org the logged
--in demo user belongs to). All genuinely deferred, not silently dropped —
-tracked in `docs/IMPLEMENTATION_STATUS.md`'s Next Steps every phase.
+Every core workflow now has a page: login, dashboard, framework
+navigation, assessment-taking, the Excel/CSV import wizard (including
+its LLM-assisted column-mapping review step), the risk register, and the
+new isolated Data Analysis feature. What's still missing: an
+organisation picker (pages read whichever org the logged-in user
+belongs to) and a UI for the assessment item's extended metadata fields
+(`rationale`/`evidence`/`owner*`) beyond current/target maturity —
+tracked in `docs/IMPLEMENTATION_STATUS.md`'s Next Steps.
 
-There are currently **zero automated frontend tests** — no React Testing
-Library component tests, no persisted Playwright E2E spec files (the
-`@playwright/test` dependency and a `test:e2e` script exist, scaffolded
-since Phase 1, but nothing has ever populated them with a spec).
+Test coverage: React Testing Library component tests
+(`components/**/*.test.tsx`, `__tests__/pages/**`) and a persisted
+Playwright E2E suite (`e2e/*.spec.ts`) both exist and run in CI — this
+was a real gap in an earlier phase, since closed (see
+`docs/IMPLEMENTATION_STATUS.md`'s "Frontend test coverage" writeups).
 
 ## Data Model
 
@@ -388,20 +450,105 @@ rows (only `invalid` rows are skipped) — a real bug from Phase 8 (warning
 rows were silently never imported) that live end-to-end testing caught
 and a unit test now guards against.
 
+## Data Analysis Service (`services/data-analysis`)
+
+A new, deliberately isolated feature — analyze an *arbitrary* spreadsheet
+(not an assessment-shaped one) and get automatic charts/insights. Built
+as its own slice specifically so it could ship without touching any
+existing assessments/risks/frameworks/dashboard/import-wizard code: a
+separate Python microservice, a thin NestJS proxy module, and a
+standalone frontend page.
+
+### Why a separate Python service
+
+`apps/api` (NestJS/Node) has no reason to carry pandas/PandasAI/AutoViz/
+matplotlib's dependency tree, so this lives in `services/data-analysis/`
+— a FastAPI app, not an npm workspace, built and deployed as its own
+Docker image (`services/data-analysis/Dockerfile`). It holds no Prisma
+models and knows nothing about tenancy or auth; `apps/api`'s
+`DataAnalysisController`/`DataAnalysisService` are the only thing that
+call it, over the internal Docker-Compose network
+(`http://data-analysis:8000`, never published on a host port), and are
+the only place auth/tenancy for this feature is enforced.
+
+```
+apps/web (data-analysis page)
+   │ authenticated multipart upload (file, mode, optional question)
+   ▼
+apps/api  DataAnalysisController → DataAnalysisService
+   │ proxies the same multipart body over HTTP, translates status codes
+   │ (503 stays 503; other 4xx → BadRequestException; else BadGatewayException)
+   ▼
+services/data-analysis  POST /analyze
+   │
+   ├─ mode="local" ──▶ AutoViz (analysis/local_mode.py) — zero LLM calls,
+   │                    zero network calls of any kind. Runs entirely
+   │                    in-process against the uploaded DataFrame,
+   │                    returns a fixed set of chart images (base64 PNG).
+   │
+   └─ mode="ai" ──────▶ PandasAI (analysis/ai_mode.py) — sends the
+                        dataframe's contents (as SQL query results, via
+                        an in-process DuckDB layer PandasAI builds
+                        automatically) to whichever LLM the configured
+                        provider chain resolves to, and returns its
+                        natural-language answer, a table, or a chart.
+```
+
+### Two modes, one explicit trade-off
+
+- **`local` mode — the privacy-preserving option.** For tenants who
+  don't want spreadsheet data leaving the platform at all. AutoViz runs
+  against the in-memory DataFrame and only writes chart files when
+  called with `verbose=2` (a real, non-obvious quirk of the installed
+  `autoviz` package — `verbose=0/1` target a Jupyter notebook and save
+  nothing). No LLM call is ever attempted in this mode, and no
+  `LLM_PROVIDER_<n>_*` configuration is required for it to work.
+- **`ai` mode — natural-language analysis, at the cost of the data
+  leaving this process.** Backed by `analysis/llm_client.py`'s
+  `FallbackLLM`, a Python re-implementation of the exact same
+  `LLM_PROVIDER_<n>_API_KEY`/`_FORMAT`/`_BASE_URL`/`_MODEL` env-var
+  scheme and slot defaults (1: OpenRouter free tier, 2: Groq free tier,
+  3: Claude) that
+  `apps/api/src/assessments/import-mapping/llm-client.ts` uses for the
+  Excel import wizard's column-mapping assistant — the same credentials
+  configure both features identically, tried in the same order, with
+  the same "only advance to the next provider on a real failure"
+  behaviour. If no slot is configured, `services/data-analysis` returns
+  a `503` with a clear message rather than attempting a call, and
+  `DataAnalysisService` surfaces that as-is to the frontend.
+
+### API
+
+`POST /analyze` (multipart: `file`, `mode` ∈ `{local, ai}`, optional
+`question` for `ai` mode) → `{ mode, rowCount, columnCount, columns,
+charts[], answer, table, error }`. `GET /health` for the container
+healthcheck. See `services/data-analysis/main.py` for the exact
+request/response handling and `services/data-analysis/tests/` (19
+pytest tests — fallback-chain ordering, both analysis modes via
+fake/stub LLMs, and the FastAPI endpoints) for the contract those
+handle.
+
 ## Deployment
 
 See `docs/DEPLOYMENT.md`. Summary: `infrastructure/Dockerfile.{api,web}`
-+ `docker-compose.yml` (Phase 15) build production images via
-Turborepo's `turbo prune --docker` recipe; GitHub Actions
-(`.github/workflows/`, Phase 16) runs lint/type-check/unit-tests/build on
-every PR plus a real Postgres-backed e2e job, and separately runs
-CodeQL, Gitleaks, Trivy, a weekly SBOM, and a nightly OWASP ZAP scan.
++ `services/data-analysis/Dockerfile` + `docker-compose.yml` (Phase 15,
+extended when the Data Analysis service was added) build four
+production images/services — `postgres`, `api`, `web`, `data-analysis`
+— via Turborepo's `turbo prune --docker` recipe for the two Node
+images and a plain `pip install` build for the Python one; GitHub
+Actions (`.github/workflows/`, Phase 16) runs lint/type-check/unit-
+tests/build on every PR plus a real Postgres-backed e2e job, and
+separately runs CodeQL, Gitleaks, Trivy (now scanning all three
+application images), a weekly SBOM, and a nightly OWASP ZAP scan.
 **The Docker images have never actually been built or run** — this
-session's sandbox had no reachable Docker daemon, so Phase 15 was
-validated as far as possible without one (a real `turbo prune`, `docker
-compose config` parsing correctly, the Next.js standalone output
-inspected file-by-file) but not proven end-to-end. Treat that as open
-until someone runs `docker compose build && up` for real.
+session's sandbox had no reachable Docker daemon, so Phase 15 (and the
+later `data-analysis` addition) was validated as far as possible without
+one (a real `turbo prune`, `docker compose config` parsing correctly,
+the Next.js standalone output inspected file-by-file, the Python
+service's actual dependency set installed and exercised for real in a
+scratch venv) but not proven end-to-end inside the images themselves.
+Treat that as open until someone runs `docker compose build && up` for
+real.
 
 ## Security Architecture & Threat Model
 
