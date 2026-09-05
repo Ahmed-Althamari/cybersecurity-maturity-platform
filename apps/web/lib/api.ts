@@ -438,3 +438,47 @@ export function getDashboardRoadmap(accessToken: string, organisationId: string)
   const query = new URLSearchParams({ organisationId });
   return apiFetch<RoadmapStatus>(`/dashboard/roadmap?${query}`, accessToken);
 }
+
+// ============================================================================
+// DATA ANALYSIS — isolated feature, unrelated to the assessments/risks/frameworks
+// domain above. See apps/api/src/data-analysis and services/data-analysis.
+// ============================================================================
+
+export type AnalysisMode = 'local' | 'ai';
+
+export interface AnalysisColumn {
+  name: string;
+  dtype: string;
+}
+
+export interface AnalysisChart {
+  title: string;
+  imageBase64: string;
+}
+
+export interface AnalysisResult {
+  mode: AnalysisMode;
+  rowCount: number;
+  columnCount: number;
+  columns: AnalysisColumn[];
+  charts: AnalysisChart[];
+  answer: string | null;
+  table: Record<string, unknown>[] | null;
+  error: string | null;
+}
+
+/**
+ * `mode: "local"` runs AutoViz only — zero LLM calls, zero network calls of any kind — for
+ * tenants who don't want their spreadsheet data leaving the platform. `mode: "ai"` sends the
+ * data to whichever LLM chain the server has configured (see llm-client.ts) for natural-language
+ * analysis beyond AutoViz's fixed chart set; `question` is only used in this mode.
+ */
+export function analyzeSpreadsheet(accessToken: string, file: File, mode: AnalysisMode, question?: string) {
+  const formData = new FormData();
+  formData.append('file', file);
+  formData.append('mode', mode);
+  if (question) {
+    formData.append('question', question);
+  }
+  return apiFetchFormData<AnalysisResult>('/data-analysis/analyze', accessToken, formData);
+}

@@ -26,12 +26,17 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      data-analysis:
+        condition: service_healthy
     environment:
       NODE_ENV: production
       PORT: 3001
       DATABASE_URL: postgresql://${POSTGRES_USER:-cmmp_user}:${POSTGRES_PASSWORD:-cmmp_password}@postgres:5432/${POSTGRES_DB:-cmmp_db}?schema=public
       JWT_SECRET: ${JWT_SECRET:?JWT_SECRET must be set (see .env.example) — refusing to fall back to a shared default in a container build}
       CORS_ORIGIN: ${NEXTAUTH_URL:-http://localhost:3000}
+      # Internal-network address of the isolated data-analysis service below — never the host-published
+      # form, since this service is never published on a host port at all.
+      DATA_ANALYSIS_SERVICE_URL: http://data-analysis:8000
     ports:
       - "3001:3001"
     networks:
@@ -57,6 +62,34 @@ services:
       NEXTAUTH_SECRET: ${NEXTAUTH_SECRET:?NEXTAUTH_SECRET must be set (see .env.example)}
     ports:
       - "3000:3000"
+    networks:
+      - cmmp-network
+
+  # Isolated data-analysis feature (services/data-analysis/) — a separate Python/FastAPI process,
+  # not part of apps/api's Node runtime, so its pandas/PandasAI/AutoViz dependency tree never
+  # touches the main API image. apps/api proxies to it over this internal network only; it's
+  # never published on a host port. See apps/api/src/data-analysis/data-analysis.service.ts.
+  data-analysis:
+    build:
+      context: ./services/data-analysis
+      dockerfile: ./Dockerfile
+    container_name: cmmp-data-analysis
+    environment:
+      # Optional LLM provider chain for "ai" mode — see llm-client.ts's env var scheme. Unset by
+      # default: "local" (AutoViz, zero LLM calls) always works; "ai" mode returns a clear 503
+      # until at least one LLM_PROVIDER_<n>_API_KEY is configured here.
+      LLM_PROVIDER_1_API_KEY: ${LLM_PROVIDER_1_API_KEY:-}
+      LLM_PROVIDER_1_FORMAT: ${LLM_PROVIDER_1_FORMAT:-}
+      LLM_PROVIDER_1_BASE_URL: ${LLM_PROVIDER_1_BASE_URL:-}
+      LLM_PROVIDER_1_MODEL: ${LLM_PROVIDER_1_MODEL:-}
+      LLM_PROVIDER_2_API_KEY: ${LLM_PROVIDER_2_API_KEY:-}
+      LLM_PROVIDER_2_FORMAT: ${LLM_PROVIDER_2_FORMAT:-}
+      LLM_PROVIDER_2_BASE_URL: ${LLM_PROVIDER_2_BASE_URL:-}
+      LLM_PROVIDER_2_MODEL: ${LLM_PROVIDER_2_MODEL:-}
+      LLM_PROVIDER_3_API_KEY: ${LLM_PROVIDER_3_API_KEY:-}
+      LLM_PROVIDER_3_FORMAT: ${LLM_PROVIDER_3_FORMAT:-}
+      LLM_PROVIDER_3_BASE_URL: ${LLM_PROVIDER_3_BASE_URL:-}
+      LLM_PROVIDER_3_MODEL: ${LLM_PROVIDER_3_MODEL:-}
     networks:
       - cmmp-network
 

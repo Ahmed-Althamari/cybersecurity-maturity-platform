@@ -9,6 +9,7 @@ on:
       - 'packages/**'
       - 'package.json'
       - 'package-lock.json'
+      - 'services/data-analysis/**'
   schedule:
     # Weekly scheduled scan, Monday 04:00 UTC
     - cron: '0 4 * * 1'
@@ -27,16 +28,21 @@ jobs:
       matrix:
         include:
           - image: api
+            context: .
             dockerfile: infrastructure/Dockerfile.api
           - image: web
+            context: .
             dockerfile: infrastructure/Dockerfile.web
+          - image: data-analysis
+            context: services/data-analysis
+            dockerfile: services/data-analysis/Dockerfile
     steps:
       - uses: actions/checkout@v4
 
       - name: Build image
         uses: docker/build-push-action@v6
         with:
-          context: .
+          context: ${{ matrix.context }}
           file: ${{ matrix.dockerfile }}
           push: false
           tags: cmmp-${{ matrix.image }}:ci

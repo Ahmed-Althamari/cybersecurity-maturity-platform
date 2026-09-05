@@ -8,6 +8,7 @@ import { AssessmentsModule } from './assessments/assessments.module';
 import { AuditModule } from './audit/audit.module';
 import { AuthModule } from './auth/auth.module';
 import { DashboardModule } from './dashboard/dashboard.module';
+import { DataAnalysisModule } from './data-analysis/data-analysis.module';
 import { FrameworksModule } from './frameworks/frameworks.module';
 import { HealthModule } from './health/health.module';
 import { PrismaModule } from './prisma/prisma.module';
@@ -45,6 +46,7 @@ import { UsersModule } from './users/users.module';
     DashboardModule,
     RisksModule,
     RemediationInitiativesModule,
+    DataAnalysisModule,
   ],
   controllers: [],
   providers: [{ provide: APP_GUARD, useClass: ThrottlerGuard }],

@@ -2290,6 +2290,76 @@ closing the window (a no-op when nothing landed late). Verified: `npm run
 test:e2e` for `@cmmp/api` 42/42 locally, plus a full `npx turbo run type-check
 test build lint` (29/29).
 
+### Data Analysis: a new, isolated PandasAI + AutoViz feature
+A new feature, deliberately built as its own isolated slice rather than folded into
+any existing module — none of the assessments/risks/frameworks/dashboard/import-wizard
+code was touched to build it. Lets a tenant upload any spreadsheet (not just an
+assessment-shaped one) and get automatic charts/insights, in one of two modes:
+
+- **`local` mode** — [AutoViz](https://github.com/AutoViML/AutoViz) only, zero LLM
+  calls and zero network calls of any kind. The explicit option for tenants who don't
+  want their spreadsheet data leaving the platform at all. Verified against a real
+  installed `autoviz` 0.1.807 that chart files only get written to disk when
+  `verbose=2` is passed (`verbose=0/1` target a Jupyter notebook and save nothing) —
+  a real, easy-to-miss quirk this session hit and fixed before it shipped.
+- **`ai` mode** — [PandasAI](https://github.com/sinaptik-ai/pandas-ai) 3.0.0, backed by
+  whichever LLM chain `LLM_PROVIDER_<n>_*` env vars configure (see "LLM client rework"
+  above — same scheme, same free-tier-first defaults, reused as-is on the Python side
+  via a `FallbackLLM` class mirroring `FallbackLlmClient`). Data (the dataframe's
+  contents, as SQL query results over an in-process DuckDB layer PandasAI 3.x builds
+  automatically) leaves this process for that provider — the explicit trade for
+  natural-language analysis beyond AutoViz's fixed chart set. Returns a clear 503 with
+  no attempted call when no provider is configured.
+
+Architecture, end to end:
+- `services/data-analysis/` — a standalone Python/FastAPI microservice (`main.py`
+  exposing `POST /analyze` and `GET /health`; `analysis/local_mode.py`,
+  `analysis/ai_mode.py`, `analysis/llm_client.py`). A separate language runtime on
+  purpose — pandas/PandasAI/AutoViz/matplotlib never touch the Node API's dependency
+  tree or its container image. 19 pytest tests (fallback-chain ordering, both analysis
+  modes via fake/stub LLMs — no real network calls in CI — and the FastAPI endpoints).
+- `apps/api/src/data-analysis/` — a new, isolated NestJS module
+  (`DataAnalysisController`/`DataAnalysisService`) that does nothing but proxy an
+  authenticated multipart upload to the Python service over HTTP and translate its
+  response status codes (503 stays 503, other 4xx becomes `BadRequestException`,
+  anything else `BadGatewayException`). Registered in `app.module.ts` as one more
+  import — the only touch to any pre-existing file in the whole feature besides the
+  shared nav below. 5 Jest tests.
+- `apps/web/pages/data-analysis/index.tsx` — a new, isolated page (mode picker, file
+  upload, optional question for `ai` mode, results view: charts grid / text answer /
+  table). Added as a fifth entry in `AppHeader`'s nav array (`components/layout/
+  AppHeader.tsx`) — the one other file this feature touches, purely additive.
+- `docker-compose.yml` — a fourth `data-analysis` service (own `Dockerfile`, own build
+  context under `services/data-analysis/`), never published on a host port; `api`
+  reaches it at `http://data-analysis:8000` over the internal compose network only.
+  `.env.example` documents the same `LLM_PROVIDER_<n>_*` vars plus
+  `DATA_ANALYSIS_SERVICE_URL` (for running the API outside compose).
+- `.github/workflows/container-security.yml` — added `data-analysis` as a third Trivy
+  scan matrix entry (own context/dockerfile), plus a `services/data-analysis/**` path
+  trigger, matching the existing `api`/`web` entries.
+
+Every real API used here was verified hands-on against actually-installed packages in
+a scratch venv before any repository code was written (this session's established
+discipline, not a shortcut) — PandasAI 3.0.0 is a ground-up rewrite of older 1.x/2.x
+tutorials/training data, so nothing about its API was assumed: `pai.chat()`'s typed
+`core.response.*` return objects, the `execute_sql_query` code-gen contract its
+prompt template imposes (any generated code must call a provided `execute_sql_query`
+function — a real, non-obvious constraint this session hit and worked through with a
+templated fake LLM in tests), and `pai.DataFrame(df)` accepting an in-memory pandas
+DataFrame directly (no file round-trip needed) were all confirmed against the real
+installed package, not recalled from training. Full stack verified live end-to-end in
+this session: a real Postgres-backed tenant/user, real JWT login, a real Playwright
+browser session uploading a CSV through the actual page and rendering 5 real AutoViz
+chart images (screenshot captured), plus the `ai` mode's 503-when-unconfigured path
+surfacing correctly in the UI. Verified: `pytest` 19/19 (`services/data-analysis`),
+`npx turbo run type-check test build lint` all green (160 API tests including the 5
+new ones, all pre-existing web tests unaffected), and a live end-to-end browser pass.
+
+Known gap: like the LLM-assisted column mapping feature, `ai` mode has never been
+exercised against a real configured LLM provider in this session (no API key
+available) — only against fake/stub LLMs in tests, plus the verified-real
+`execute_sql_query` prompt contract. See Next Steps below.
+
 ## Next Steps
 
 What's left, roughly in priority order. Every item from
@@ -2300,18 +2370,24 @@ pattern, and the Dependabot/`npm audit` triage — is now done above (the
 triage closed with one real fix (`multer`) and a documented, deliberate
 punt on the rest pending dedicated major-version-bump work):
 
-1. **Actually build and run Phase 15's Docker images.** `docker compose
+1. **Actually build and run Phase 15's Docker images** (now four:
+   `api`/`web`/`postgres`/the new `data-analysis`). `docker compose
    build && docker compose up` somewhere with a working daemon (this
    session's sandbox never had one). Everything was validated as far as
    possible without a daemon (`turbo prune` run for real, `docker
-   compose config` parsing cleanly, the Next.js `standalone` output
-   inspected file-by-file), but "parses correctly" and "boots and serves
-   traffic" are different claims, and only the first one has been
-   checked. `container-security.yml`'s Trivy scan and `dast.yml`'s ZAP
-   scan will do this automatically the next time either fires on a
-   GitHub Actions runner (which does have a working daemon) — worth
-   watching for that specifically, since it's the first real
-   verification those Dockerfiles will get.
+   compose config` parsing cleanly (re-verified after adding
+   `data-analysis`), the Next.js `standalone` output inspected
+   file-by-file, `services/data-analysis`'s actual Python dependency set
+   installed and exercised for real in a scratch venv — just never
+   inside the Docker image itself), but "parses correctly" and "boots
+   and serves traffic" are different claims, and only the first one has
+   been checked for `data-analysis`'s own `Dockerfile`.
+   `container-security.yml`'s Trivy scan (now scanning three images,
+   `data-analysis` included) and `dast.yml`'s ZAP scan will do this
+   automatically the next time either fires on a GitHub Actions runner
+   (which does have a working daemon) — worth watching for that
+   specifically, since it's the first real verification those
+   Dockerfiles will get.
 2. All four Phase 10 frontend follow-ups (framework navigation,
    assessment-taking, risk register, Excel import wizard) are now done
    — see Post-Phase-17 Feature Work above, and the import wizard's
@@ -2328,12 +2404,14 @@ punt on the rest pending dedicated major-version-bump work):
    outcome-statement text is still unverified; this session's `WebFetch`
    couldn't reach NIST's own reference tool or the CSWP 29 PDF to check
    it.
-4. Exercise the new LLM-assisted column-mapping feature
-   (`apps/api/src/assessments/import-mapping/`) against a real model —
-   this session had no `LLM_API_KEY`/`ANTHROPIC_API_KEY` for any of the
-   three configured providers (OpenRouter free, Groq free, Claude), so
-   it's covered by unit tests against fakes/mocks only, never a real
-   call to any of them — see that section's own writeup.
+4. Exercise the LLM-assisted column-mapping feature
+   (`apps/api/src/assessments/import-mapping/`) and the new Data
+   Analysis feature's `ai` mode (`services/data-analysis/analysis/
+   ai_mode.py`) against a real model — this session had no real API key
+   for any of the three configured providers (OpenRouter free, Groq
+   free, Claude), so both are covered by unit tests against fakes/mocks
+   only, never a real call to any of them — see each section's own
+   writeup.
 5. **Get real GitHub Dependabot alert data.** This session triaged what
    `npm audit` could see (30 findings; `multer`'s 5 fixed, see
    Post-Phase-17 Hardening above) but never had tool access to GitHub's

@@ -65,3 +65,10 @@ temp/
 # Database
 data/
 pgdata/
+
+# Python (services/data-analysis)
+__pycache__/
+*.pyc
+.pytest_cache/
+services/*/venv/
+services/*/.venv/
