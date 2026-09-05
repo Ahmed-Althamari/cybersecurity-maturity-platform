@@ -50,6 +50,15 @@ export async function createTestTenant(prisma: PrismaService, options: { role: s
  * firing while a template still references it). Assessment's own children (AssessmentItem,
  * AssessmentHistory, Evidence) *are* `ON DELETE CASCADE` from Assessment, so deleting Assessment
  * rows here is enough to take those with it.
+ *
+ * The AuditInterceptor logs `void this.recordFromResponse(...)` — deliberately fire-and-forget,
+ * so a request's HTTP response (and therefore a test's own assertions) can complete before its
+ * audit write actually lands. That write can land after the first `auditEvent.deleteMany` below
+ * but before `user.deleteMany` a few lines later — several awaited deletes in between are enough
+ * time for it — which throws exactly the FK violation this reproduced intermittently in CI
+ * (`audit_events_userId_fkey`, never locally, and only ever on this one delete). Re-clearing
+ * `auditEvent` immediately before `user.deleteMany` closes that window; it's a no-op when nothing
+ * landed late.
  */
 export async function cleanupTestTenant(prisma: PrismaService, tenantId: string): Promise<void> {
   await prisma.auditEvent.deleteMany({ where: { tenantId } });
@@ -58,6 +67,7 @@ export async function cleanupTestTenant(prisma: PrismaService, tenantId: string)
   await prisma.assessment.deleteMany({ where: { tenantId } });
   await prisma.assessmentTemplate.deleteMany({ where: { framework: { tenantId } } });
   await prisma.userRoleAssignment.deleteMany({ where: { tenantId } });
+  await prisma.auditEvent.deleteMany({ where: { tenantId } });
   await prisma.user.deleteMany({ where: { tenantId } });
   await prisma.organisation.deleteMany({ where: { tenantId } });
   await prisma.tenant.delete({ where: { id: tenantId } });

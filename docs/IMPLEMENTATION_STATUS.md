@@ -2274,6 +2274,22 @@ taxonomy level that matters most for navigation, scoring, and rollups:
   to NIST's own reference tool (or the PDF) should finish this before treating the
   fixture as compliance-grade at the Subcategory level.
 
+### Fixed a real, recurring race in the API e2e test cleanup helper
+`test/support/fixtures.ts`'s `cleanupTestTenant` — shared by every `*.e2e-spec.ts`
+file, untouched by any of this session's own changes — intermittently failed in CI
+(twice, on two different PR commits; never once locally across dozens of runs)
+with `Foreign key constraint violated: audit_events_userId_fkey` while deleting a
+test tenant's users. Root cause: `AuditInterceptor` logs via
+`void this.recordFromResponse(...)` — deliberately fire-and-forget, so a request's
+HTTP response (and a test's own assertions) can complete before its audit write
+actually lands in the database. That write can land after `cleanupTestTenant`'s
+first `auditEvent.deleteMany` but before `user.deleteMany` several awaited deletes
+later — enough of a window for CI's timing to hit it twice while local runs never
+did. Fixed by re-clearing `auditEvent` immediately before `user.deleteMany`,
+closing the window (a no-op when nothing landed late). Verified: `npm run
+test:e2e` for `@cmmp/api` 42/42 locally, plus a full `npx turbo run type-check
+test build lint` (29/29).
+
 ## Next Steps
 
 What's left, roughly in priority order. Every item from
