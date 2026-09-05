@@ -1,5 +1,6 @@
 import { INestApplication, ValidationPipe } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
+import helmet from 'helmet';
 
 import { AppModule } from '../../src/app.module';
 
@@ -26,17 +27,45 @@ import { AppModule } from '../../src/app.module';
  * exactly this reason — see test/token-revocation.e2e-spec.ts.
  * apps/api/test/rate-limit.e2e-spec.ts is the one place the throttle's
  * actual behavior gets deliberately exercised, with its own bootstrap.
+ *
+ * Also applies the same CORS and helmet middleware main.ts's bootstrap()
+ * does — added so security-headers.integration-spec.ts asserts against
+ * the real production middleware stack rather than a hand-trimmed subset
+ * that could silently drift from it (a helmet config change in main.ts
+ * that was never mirrored here would otherwise go untested).
  */
 export async function createTestApp(): Promise<INestApplication> {
   const moduleRef = await Test.createTestingModule({ imports: [AppModule] }).compile();
   const app = moduleRef.createNestApplication();
-  app.setGlobalPrefix('api/v1');
+  app.setGlobalPrefix('api/v1', { exclude: ['health'] });
   app.useGlobalPipes(
     new ValidationPipe({
       whitelist: true,
       forbidNonWhitelisted: true,
       transform: true,
       transformOptions: { enableImplicitConversion: true },
+    }),
+  );
+  app.enableCors({
+    origin: process.env.CORS_ORIGIN || 'http://localhost:3000',
+    credentials: true,
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization'],
+  });
+  app.use(
+    helmet({
+      contentSecurityPolicy: {
+        directives: {
+          defaultSrc: ["'none'"],
+          frameAncestors: ["'none'"],
+        },
+      },
+      hsts: {
+        maxAge: 31536000,
+        includeSubDomains: true,
+      },
+      referrerPolicy: { policy: 'no-referrer' },
+      frameguard: { action: 'deny' },
     }),
   );
   await app.init();

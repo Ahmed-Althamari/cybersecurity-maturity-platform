@@ -80,11 +80,35 @@ export class RemediationInitiativesService {
     });
   }
 
-  async findAll(tenantId: string, organisationId: string, options: { status?: string; sort?: 'priority' | 'recent' } = {}) {
-    return this.prisma.remediationInitiative.findMany({
-      where: { tenantId, organisationId, deletedAt: null, status: options.status },
-      orderBy: options.sort === 'priority' ? [{ priority: 'asc' }, { targetCompletionDate: 'asc' }] : [{ createdAt: 'desc' }],
-    });
+  /**
+   * `search` matches on `title` case-insensitively (Postgres `ILIKE`-equivalent via Prisma's
+   * `mode: 'insensitive'`) — added for the risk-detail page's initiative picker, which searches
+   * across every initiative in the organisation rather than paging through a single fixed-size
+   * list that could otherwise silently hide anything past the first page's worth of results.
+   */
+  async findAll(
+    tenantId: string,
+    organisationId: string,
+    options: { status?: string; sort?: 'priority' | 'recent'; search?: string; page?: number; pageSize?: number } = {},
+  ) {
+    const page = options.page && options.page > 0 ? Math.floor(options.page) : 1;
+    const pageSize = options.pageSize && options.pageSize > 0 ? Math.min(Math.floor(options.pageSize), 100) : 20;
+
+    const where = {
+      tenantId,
+      organisationId,
+      deletedAt: null,
+      status: options.status,
+      ...(options.search ? { title: { contains: options.search, mode: 'insensitive' as const } } : {}),
+    };
+    const orderBy = options.sort === 'priority' ? [{ priority: 'asc' as const }, { targetCompletionDate: 'asc' as const }] : [{ createdAt: 'desc' as const }];
+
+    const [data, total] = await Promise.all([
+      this.prisma.remediationInitiative.findMany({ where, orderBy, skip: (page - 1) * pageSize, take: pageSize }),
+      this.prisma.remediationInitiative.count({ where }),
+    ]);
+
+    return { data, total, page, pageSize, totalPages: Math.max(1, Math.ceil(total / pageSize)) };
   }
 
   async findOne(id: string, tenantId: string) {

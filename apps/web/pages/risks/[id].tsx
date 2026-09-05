@@ -1,12 +1,22 @@
 import type { GetServerSideProps } from 'next';
 import Head from 'next/head';
 import { useRouter } from 'next/router';
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 
 import { AppHeader } from '../../components/layout/AppHeader';
 import { BackLink } from '../../components/layout/BackLink';
 import { RiskLevelBadge } from '../../components/risks/RiskLevelBadge';
-import { ApiError, deleteRisk, getRisk, updateRisk, type RiskRecord } from '../../lib/api';
+import {
+  ApiError,
+  deleteRisk,
+  getRisk,
+  linkInitiative,
+  listInitiatives,
+  unlinkInitiative,
+  updateRisk,
+  type RemediationInitiativeSummary,
+  type RiskRecord,
+} from '../../lib/api';
 import { getAuthSession } from '../../lib/auth';
 import { hasAnyRole, RISK_DELETE_ROLES, RISK_WRITE_ROLES } from '../../lib/roles';
 
@@ -21,6 +31,7 @@ interface RiskDetailPageProps {
 const SCALE = [1, 2, 3, 4, 5];
 const STATUS_OPTIONS = ['OPEN', 'IN_PROGRESS', 'CLOSED'];
 const TREATMENT_OPTIONS = ['MITIGATE', 'ACCEPT', 'AVOID', 'TRANSFER', 'MONITOR'];
+const INITIATIVE_PAGE_SIZE = 10;
 
 export default function RiskDetailPage({ risk, accessToken, canEdit, canDelete, errorMessage }: RiskDetailPageProps) {
   const router = useRouter();
@@ -34,6 +45,58 @@ export default function RiskDetailPage({ risk, accessToken, canEdit, canDelete, 
   const [saving, setSaving] = useState(false);
   const [saveMessage, setSaveMessage] = useState<string | null>(null);
   const [deleting, setDeleting] = useState(false);
+
+  const [linkedInitiatives, setLinkedInitiatives] = useState<RemediationInitiativeSummary[]>(risk?.initiatives ?? []);
+  const [availableInitiatives, setAvailableInitiatives] = useState<RemediationInitiativeSummary[]>([]);
+  const [initiativesLoading, setInitiativesLoading] = useState(true);
+  const [initiativeSearchInput, setInitiativeSearchInput] = useState('');
+  const [initiativeSearch, setInitiativeSearch] = useState('');
+  const [initiativePage, setInitiativePage] = useState(1);
+  const [initiativeTotalPages, setInitiativeTotalPages] = useState(1);
+  const [selectedInitiativeId, setSelectedInitiativeId] = useState('');
+  const [initiativeError, setInitiativeError] = useState<string | null>(null);
+
+  // Debounces the search box so every keystroke doesn't fire a request, and resets to page 1 --
+  // a new search invalidates whatever page count the previous one had. Guarded on the trimmed
+  // value actually changing so the debounce timer that's already in flight when this effect
+  // re-runs (e.g. on mount) doesn't reset the page a user has already paged forward from.
+  useEffect(() => {
+    const trimmed = initiativeSearchInput.trim();
+    if (trimmed === initiativeSearch) {
+      return;
+    }
+    const handle = setTimeout(() => {
+      setInitiativeSearch(trimmed);
+      setInitiativePage(1);
+    }, 300);
+    return () => clearTimeout(handle);
+  }, [initiativeSearchInput, initiativeSearch]);
+
+  useEffect(() => {
+    if (!risk) return;
+    let cancelled = false;
+    setInitiativesLoading(true);
+    listInitiatives(accessToken, risk.organisationId, {
+      search: initiativeSearch,
+      page: initiativePage,
+      pageSize: INITIATIVE_PAGE_SIZE,
+    })
+      .then((result) => {
+        if (cancelled) return;
+        setAvailableInitiatives(result.data);
+        setInitiativeTotalPages(Math.max(1, result.totalPages));
+      })
+      .catch(() => {
+        if (!cancelled) setAvailableInitiatives([]);
+      })
+      .finally(() => {
+        if (!cancelled) setInitiativesLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [risk?.organisationId, accessToken, initiativeSearch, initiativePage]);
 
   if (!risk) {
     return (
@@ -68,6 +131,31 @@ export default function RiskDetailPage({ risk, accessToken, canEdit, canDelete, 
     } catch (err) {
       setSaveMessage(err instanceof ApiError ? err.message : 'Failed to delete this risk.');
       setDeleting(false);
+    }
+  }
+
+  async function handleLinkInitiative() {
+    if (!selectedInitiativeId) return;
+    setInitiativeError(null);
+    try {
+      await linkInitiative(accessToken, selectedInitiativeId, risk!.id);
+      const linked = availableInitiatives.find((initiative) => initiative.id === selectedInitiativeId);
+      if (linked) {
+        setLinkedInitiatives((current) => [...current, linked]);
+      }
+      setSelectedInitiativeId('');
+    } catch (err) {
+      setInitiativeError(err instanceof ApiError ? err.message : 'Failed to link initiative.');
+    }
+  }
+
+  async function handleUnlinkInitiative(initiativeId: string) {
+    setInitiativeError(null);
+    try {
+      await unlinkInitiative(accessToken, initiativeId, risk!.id);
+      setLinkedInitiatives((current) => current.filter((initiative) => initiative.id !== initiativeId));
+    } catch (err) {
+      setInitiativeError(err instanceof ApiError ? err.message : 'Failed to unlink initiative.');
     }
   }
 
@@ -233,6 +321,111 @@ export default function RiskDetailPage({ risk, accessToken, canEdit, canDelete, 
                 </button>
               )}
             </div>
+          </div>
+
+          <div className="bg-slate-800 rounded-lg p-6 border border-slate-700 space-y-4 mt-6">
+            <h2 className="text-lg font-semibold text-white">Remediation Initiatives</h2>
+
+            {linkedInitiatives.length === 0 ? (
+              <p className="text-sm text-slate-500">None linked yet.</p>
+            ) : (
+              <ul className="space-y-2">
+                {linkedInitiatives.map((initiative) => (
+                  <li
+                    key={initiative.id}
+                    className="flex items-center justify-between rounded-md border border-slate-700 p-3 text-sm"
+                  >
+                    <div>
+                      <p className="font-medium text-slate-200">{initiative.title}</p>
+                      <p className="text-xs text-slate-500">{initiative.status}</p>
+                    </div>
+                    {canEdit && (
+                      <button
+                        type="button"
+                        onClick={() => handleUnlinkInitiative(initiative.id)}
+                        className="text-red-400 hover:text-red-300 text-xs font-medium"
+                      >
+                        Unlink
+                      </button>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            )}
+
+            {canEdit && (
+              <div className="space-y-2 pt-2 border-t border-slate-700">
+                <label htmlFor="initiative-search" className="block text-sm text-slate-300 mb-1">
+                  Link an existing initiative
+                </label>
+                <input
+                  id="initiative-search"
+                  type="text"
+                  value={initiativeSearchInput}
+                  onChange={(e) => setInitiativeSearchInput(e.target.value)}
+                  placeholder="Search initiatives by title…"
+                  className="w-full rounded-md bg-slate-900 border border-slate-600 px-3 py-2 text-white"
+                />
+                <div className="max-h-48 overflow-y-auto rounded-md border border-slate-700">
+                  {initiativesLoading && <p className="p-3 text-sm text-slate-500">Loading initiatives…</p>}
+                  {!initiativesLoading &&
+                    availableInitiatives
+                      .filter((initiative) => !linkedInitiatives.some((linked) => linked.id === initiative.id))
+                      .length === 0 && (
+                      <p className="p-3 text-sm text-slate-500">
+                        {initiativeSearch ? 'No matching initiatives.' : 'Every existing remediation initiative is already linked to this risk.'}
+                      </p>
+                    )}
+                  {!initiativesLoading &&
+                    availableInitiatives
+                      .filter((initiative) => !linkedInitiatives.some((linked) => linked.id === initiative.id))
+                      .map((initiative) => (
+                        <button
+                          key={initiative.id}
+                          type="button"
+                          onClick={() => setSelectedInitiativeId(initiative.id)}
+                          className={`block w-full px-3 py-2 text-left text-sm ${
+                            selectedInitiativeId === initiative.id ? 'bg-blue-600/30 text-white' : 'text-slate-300 hover:bg-slate-700/40'
+                          }`}
+                        >
+                          {initiative.title} ({initiative.status})
+                        </button>
+                      ))}
+                </div>
+                {initiativeTotalPages > 1 && (
+                  <div className="flex items-center justify-center gap-3">
+                    <button
+                      type="button"
+                      onClick={() => setInitiativePage((p) => p - 1)}
+                      disabled={initiativePage <= 1}
+                      className="rounded-md border border-slate-600 px-3 py-1 text-xs text-slate-300 disabled:opacity-50"
+                    >
+                      Previous
+                    </button>
+                    <span className="text-xs text-slate-400">
+                      Page {initiativePage} of {initiativeTotalPages}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setInitiativePage((p) => p + 1)}
+                      disabled={initiativePage >= initiativeTotalPages}
+                      className="rounded-md border border-slate-600 px-3 py-1 text-xs text-slate-300 disabled:opacity-50"
+                    >
+                      Next
+                    </button>
+                  </div>
+                )}
+                {initiativeError && <p className="text-sm text-red-400">{initiativeError}</p>}
+                <button
+                  type="button"
+                  onClick={handleLinkInitiative}
+                  disabled={!selectedInitiativeId}
+                  className="rounded-md border border-slate-600 px-4 py-2 text-sm font-medium text-slate-200 disabled:opacity-50"
+                >
+                  Link
+                </button>
+              </div>
+            )}
           </div>
         </div>
       </div>

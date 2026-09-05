@@ -1,6 +1,6 @@
 # CMMP Implementation Status
 
-Last Updated: 2026-09-04 (Phase 17 + post-Phase-17 hardening)
+Last Updated: 2026-09-05 (branch reconciliation — see "Branch Reconciliation" below)
 
 ## Overall Progress
 
@@ -2429,6 +2429,163 @@ punt on the rest pending dedicated major-version-bump work):
    own scoped PR with real testing afterward (a browser pass for
    Next.js, the full test suite plus manual verification for NestJS) —
    not something to do blind in an autonomous pass.
+
+## Branch Reconciliation (2026-09-05)
+
+A second, independent parallel-session situation surfaced after the
+Post-Phase-17 Hardening work above had already merged into `main` (as
+PR #21). Two *other* sessions, unrelated to that one, had separately
+been trying to reconcile their own pair of parallel branches against an
+older, pre-PR-#21 `main`:
+
+- **PR #2** (`claude/proceed-bo89gm`, "Hardening batch: auth, RBAC,
+  headers, audit immutability, uploads, rate limiting, types, picker
+  UX, password change") built its own independent version of
+  essentially Phases 4–17 plus a round of hardening, diverging from a
+  point before any of PR #21's work existed.
+- **PR #20** (`merge/proceed-into-main`) was an earlier session's
+  attempt to reconcile PR #2 into `main` — but `main` at the time was
+  already stale (pre-PR #21), and PR #20 was never updated afterward.
+  It sat open, unmerged, with real unique work in it.
+
+This reconciliation merges PR #20 into a fresh branch off the current
+(post-PR-#21) `main`, resolving on merits rather than favoring either
+side wholesale. The two branches had independently rebuilt overlapping
+systems (auth, audit logging, the assessments/frameworks/scoring
+modules, test infrastructure) from the same distant ancestor — around
+74 files carried real conflicts, and dozens more were PR #20-only
+additions that needed the same file-by-file judgment despite not
+technically conflicting.
+
+**What was confirmed genuinely unique to PR #20/#2 and carried forward:**
+
+1. **Helmet security headers on the API** (`apps/api/src/main.ts`) —
+   CSP, HSTS, Referrer-Policy, replacing a hand-rolled
+   X-Content-Type-Options/X-Frame-Options/X-XSS-Protection-only
+   middleware. The equivalent Next.js headers (`apps/web/next.config.js`)
+   and its paired runtime check (`apps/web/scripts/check-env.js`, wired
+   into `infrastructure/Dockerfile.web`'s `CMD`) were already present on
+   both sides identically and merged in without incident.
+2. **Audit log immutability at the database level** — a Postgres
+   trigger blocking `UPDATE` on `audit_events` (not `DELETE`, to avoid
+   breaking the tenant-deletion cascade), added as a new migration
+   (`20260905000002_audit_events_immutable_update`) on top of `main`'s
+   current migration history rather than editing or renumbering
+   anything already applied.
+3. **File-upload signature/magic-byte validation** — PR #20 had its own
+   complete parser rewrite (`packages/import-engine/src/parse.ts`)
+   duplicating `main`'s existing `parse-csv.ts`/`parse-xlsx.ts` split;
+   only the actual new logic (`validateFileSignature()`: a real ZIP
+   signature check for `.xlsx`/`.xls`, a binary-content check for
+   `.csv`) was ported, into `main`'s existing `file-guard.ts` alongside
+   (not replacing) its existing extension/size/MIME checks, and wired
+   into `assessments.service.ts` before parsing.
+4. **A searchable/paginated remediation-initiative picker.** `main`'s
+   `apps/web/pages/risks/[id].tsx` had no initiative-linking UI at all
+   yet (this was earlier-stage than the "capped at 100" description
+   suggested), and `GET /remediation-initiatives` had no pagination or
+   search. Added a `search`/`page`/`pageSize`-aware `findAll()` on
+   `RemediationInitiativesService`, and a picker section on the risk
+   detail page — built to match `main`'s existing SSR (`getServerSideProps`)
+   page architecture and plain-Tailwind styling rather than adopting PR
+   #20's client-only (`useSession`) rewrite of the whole page or its
+   `components/ui/` shadcn-style kit, neither of which exists in `main`.
+5. **`POST /auth/change-password` with cross-session token revocation** —
+   added to `main`'s existing `AuthService`/`AuthController` (not a
+   wholesale replacement): a `passwordChangedAt` stamp, a new
+   millisecond-precision `issuedAtMs` JWT claim (the standard `iat`'s
+   1-second resolution isn't fine enough to correctly order a token
+   issued in the same wall-clock second as the change — PR #2's own
+   description notes this was caught as a real intermittent test
+   failure), and a `JwtStrategy` check rejecting any token issued
+   before that stamp.
+
+**The rate-limiting collision, watched for as instructed:** PR #2's own
+description warned that a hand-rolled per-IP guard, added after a
+second `ThrottlerModule` registration silently broke the existing
+login-specific throttle, had caused a real bug during its own
+development. PR #20 carried that same hand-rolled `GlobalRateLimitGuard`
+forward as `main`'s `APP_GUARD`. Since PR #21's `main` already has its
+own working, CI-verified `ThrottlerModule.forRoot()` (a generous global
+default plus a tight `@Throttle()` override on login), PR #20's
+`GlobalRateLimitGuard` and its dedicated test files were dropped
+entirely in favor of keeping `main`'s existing mechanism untouched —
+exactly the collision the task was flagged to watch for, avoided by not
+reintroducing the guard that had caused it before.
+
+**Everything else PR #20 carried was a duplicate rebuild of ground PR
+#21 already covered, and was NOT carried forward** — `main`'s own
+already-verified implementation was kept as-is in every case:
+`packages/framework-engine`'s definitions/persist/validator/
+component-descriptor files (duplicating `main`'s loader/navigation/
+schema/flatten), `packages/scoring-engine`'s gap-analysis/maturity-scale
+(duplicating `gaps.ts`/`levels.ts`), a parallel `apps/api/src/framework`,
+`import`, `initiatives`, and `scoring` module (duplicating `main`'s
+`frameworks`, the assessments import flow, `remediation-initiatives`,
+and direct `scoring-engine` use respectively), an entire encrypted
+platform-settings feature (`apps/api/src/settings`,
+`packages/security/src/encryption`) with no equivalent in `main` and
+out of scope for this reconciliation, an `executive-viewer-scope`
+RBAC guard with no `main` equivalent, `apps/api/src/common/pagination.ts`
+(a generic pagination helper only `users.service.ts`'s own duplicated
+rebuild used), `apps/api/src/config/validate-env.ts` (a bootstrap-time
+`JWT_SECRET` check duplicating `main`'s already-verified
+`resolveJwtSecret()`, which throws at DI-construction time instead),
+its own CI workflow restructuring (`codeql.yml`/`gitleaks.yml`/
+`container-scan.yml`/`deploy.yml` replacing `main`'s existing
+`ci.yml`/`security.yml`/`container-security.yml`/`dast.yml`), its own
+simpler (non-`turbo prune`) Dockerfiles, `docs/adr/` and a full second
+set of architecture docs describing that now-dropped module layout, and
+several duplicate integration-test files
+(`tenant-security.integration-spec.ts` — partially overlapping `main`'s
+already-more-comprehensive `tenant-isolation.e2e-spec.ts`;
+`token-revocation.integration-spec.ts` — fully duplicating `main`'s
+existing `token-revocation.e2e-spec.ts` scenario-for-scenario;
+`auth-rate-limit.integration-spec.ts`/`global-rate-limit.integration-spec.ts`/
+`executive-viewer-scope.integration-spec.ts` — all testing guards that
+were dropped). PR #20's own `test-app.ts` (a from-scratch app-bootstrap
+helper for asserting Helmet headers against the real middleware stack)
+duplicated `main`'s existing `apps/api/test/support/app.ts` — rather
+than keep two same-named helpers at different paths, the missing
+production-parity pieces (health-path exclusion, CORS, `helmet()`) were
+folded into `main`'s existing helper instead, and every kept
+integration spec points at it.
+
+**Judgment calls worth a second look:** `RolesGuard` and
+`users.service.ts` in PR #20 gained a multi-role check
+(`user.roles.some(...)` rather than just `user.role`) and generic
+pagination respectively — neither is one of the five confirmed unique
+features, both change the behavior of an existing, already-verified
+`main` endpoint, and the multi-role change in particular touches
+security-sensitive authorization logic outside this reconciliation's
+stated scope. Both were left as `main`'s original, unmodified — worth a
+human's separate look at whether the multi-role RBAC gap is real and
+worth its own PR, since `main`'s own JWT payload already carries a
+`roles` array that `RolesGuard` doesn't currently check.
+
+**Migrations:** PR #20's own five-migration history (its own `init`,
+`add_platform_settings`, `add_revoked_tokens`, plus the two genuinely
+needed ones) was not applied wholesale — `main` already has its own
+`init` and `add_revoked_tokens` migrations covering the same schema
+ground via a different path. Only the two migrations for genuinely new
+schema (the `passwordChangedAt` column, the audit-immutability trigger)
+were added, as fresh migrations timestamped after `main`'s current
+migration history, with their SQL unchanged from PR #20's own (both are
+schema-agnostic — a column add and a trigger against a fixed table
+name).
+
+**Verification:** `npx turbo run type-check test build lint`,
+`apps/api`'s full e2e suite (`npm run test:e2e --workspace=@cmmp/api`,
+against a real local Postgres — this now includes the three
+integration-spec files kept above, folded into the same `test/*.e2e-spec.ts`
+runner via `jest-e2e.json`'s test-file pattern), and `apps/web`'s
+Playwright suite were all run clean after this reconciliation — see the
+pull request description for the exact commands and results.
+
+Once the PR from this reconciliation merges, PR #20 (and the PR #2
+branch beneath it) can be closed as superseded — their unique work is
+now in `main` via this reconciliation, and everything else in them was
+already independently rebuilt here.
 
 ## Contact & Questions
 

@@ -16,6 +16,7 @@
     "clean": "rm -rf .next dist coverage"
   },
   "dependencies": {
+    "@cmmp/shared": "*",
     "@hookform/resolvers": "^3.3.2",
     "@prisma/client": "^5.22.0",
     "@radix-ui/react-dialog": "^1.1.1",

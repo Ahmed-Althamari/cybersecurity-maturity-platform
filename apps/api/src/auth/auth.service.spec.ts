@@ -92,6 +92,15 @@ describe('AuthService', () => {
     expect(payload.tenantId).toBe('tenant-1');
   });
 
+  it('stamps every issued token with a millisecond-precision issuedAtMs claim', async () => {
+    const { access_token } = await authService.login({
+      email: 'ciso@example.local',
+      password: 'CorrectHorseBattery1!',
+    });
+    const payload = await authService.validateToken(access_token);
+    expect(payload.issuedAtMs).toEqual(expect.any(Number));
+  });
+
   it('issues a unique jti per token, including across a refresh', async () => {
     const { access_token } = await authService.login({
       email: 'ciso@example.local',
@@ -144,6 +153,55 @@ describe('AuthService', () => {
     it('reports a token not revoked when no matching row exists', async () => {
       prisma.revokedToken.findUnique.mockResolvedValueOnce(null);
       await expect(authService.isRevoked('jti-456')).resolves.toBe(false);
+    });
+  });
+
+  describe('changePassword', () => {
+    const requestUser = {
+      sub: 'user-1',
+      email: 'ciso@example.local',
+      name: 'CISO',
+      tenantId: 'tenant-1',
+      organisationId: 'org-1',
+      role: 'CISO',
+      roles: ['CISO'],
+      jti: 'jti-current',
+      exp: 1893456000,
+    };
+
+    it('rejects an incorrect current password', async () => {
+      await expect(
+        authService.changePassword(requestUser, { currentPassword: 'wrong', newPassword: 'ANewPassword123!' }),
+      ).rejects.toThrow(UnauthorizedException);
+    });
+
+    it('hashes and stores the new password, stamping passwordChangedAt', async () => {
+      await authService.changePassword(requestUser, {
+        currentPassword: 'CorrectHorseBattery1!',
+        newPassword: 'ANewPassword123!',
+      });
+
+      expect(prisma.user.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: 'user-1' },
+          data: expect.objectContaining({ passwordChangedAt: expect.any(Date) }),
+        }),
+      );
+      const updateArgs = prisma.user.update.mock.calls[0][0];
+      expect(updateArgs.data.passwordHash).not.toBe('CorrectHorseBattery1!');
+      await expect(bcrypt.compare('ANewPassword123!', updateArgs.data.passwordHash)).resolves.toBe(true);
+    });
+
+    it("returns a fresh token for the caller's own session, so it survives the change", async () => {
+      const result = await authService.changePassword(requestUser, {
+        currentPassword: 'CorrectHorseBattery1!',
+        newPassword: 'ANewPassword123!',
+      });
+
+      expect(result.access_token).toBeDefined();
+      const payload = await authService.validateToken(result.access_token);
+      expect(payload.jti).not.toBe('jti-current');
+      expect(payload.issuedAtMs).toEqual(expect.any(Number));
     });
   });
 });

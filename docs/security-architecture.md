@@ -18,14 +18,16 @@ design.
 | **Credential redaction in audit trail** | `sanitizeForAudit()` replaces `password`/`token`/`secret`-shaped keys with `[REDACTED]` before a request body is ever persisted | `sanitize.spec.ts` + live: confirmed a real login/user-create audit row shows `[REDACTED]`, not the submitted password |
 | **Formula/CSV injection defense** | `@cmmp/import-engine`'s `sanitizeCellValue()` — a cell starting with `=`, `+`, `-`, `@`, or a control character gets prefixed with `'` before storage | `sanitize.spec.ts` in `import-engine`, plus a live end-to-end import test |
 | **Input validation** | `class-validator` DTOs with `ValidationPipe({ whitelist: true, forbidNonWhitelisted: true })` — an unexpected field in a request body is rejected outright, not silently dropped | Exercised by every e2e test that posts a body |
-| **File upload hardening** | `@cmmp/import-engine`'s `validateFileUpload()` — extension allowlist, path-traversal character rejection, 10MB size cap, 20,000 row cap | `file-guard.spec.ts` |
-| **Security response headers** | `main.ts`: `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, `X-XSS-Protection: 1; mode=block` on every response | Manual inspection of `main.ts`; not asserted by a test |
+| **File upload hardening** | `@cmmp/import-engine`'s `validateFileUpload()` — extension allowlist, path-traversal character rejection, 10MB size cap, 20,000 row cap — plus `validateFileSignature()`, which rejects a file whose actual bytes don't match its claimed extension (a real ZIP local-file-header signature for `.xlsx`/`.xls`; a binary-content check for `.csv`) before any parsing is attempted, closing the "renamed/disguised file" gap the extension/size/MIME checks alone don't catch | `file-guard.spec.ts` |
+| **Security response headers** | `helmet()` on the NestJS API (`main.ts`) — CSP (`default-src`/`frame-ancestors: 'none'`, appropriate for a pure JSON API), HSTS (1 year, includes subdomains), `Referrer-Policy: no-referrer`, `X-Frame-Options: DENY`, `X-Content-Type-Options: nosniff`. Replaces an earlier hand-rolled middleware that set only the latter two headers (plus the deprecated, no-longer-meaningful `X-XSS-Protection`) with no CSP/HSTS/Referrer-Policy at all. The Next.js web app (`apps/web/next.config.js`) sets the equivalent headers via its own `headers()` config | `apps/api/test/security-headers.integration-spec.ts` — asserts every header directly against a real HTTP response from the real app (via `apps/api/test/support/app.ts`, which now mirrors `main.ts`'s full middleware stack) |
 | **CORS** | Restricted to a single configured origin (`CORS_ORIGIN` env var, defaults to `http://localhost:3000`), not `*` | Manual inspection of `main.ts` |
 | **Soft delete** | `deletedAt` timestamp instead of hard `DELETE` across tenant-scoped resources — every read filters `deletedAt: null` | Consistent pattern, unit-tested per-resource (e.g. `risks.service.spec.ts`'s "soft-deletes rather than hard-deletes") |
 | **Rate limiting** | `@nestjs/throttler`, global `APP_GUARD`. App-wide default (100 req/15min/IP, configurable via `RATE_LIMIT_MAX_REQUESTS`/`RATE_LIMIT_WINDOW_MS`) plus a much tighter override on `POST /auth/login` specifically (5/min/IP via `@Throttle()`) — that's the one endpoint reachable with zero prior authentication, so it's the one that needs brute-force resistance rather than just general abuse protection. `GET /health` is exempted (`@SkipThrottle()`) since it's designed for frequent automated polling. `ENABLE_RATE_LIMITING` in `.env.example` is *not* wired as an on/off toggle — rate limiting is unconditionally on, a deliberate choice for a security product (opt-out is the wrong default here) | `apps/api/test/rate-limit.e2e-spec.ts` — 5 login attempts succeed (as 401s, wrong password), the 6th gets a real 429 with a `Retry-After` header even when the credentials on that 6th attempt are correct; `/health` confirmed still reachable after login's limit is exhausted |
 | **Token revocation on logout** | A `RevokedToken` table keyed by `jti` (a unique id added to every JWT at sign time). `POST /auth/logout` upserts a row for *that specific token's* `jti`; `JwtStrategy.validate()` checks it on every authenticated request and rejects with 401 if found. Per-token, not a global "sign out everywhere" — a different session for the same user (a different device, a different tab) is untouched | `apps/api/test/token-revocation.e2e-spec.ts` — logs out one of two sessions and confirms the other still works, confirms the same token can't log out twice; `auth.service.spec.ts`/`jwt.strategy.spec.ts` unit-test the upsert and the revocation check directly |
 | **Refresh-token rotation** | `POST /auth/refresh` revokes the token it was called with (same `RevokedToken` mechanism as logout) the moment it mints the new one, so a leaked pre-refresh token can't go on being used indefinitely just because its holder refreshes | `apps/api/test/token-revocation.e2e-spec.ts` — the token used to call `/refresh` 401s immediately afterward while the newly minted one works; `auth.service.spec.ts` asserts the exact revocation call (correct `jti`/`expiresAt`) |
 | **RevokedToken pruning** | `RevokedTokenCleanupService` (`@nestjs/schedule`, `@Cron(CronExpression.EVERY_HOUR)`) deletes rows whose `expiresAt` has already passed, keeping the table from growing without bound | `revoked-token-cleanup.service.spec.ts`; live: inserted a real already-expired row and a real future-dated row directly via `psql`, ran the service's own query against the live database, confirmed exactly the expired row was deleted and the future one survived |
+| **Password change with cross-session revocation** | `POST /auth/change-password` verifies the current password, stamps `User.passwordChangedAt`, and mints a fresh token for the caller. `JwtStrategy.validate()` rejects any token whose `issuedAtMs` claim predates that stamp — a wholesale cutoff of every *other* previously-issued token for that user (a stolen/leaked token, a session left open on another device), not just the one used to make the change. Uses a custom millisecond-precision `issuedAtMs` claim rather than the standard `iat` (only second-precision — not fine enough to correctly order a token issued in the same wall-clock second as the change; this was caught as a real, intermittent integration-test failure, not a hypothetical) | `auth.service.spec.ts` / `jwt.strategy.spec.ts` unit-test the hashing, stamping, and rejection logic directly; `apps/api/test/change-password.integration-spec.ts` confirms it end-to-end against a live server — two concurrent sessions, one changes the password, both its own old token and the other session's token 401 afterward, and the freshly-returned token still works |
+| **Audit log immutability at the database level** | A Postgres trigger (`prevent_audit_events_update()`, `packages/database/prisma/migrations/*_audit_events_immutable_update`) unconditionally rejects any `UPDATE` against `audit_events`, for every role and connection, with no bypass — defense-in-depth on top of (not a replacement for) the application-level guarantee below. Deliberately scoped to `UPDATE` only, not `DELETE`: `AuditEvent.tenantId` has `onDelete: Cascade`, so deleting a Tenant (a real, legitimate operation) cascades into deleting its audit rows through the same DELETE machinery a row-level trigger can't distinguish from a direct, illegitimate delete — blocking DELETE unconditionally would have broken that cascade | `apps/api/test/audit-immutability.integration-spec.ts` — a direct `UPDATE` against a real row is rejected at the database level; a direct `DELETE` is confirmed still allowed |
 
 ## Security Gaps (Honestly, Not Implemented)
 
@@ -76,7 +78,7 @@ doesn't exist).
 | Threat | Mitigation | Residual risk |
 |---|---|---|
 | A user denying they performed a mutating action | `AuditEvent` rows: actor, action, resource, resourceId, IP, user-agent, correlation id, timestamp — append-only | Audit writes are best-effort: `AuditService.record()` catches its own errors and logs rather than failing the request (a deliberate trade-off — a logging outage shouldn't take down the API), so a database blip during a write could produce a gap in the trail with no alert raised for it. |
-| Tampering with the audit log itself to hide an action | No `update`/`delete` method exists on `AuditService`; `AuditController` exposes only `GET` routes | Nothing stops direct database access (e.g. `psql`) from modifying `audit_events` rows — this is an application-layer guarantee, not a database-level one (no append-only table constraint, no separate audit-log service). |
+| Tampering with the audit log itself to hide an action | No `update`/`delete` method exists on `AuditService`; `AuditController` exposes only `GET` routes — and, as of this reconciliation, a Postgres trigger also unconditionally rejects any `UPDATE` against `audit_events` at the database level, closing the gap direct database access (e.g. `psql`) previously left open | `DELETE` against `audit_events` is still unrestricted at the database level (a deliberate scope choice — see the Security Controls table above) — a direct, illegitimate delete via `psql` is not distinguishable from the legitimate tenant-deletion cascade this system relies on. |
 
 ### Information Disclosure (exposing data to those who shouldn't see it)
 
@@ -94,7 +96,7 @@ doesn't exist).
 |---|---|---|
 | Unbounded file upload | 10MB size cap, 20,000 row cap (`file-guard.ts`); the underlying multipart parser (`multer`) is now `2.3.0`, past 5 real DoS advisories (4 high, 1 moderate — incomplete-cleanup, resource-exhaustion, uncontrolled-recursion, and deeply-nested-field-name variants) that affected the exact `<2.0.2` version this repo shipped through Post-Phase-17 Hardening | A zip bomb inside a valid-looking `.xlsx` isn't fully mitigated — `exceljs` doesn't expose a cheap "inspect before decompressing" API, so the compressed-size cap is the practical defense today, not a true streaming byte-budget decompressor. Documented as a known limitation in `import-engine`'s own code comments since Phase 8. Also unaddressed: `@nestjs/common`'s own `file-type` dependency carries a separate, still-open ZIP-decompression-bomb advisory (moderate) — confirmed to require the same NestJS-ecosystem major-version bump as the rest of that dependency cluster, not a safe patch. |
 | Login brute-force as a resource-exhaustion vector | 5/min/IP throttle on `POST /auth/login` | Same distributed-source caveat as the Spoofing section. |
-| Unbounded query results | Most list endpoints don't paginate (`GET /risks`, `GET /remediation-initiatives` return everything matching the filter); `GET /audit-events` does paginate (`limit`/`offset`, default 50) | A tenant with a very large Risk/RemediationInitiative table could produce a large, slow response. Not yet a problem at demo-data scale (106 seeded assessment items), worth revisiting before real production data volumes. |
+| Unbounded query results | Most list endpoints don't paginate (`GET /risks` returns everything matching the filter); `GET /audit-events` and (as of this reconciliation) `GET /remediation-initiatives` do paginate (`page`/`pageSize`, capped at 100) | A tenant with a very large Risk table could still produce a large, slow response. Not yet a problem at demo-data scale (106 seeded assessment items), worth revisiting before real production data volumes. |
 
 ### Elevation of Privilege
 
@@ -160,3 +162,33 @@ real GitHub Dependabot alert data this session had no tool access to):
    coverage in `apps/api/test/tenant-isolation.e2e-spec.ts` (nested
    `describe` blocks reusing one tenant-A/tenant-B pair rather than
    logging in separately per resource), not just `Risk`.
+7. ~~Security response headers beyond the legacy trio~~ — done:
+   `helmet()` on the API (CSP, HSTS, Referrer-Policy) and the Next.js
+   equivalent on the web app, replacing a hand-rolled
+   `X-Content-Type-Options`/`X-Frame-Options`/`X-XSS-Protection`-only
+   middleware with no CSP/HSTS/Referrer-Policy at all;
+   `apps/api/test/security-headers.integration-spec.ts`.
+8. ~~Audit log immutability at the database level~~ — done: a Postgres
+   trigger rejects any `UPDATE` against `audit_events` unconditionally,
+   for every role and connection, on top of the existing application-
+   level guarantee (no update/delete method on `AuditService`);
+   `apps/api/test/audit-immutability.integration-spec.ts`.
+9. ~~File-upload signature/magic-byte validation~~ — done:
+   `validateFileSignature()` rejects a file whose actual bytes don't
+   match its claimed extension (ZIP signature for `.xlsx`/`.xls`, a
+   binary-content check for `.csv`) before any parsing is attempted, in
+   addition to the existing extension/size/MIME checks; `file-guard.spec.ts`.
+10. ~~Password-change-triggered token revocation~~ — done:
+    `POST /auth/change-password` stamps `passwordChangedAt`, and
+    `JwtStrategy` rejects any token issued before that stamp — every
+    *other* outstanding session is revoked, while a fresh token is
+    minted for the caller's own session; `apps/api/test/change-password.integration-spec.ts`.
+
+This reconciliation (see `docs/IMPLEMENTATION_STATUS.md`'s "Branch
+Reconciliation" section for the full writeup) merged a second,
+independently-developed hardening effort (PRs #2/#20) into the branch
+that already contained items 1–6 above (PR #21). Items 7–10 are what
+that second effort added that wasn't already covered; its own
+independent rebuilds of already-covered ground (a second rate-limiting
+implementation, a second RBAC/audit/import stack, etc.) were not carried
+forward — see that section for which was which and why.

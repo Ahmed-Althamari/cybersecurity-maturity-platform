@@ -7,6 +7,7 @@ import { AuditLog } from '../audit/decorators/audit-log.decorator';
 
 import { AuthService } from './auth.service';
 import { CurrentUser } from './decorators/current-user.decorator';
+import { ChangePasswordDto } from './dto/change-password.dto';
 import { LoginDto } from './dto/login.dto';
 import { JwtAuthGuard } from './guards/jwt-auth.guard';
 import type { AuthenticatedRequest, RequestUser } from './types/authenticated-request';
@@ -44,6 +45,14 @@ export class AuthController {
       throw new Error('No token provided');
     }
     return this.authService.refreshToken(token);
+  }
+
+  @Post('change-password')
+  @ApiBearerAuth()
+  @UseGuards(JwtAuthGuard)
+  @AuditLog('UPDATE', 'User')
+  async changePassword(@Body() dto: ChangePasswordDto, @CurrentUser() user: RequestUser) {
+    return this.authService.changePassword(user, dto);
   }
 
   @Get('me')

@@ -7,7 +7,7 @@
 
 export { autoMapColumns } from './columns';
 export { buildErrorReportCsv } from './error-report';
-export { MAX_FILE_SIZE_BYTES, MAX_ROWS, validateFileUpload, type FileUploadMeta } from './file-guard';
+export { MAX_FILE_SIZE_BYTES, MAX_ROWS, validateFileSignature, validateFileUpload, type FileUploadMeta } from './file-guard';
 export { importFromCsv, importFromSheet, importFromXlsx, type ImportFromXlsxResult } from './import';
 export { parseCsv } from './parse-csv';
 export { parseXlsx, type ParsedWorkbook } from './parse-xlsx';

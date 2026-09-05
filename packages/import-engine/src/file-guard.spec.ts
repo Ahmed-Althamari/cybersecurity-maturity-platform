@@ -1,4 +1,4 @@
-import { MAX_FILE_SIZE_BYTES, validateFileUpload } from './file-guard';
+import { MAX_FILE_SIZE_BYTES, validateFileSignature, validateFileUpload } from './file-guard';
 
 describe('validateFileUpload', () => {
   it('accepts a well-formed .xlsx upload', () => {
@@ -32,5 +32,35 @@ describe('validateFileUpload', () => {
   it('warns (but does not reject) on an unrecognised MIME type', () => {
     const issues = validateFileUpload({ filename: 'assessment.csv', mimetype: 'text/html', size: 100 });
     expect(issues).toEqual([expect.objectContaining({ severity: 'warning' })]);
+  });
+});
+
+describe('validateFileSignature', () => {
+  it('accepts a real xlsx (ZIP signature present)', () => {
+    const zipLike = Buffer.concat([Buffer.from([0x50, 0x4b, 0x03, 0x04]), Buffer.from('rest of the file')]);
+    expect(validateFileSignature(zipLike, 'assessment.xlsx')).toEqual([]);
+  });
+
+  it('rejects a file claiming to be .xlsx without the ZIP signature — e.g. a renamed/disguised file', () => {
+    const notAZip = Buffer.from('this is not a real spreadsheet, just renamed');
+    const issues = validateFileSignature(notAZip, 'assessment.xlsx');
+    expect(issues).toEqual([expect.objectContaining({ severity: 'error' })]);
+    expect(issues[0].message).toContain('ZIP file signature');
+  });
+
+  it('rejects an xlsx buffer too short to even contain a signature', () => {
+    const issues = validateFileSignature(Buffer.from([0x50, 0x4b]), 'assessment.xlsx');
+    expect(issues).toEqual([expect.objectContaining({ severity: 'error' })]);
+  });
+
+  it('accepts a real CSV (plain text content)', () => {
+    expect(validateFileSignature(Buffer.from('Control_ID,Maturity\nGV.RM-01,DEFINED\n'), 'assessment.csv')).toEqual([]);
+  });
+
+  it('rejects a file claiming to be .csv but containing binary content', () => {
+    const binary = Buffer.from([0x00, 0x01, 0x02, 0x03, 0x04]);
+    const issues = validateFileSignature(binary, 'assessment.csv');
+    expect(issues).toEqual([expect.objectContaining({ severity: 'error' })]);
+    expect(issues[0].message).toContain('binary content');
   });
 });

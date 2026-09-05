@@ -224,6 +224,12 @@ export interface RoadmapStatus {
   buckets: Record<'IMMEDIATE' | 'SHORT_TERM' | 'MEDIUM_TERM' | 'STRATEGIC' | 'UNSCHEDULED', RoadmapInitiative[]>;
 }
 
+export interface RemediationInitiativeSummary {
+  id: string;
+  title: string;
+  status: string;
+}
+
 export interface RiskRecord {
   id: string;
   organisationId: string;
@@ -239,6 +245,10 @@ export interface RiskRecord {
   owner: string | null;
   treatment: string;
   targetDate: string | null;
+  // Optional: older callers (e.g. the risk list page, which only ever
+  // renders summary fields) don't need this populated, but the risk-detail
+  // page's initiative picker does — the API includes it on GET /risks/:id.
+  initiatives?: RemediationInitiativeSummary[];
   status: string;
 }
 
@@ -432,6 +442,38 @@ export function updateRisk(accessToken: string, id: string, input: UpdateRiskInp
 
 export function deleteRisk(accessToken: string, id: string) {
   return apiFetch<{ message: string }>(`/risks/${id}`, accessToken, { method: 'DELETE' });
+}
+
+export interface PaginatedInitiatives {
+  data: RemediationInitiativeSummary[];
+  total: number;
+  page: number;
+  pageSize: number;
+  totalPages: number;
+}
+
+export function listInitiatives(
+  accessToken: string,
+  organisationId: string,
+  options: { search?: string; page?: number; pageSize?: number } = {},
+) {
+  const params: Record<string, string> = { organisationId };
+  if (options.search) params.search = options.search;
+  if (options.page) params.page = String(options.page);
+  if (options.pageSize) params.pageSize = String(options.pageSize);
+  const query = new URLSearchParams(params);
+  return apiFetch<PaginatedInitiatives>(`/remediation-initiatives?${query}`, accessToken);
+}
+
+// Linking is modelled on the initiative, not the risk (`POST/DELETE
+// /remediation-initiatives/:id/risks/:riskId`) — these just call that from
+// the risk-detail page's point of view.
+export function linkInitiative(accessToken: string, initiativeId: string, riskId: string) {
+  return apiFetch<unknown>(`/remediation-initiatives/${initiativeId}/risks/${riskId}`, accessToken, { method: 'POST' });
+}
+
+export function unlinkInitiative(accessToken: string, initiativeId: string, riskId: string) {
+  return apiFetch<unknown>(`/remediation-initiatives/${initiativeId}/risks/${riskId}`, accessToken, { method: 'DELETE' });
 }
 
 export function getDashboardRoadmap(accessToken: string, organisationId: string) {

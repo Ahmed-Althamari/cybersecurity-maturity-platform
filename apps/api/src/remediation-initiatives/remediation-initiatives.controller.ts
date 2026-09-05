@@ -58,8 +58,17 @@ export class RemediationInitiativesController {
     @Query('organisationId') organisationId?: string,
     @Query('status') status?: string,
     @Query('sort') sort?: 'priority' | 'recent',
+    @Query('search') search?: string,
+    @Query('page') page?: string,
+    @Query('pageSize') pageSize?: string,
   ) {
-    return this.remediationInitiativesService.findAll(user.tenantId, requireOrganisationId(organisationId), { status, sort });
+    return this.remediationInitiativesService.findAll(user.tenantId, requireOrganisationId(organisationId), {
+      status,
+      sort,
+      search,
+      page: page ? Number(page) : undefined,
+      pageSize: pageSize ? Number(pageSize) : undefined,
+    });
   }
 
   @Get(':id')
