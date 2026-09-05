@@ -17,129 +17,179 @@ import { createTestApp } from './support/app';
  * gap: "no password-change-triggered revocation"). Uses its own throwaway
  * tenant/org/user rather than the shared seeded demo tenant, since this
  * suite mutates the user's password.
+ *
+ * Each `describe` below gets its OWN app instance (and therefore its own
+ * empty in-memory ThrottlerStorage) rather than sharing one across every
+ * test in the file -- same reasoning as apps/api/test/support/app.ts's own
+ * doc comment: the real 5/min/IP login throttle is never bypassed here,
+ * so the total `POST /auth/login` calls any one app instance sees must
+ * stay comfortably under that limit. A single shared app across all of
+ * this file's login calls (1 + 1 + 4 = 6) would exceed it.
  */
-describe('POST /auth/change-password (integration)', () => {
-  let app: INestApplication;
-  let prisma: PrismaService;
-  let baseUrl: string;
+interface TestContext {
+  app: INestApplication;
+  prisma: PrismaService;
+  baseUrl: string;
+  tenantId: string;
+  userEmail: string;
+}
 
-  let tenantId: string;
-  let orgId: string;
+async function setUp(): Promise<TestContext> {
+  const app = await createTestApp();
+  await app.listen(0);
+  const address = app.getHttpServer().address();
+  const baseUrl = `http://127.0.0.1:${address.port}/api/v1`;
+
+  const prisma = app.get(PrismaService);
+
+  const tenant = await prisma.tenant.create({
+    data: { name: 'E2E Change-Password Tenant', slug: `e2e-change-password-${randomUUID()}` },
+  });
+  const tenantId = tenant.id;
+
+  const org = await prisma.organisation.create({
+    data: { name: 'E2E Org', slug: `e2e-org-${randomUUID()}`, tenantId },
+  });
+
   const userEmail = `change-password-${randomUUID()}@e2e-test.local`;
-  const originalPassword = 'OriginalPassword123!';
-
-  beforeAll(async () => {
-    app = await createTestApp();
-    await app.listen(0);
-    const address = app.getHttpServer().address();
-    baseUrl = `http://127.0.0.1:${address.port}/api/v1`;
-
-    prisma = app.get(PrismaService);
-
-    const tenant = await prisma.tenant.create({
-      data: { name: 'E2E Change-Password Tenant', slug: `e2e-change-password-${randomUUID()}` },
-    });
-    tenantId = tenant.id;
-
-    const org = await prisma.organisation.create({
-      data: { name: 'E2E Org', slug: `e2e-org-${randomUUID()}`, tenantId },
-    });
-    orgId = org.id;
-
-    const passwordHash = await bcrypt.hash(originalPassword, 10);
-    await prisma.user.create({
-      data: {
-        email: userEmail,
-        name: 'Change Password Test User',
-        passwordHash,
-        tenantId,
-        organisationId: orgId,
-        userRoleAssignments: { create: { role: 'CISO', tenantId, organisationId: orgId } },
-      },
-    });
+  const passwordHash = await bcrypt.hash('OriginalPassword123!', 10);
+  await prisma.user.create({
+    data: {
+      email: userEmail,
+      name: 'Change Password Test User',
+      passwordHash,
+      tenantId,
+      organisationId: org.id,
+      userRoleAssignments: { create: { role: 'CISO', tenantId, organisationId: org.id } },
+    },
   });
 
-  afterAll(async () => {
-    await prisma.auditEvent.deleteMany({ where: { tenantId } });
-    await prisma.userRoleAssignment.deleteMany({ where: { tenantId } });
-    await prisma.user.deleteMany({ where: { tenantId } });
-    await prisma.organisation.deleteMany({ where: { tenantId } });
-    await prisma.tenant.delete({ where: { id: tenantId } });
-    await app.close();
-  });
+  return { app, prisma, baseUrl, tenantId, userEmail };
+}
 
-  async function login(password: string): Promise<string> {
-    const res = await fetch(`${baseUrl}/auth/login`, {
+async function tearDown(ctx: TestContext): Promise<void> {
+  // Audit writes are fire-and-forget (AuditInterceptor never awaits them before responding —
+  // see its own doc comment), so the very last request's audit row can still be in flight when
+  // this runs. A short grace period avoids a flaky FK-constraint violation racing an audit_events
+  // insert that lands a beat late. Deleting only the Tenant (rather than each child table
+  // individually) also matters here: every one of Organisation/User/AuditEvent's own tenantId
+  // relations cascades directly from Tenant, so a single delete removes all of them in one
+  // statement with no manual ordering to get wrong (AuditEvent.userId is onDelete: Restrict, but
+  // that arc is never invoked — its rows are gone via the tenantId cascade before User's own
+  // tenantId cascade would otherwise hit that Restrict).
+  await new Promise((resolve) => setTimeout(resolve, 500));
+  await ctx.prisma.tenant.delete({ where: { id: ctx.tenantId } });
+  await ctx.app.close();
+}
+
+function loginWith(ctx: TestContext) {
+  return async function login(password: string): Promise<string> {
+    const res = await fetch(`${ctx.baseUrl}/auth/login`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email: userEmail, password }),
+      body: JSON.stringify({ email: ctx.userEmail, password }),
     });
     if (res.status !== 201) {
       throw new Error(`login failed: ${res.status} ${await res.text()}`);
     }
     const body = await res.json();
     return body.access_token as string;
-  }
+  };
+}
 
-  it('rejects the wrong current password and leaves the account untouched', async () => {
-    const token = await login(originalPassword);
-
-    const res = await fetch(`${baseUrl}/auth/change-password`, {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ currentPassword: 'totally-wrong', newPassword: 'WouldBeNewPassword123!' }),
+describe('POST /auth/change-password (integration)', () => {
+  describe('rejects the wrong current password and leaves the account untouched', () => {
+    let ctx: TestContext;
+    beforeAll(async () => {
+      ctx = await setUp();
     });
-    expect(res.status).toBe(401);
+    afterAll(async () => {
+      await tearDown(ctx);
+    });
 
-    // Original password still works -- nothing was changed.
-    await expect(login(originalPassword)).resolves.toEqual(expect.any(String));
+    it('rejects and leaves the account untouched', async () => {
+      const login = loginWith(ctx);
+      const token = await login('OriginalPassword123!');
+
+      const res = await fetch(`${ctx.baseUrl}/auth/change-password`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ currentPassword: 'totally-wrong', newPassword: 'WouldBeNewPassword123!' }),
+      });
+      expect(res.status).toBe(401);
+
+      // Original password still works -- nothing was changed.
+      await expect(login('OriginalPassword123!')).resolves.toEqual(expect.any(String));
+    });
   });
 
-  it('rejects a new password shorter than the platform minimum', async () => {
-    const token = await login(originalPassword);
-
-    const res = await fetch(`${baseUrl}/auth/change-password`, {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ currentPassword: originalPassword, newPassword: 'short' }),
+  describe('rejects a new password shorter than the platform minimum', () => {
+    let ctx: TestContext;
+    beforeAll(async () => {
+      ctx = await setUp();
     });
-    expect(res.status).toBe(400);
+    afterAll(async () => {
+      await tearDown(ctx);
+    });
+
+    it('rejects the too-short password', async () => {
+      const login = loginWith(ctx);
+      const token = await login('OriginalPassword123!');
+
+      const res = await fetch(`${ctx.baseUrl}/auth/change-password`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ currentPassword: 'OriginalPassword123!', newPassword: 'short' }),
+      });
+      expect(res.status).toBe(400);
+    });
   });
 
-  it('changes the password, revokes every other outstanding token, and returns a working fresh one', async () => {
-    const tokenA = await login(originalPassword);
-    const tokenB = await login(originalPassword);
-
-    const newPassword = 'BrandNewPassword123!';
-    const changeRes = await fetch(`${baseUrl}/auth/change-password`, {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${tokenA}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ currentPassword: originalPassword, newPassword }),
+  describe('changes the password, revokes every other outstanding token, and returns a working fresh one', () => {
+    let ctx: TestContext;
+    beforeAll(async () => {
+      ctx = await setUp();
     });
-    expect(changeRes.status).toBe(201);
-    const { access_token: freshToken } = await changeRes.json();
-    expect(freshToken).toEqual(expect.any(String));
-
-    // The token used to make the change is itself now stale (issued before
-    // passwordChangedAt) -- confirms this isn't just per-jti revocation
-    // like logout, but a wholesale cutoff of every previously issued token.
-    const usingTokenA = await fetch(`${baseUrl}/auth/me`, { headers: { Authorization: `Bearer ${tokenA}` } });
-    expect(usingTokenA.status).toBe(401);
-
-    // A *different* session's token, never presented to change-password at
-    // all, is also revoked -- this is the "all outstanding tokens" part.
-    const usingTokenB = await fetch(`${baseUrl}/auth/me`, { headers: { Authorization: `Bearer ${tokenB}` } });
-    expect(usingTokenB.status).toBe(401);
-
-    // The freshly minted token from the change-password response itself
-    // still works.
-    const usingFreshToken = await fetch(`${baseUrl}/auth/me`, {
-      headers: { Authorization: `Bearer ${freshToken}` },
+    afterAll(async () => {
+      await tearDown(ctx);
     });
-    expect(usingFreshToken.status).toBe(200);
 
-    // The old password no longer authenticates; the new one does.
-    await expect(login(originalPassword)).rejects.toThrow();
-    await expect(login(newPassword)).resolves.toEqual(expect.any(String));
+    it('changes the password and revokes every other outstanding token', async () => {
+      const login = loginWith(ctx);
+      const tokenA = await login('OriginalPassword123!');
+      const tokenB = await login('OriginalPassword123!');
+
+      const newPassword = 'BrandNewPassword123!';
+      const changeRes = await fetch(`${ctx.baseUrl}/auth/change-password`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${tokenA}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ currentPassword: 'OriginalPassword123!', newPassword }),
+      });
+      expect(changeRes.status).toBe(201);
+      const { access_token: freshToken } = await changeRes.json();
+      expect(freshToken).toEqual(expect.any(String));
+
+      // The token used to make the change is itself now stale (issued before
+      // passwordChangedAt) -- confirms this isn't just per-jti revocation
+      // like logout, but a wholesale cutoff of every previously issued token.
+      const usingTokenA = await fetch(`${ctx.baseUrl}/auth/me`, { headers: { Authorization: `Bearer ${tokenA}` } });
+      expect(usingTokenA.status).toBe(401);
+
+      // A *different* session's token, never presented to change-password at
+      // all, is also revoked -- this is the "all outstanding tokens" part.
+      const usingTokenB = await fetch(`${ctx.baseUrl}/auth/me`, { headers: { Authorization: `Bearer ${tokenB}` } });
+      expect(usingTokenB.status).toBe(401);
+
+      // The freshly minted token from the change-password response itself
+      // still works.
+      const usingFreshToken = await fetch(`${ctx.baseUrl}/auth/me`, {
+        headers: { Authorization: `Bearer ${freshToken}` },
+      });
+      expect(usingFreshToken.status).toBe(200);
+
+      // The old password no longer authenticates; the new one does.
+      await expect(login('OriginalPassword123!')).rejects.toThrow();
+      await expect(login(newPassword)).resolves.toEqual(expect.any(String));
+    });
   });
 });

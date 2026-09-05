@@ -110,7 +110,9 @@ describe('Tenant isolation (e2e)', () => {
         .set('Authorization', `Bearer ${tokenB}`)
         .expect(200);
 
-      expect(response.body).toEqual([]);
+      // GET /remediation-initiatives is paginated (search/page/pageSize — added for the
+      // risk-detail page's initiative picker); an empty result is `{ data: [] }`, not a bare `[]`.
+      expect(response.body.data).toEqual([]);
     });
 
     it('refuses to update another tenant\'s initiative (404, not silently scoped)', async () => {

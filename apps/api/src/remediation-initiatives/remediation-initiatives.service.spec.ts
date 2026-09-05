@@ -34,7 +34,7 @@ describe('RemediationInitiativesService', () => {
     prisma = {
       organisation: { findFirst: jest.fn() },
       risk: { count: jest.fn(), findFirst: jest.fn() },
-      remediationInitiative: { create: jest.fn(), findMany: jest.fn(), findFirst: jest.fn(), update: jest.fn() },
+      remediationInitiative: { create: jest.fn(), findMany: jest.fn(), findFirst: jest.fn(), update: jest.fn(), count: jest.fn() },
       assessment: { findFirst: jest.fn() },
       assessmentItem: { findFirst: jest.fn() },
     };
@@ -84,6 +84,10 @@ describe('RemediationInitiativesService', () => {
   });
 
   describe('findAll', () => {
+    beforeEach(() => {
+      prisma.remediationInitiative.count.mockResolvedValue(0);
+    });
+
     it('scopes to tenant and organisation', async () => {
       prisma.remediationInitiative.findMany.mockResolvedValueOnce([]);
       await service.findAll('tenant-a', 'org-a', {});
@@ -100,6 +104,35 @@ describe('RemediationInitiativesService', () => {
       expect(prisma.remediationInitiative.findMany).toHaveBeenCalledWith(
         expect.objectContaining({ orderBy: expect.arrayContaining([{ priority: 'asc' }]) }),
       );
+    });
+
+    it('filters by a case-insensitive title search', async () => {
+      prisma.remediationInitiative.findMany.mockResolvedValueOnce([]);
+      await service.findAll('tenant-a', 'org-a', { search: 'firewall' });
+
+      expect(prisma.remediationInitiative.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({ title: { contains: 'firewall', mode: 'insensitive' } }),
+        }),
+      );
+    });
+
+    it('paginates using page/pageSize and reports totalPages', async () => {
+      prisma.remediationInitiative.findMany.mockResolvedValueOnce([]);
+      prisma.remediationInitiative.count.mockResolvedValueOnce(45);
+
+      const result = await service.findAll('tenant-a', 'org-a', { page: 2, pageSize: 20 });
+
+      expect(prisma.remediationInitiative.findMany).toHaveBeenCalledWith(expect.objectContaining({ skip: 20, take: 20 }));
+      expect(result).toEqual({ data: [], total: 45, page: 2, pageSize: 20, totalPages: 3 });
+    });
+
+    it('defaults to page 1 and a pageSize of 20, capped at 100', async () => {
+      prisma.remediationInitiative.findMany.mockResolvedValueOnce([]);
+
+      await service.findAll('tenant-a', 'org-a', { pageSize: 500 });
+
+      expect(prisma.remediationInitiative.findMany).toHaveBeenCalledWith(expect.objectContaining({ skip: 0, take: 100 }));
     });
   });
 
