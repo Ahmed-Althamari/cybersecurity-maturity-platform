@@ -2002,6 +2002,99 @@ scaffolding but zero test files and no Jest config. Added both.
   isolation would not have), `npm run test:e2e` (42/42, unaffected),
   `npm run lint` clean.
 
+### Frontend test coverage: a persisted Playwright E2E suite
+The other half of the "zero automated tests in `apps/web`" gap — the
+`@playwright/test` dependency and `test:e2e` script existed since Phase
+1 scaffolding, but no spec file had ever been written and nothing ran
+it in CI.
+- New `apps/web/playwright.config.ts`: a two-entry `webServer` array
+  (`node dist/main` for `apps/api`, `npm run start` for `apps/web`)
+  drives real HTTP servers against the real Postgres, not a mocked
+  stack — the same "test the real thing" discipline the API's own
+  e2e-spec suite already follows. `reuseExistingServer: !process.env.CI`
+  lets a developer keep both servers running locally across repeated
+  runs; CI always starts fresh.
+- `apps/web/e2e/global-setup.ts` signs in once per demo role
+  (`admin@example.local`, `ciso@example.local`, `viewer@example.local`)
+  through the real credentials → NextAuth → API round trip and saves a
+  Playwright `storageState` per role, so every spec reuses an
+  authenticated session instead of re-logging-in per test.
+- 4 spec files, 9 tests, covering flows a unit/component test can't:
+  `auth.spec.ts` (invalid credentials, valid sign-in, an
+  unauthenticated visitor bounced from `/dashboard`), `dashboard.spec.ts`
+  (KPI cards + nav links, navigating to Risks, sign-out), `risks.spec.ts`
+  (a `READ_ONLY_VIEWER` can't see "New Risk"; a full admin lifecycle —
+  create, edit status, delete — against the real API, cleaning up after
+  itself), and `frameworks.spec.ts` (list → detail → the
+  `NavigationTree`'s `<details>` stay open at depth 0).
+- Small accessibility fix that was also a testability blocker:
+  `risks/new.tsx` and `risks/[id].tsx`'s form `<label>`s had no
+  `htmlFor`/`id` pairing (unlike `auth/signin.tsx`, which already did
+  this correctly) — `getByLabel()` can't resolve an unassociated label,
+  in Playwright or in a screen reader. Wired up `htmlFor`/`id` on every
+  field in both forms.
+- **Real gotchas found and fixed, not just "tests pass"**:
+  1. Jest's default `testMatch` picks up any `*.spec.ts`, which is also
+     Playwright's own spec-file convention — `apps/web`'s existing
+     `jest.config.js` already anticipated this with a
+     `testPathIgnorePatterns` entry for a `test-e2e/` folder that was
+     never actually the folder name used here (`e2e/`). Fixed by
+     pointing the ignore pattern at the real directory.
+  2. The API's health check is deliberately excluded from the global
+     `api/v1` prefix (`app.setGlobalPrefix('api/v1', { exclude:
+     ['health'] })`, for orchestrator probes) and lives at bare
+     `/health`, not `/api/v1/health`. `webServer`'s reuse check first
+     polled `/api/v1` and treated its 404 as "not ready," which made
+     Playwright try to start a second `node dist/main` on an
+     already-bound port and crash with `EADDRINUSE`. Fixed by pointing
+     the health check at the real `/health` route.
+  3. **The one worth remembering**: `next start` reads its build
+     manifest and embeds the build ID into every page's SSR'd HTML once,
+     at process boot — it does not notice a later `next build`
+     overwriting `.next` on disk. Rebuilding `apps/web` without
+     restarting the already-running `next start` process produces a
+     server that serves *old* HTML referencing a build ID whose chunk
+     files no longer exist on disk (404s served as `text/html`, which
+     the browser then refuses to execute as script — a strict-MIME-type
+     console error, not a thrown exception). The visible symptom is
+     stranger than the cause: React never finishes hydrating, so click
+     handlers silently do nothing — a "Sign Out" button and a "Save
+     Changes" button that appear to do absolutely nothing, with no
+     error anywhere in sight. This cost real debugging time (a `401` on
+     `/api/auth/callback/credentials` in one repro was itself just
+     `authorize()` returning `null` for an unrelated login-throttle
+     `429`, a second rabbit hole layered on top of the first). Not a
+     code bug — an operational rule: **restart `next start` after every
+     rebuild**, which is exactly what CI's `web-e2e` job does by
+     construction (build, then start, in the same job run, only once).
+  4. The login endpoint's real `@Throttle({ limit: 5, ttl: 60_000 })` (see
+     Post-Phase-17 Hardening above) is keyed per IP across every login
+     attempt, not per account — a single CI run of this suite makes
+     exactly 5 login calls (3 in `global-setup`, 2 in `auth.spec.ts`),
+     right at the boundary. Repeatedly re-running the suite locally
+     within the same 60-second window reproduces real 429s. Worth
+     knowing before adding a 4th demo-user login or another
+     login-exercising spec — either would push a single CI run over the
+     limit.
+- New CI job `web-e2e` in `.github/workflows/ci.yml`: its own Postgres
+  service, migrate + seed, `turbo run build` for both `@cmmp/api` and
+  `@cmmp/web`, `playwright install --with-deps chromium` (this
+  sandbox's pre-installed Chromium doesn't exist on a GitHub-hosted
+  runner), then `npm run test:e2e --workspace=@cmmp/web`; uploads the
+  HTML report as an artifact on every run (`if: always()`) since a
+  failure's trace is far more useful than its log line.
+- `apps/web/e2e/.auth/*.json` (the saved storage states — real, if
+  short-lived, session tokens) and `apps/web/playwright-report/` /
+  `apps/web/test-results/` are gitignored, not committed.
+- Full verification: `npx turbo run type-check test build` (27/27,
+  unaffected — the new spec files are excluded from Jest by gotcha #1
+  above, but still typecheck cleanly under `apps/web/tsconfig.json`'s
+  `**/*.ts`/`**/*.tsx` globs against `@playwright/test`'s own types),
+  `npx turbo run lint` clean, `npm run test:e2e` for `@cmmp/api` (42/42,
+  unaffected), and — after learning gotcha #3 the hard way — a final
+  clean `node dist/main` + `npm run start` + `npx playwright test` run
+  against a genuinely fresh build: **9/9 passing**.
+
 ## Next Steps
 
 What's left, roughly in priority order. Every item from
@@ -2024,32 +2117,28 @@ punt on the rest pending dedicated major-version-bump work):
    GitHub Actions runner (which does have a working daemon) — worth
    watching for that specifically, since it's the first real
    verification those Dockerfiles will get.
-2. Frontend test coverage — zero automated tests in `apps/web` today.
-   React Testing Library component tests and a persisted Playwright E2E
-   suite (the dependency and a `test:e2e` script exist, scaffolded since
-   Phase 1, but no spec file has ever been written).
-3. All four Phase 10 frontend follow-ups (framework navigation,
+2. All four Phase 10 frontend follow-ups (framework navigation,
    assessment-taking, risk register, Excel import wizard) are now done
    — see Post-Phase-17 Feature Work above. What's left from that same
    area: extracting the dashboard components into `@cmmp/ui` if/when a
    second app or page needs them (not worth the abstraction for one
    dashboard page yet); the assessment-taking flow only covers
    current/target maturity, not the extended per-item metadata fields
-   (`rationale`/`evidence`/`owner*`/etc.), no UI yet; and item 4 below,
+   (`rationale`/`evidence`/`owner*`/etc.), no UI yet; and item 3 below,
    which the import wizard deliberately didn't solve.
-4. Wire `POST /assessments/:id/import`'s `columnMapping` override — the
+3. Wire `POST /assessments/:id/import`'s `columnMapping` override — the
    library (`ImportOptions.columnMapping`) already supports it, but the
    endpoint only auto-maps columns today; needs a way to accept a manual
    mapping as a form field or a preceding "preview" call, matching the
    import wizard's step 3 in master prompt §14. The new import wizard UI
    is explicit with users that this step doesn't exist yet rather than
    pretending otherwise — see that section's own writeup.
-5. Before relying on the seeded NIST CSF 2.0 data for anything
+4. Before relying on the seeded NIST CSF 2.0 data for anything
    compliance-facing, diff `packages/database/prisma/fixtures/nist-csf-2.0.json`
    against the official NIST CSWP 29 publication — it was reproduced from
    training-data knowledge, not transcribed from the source document (see
    Phase 5 notes above)
-6. **Get real GitHub Dependabot alert data.** This session triaged what
+5. **Get real GitHub Dependabot alert data.** This session triaged what
    `npm audit` could see (30 findings; `multer`'s 5 fixed, see
    Post-Phase-17 Hardening above) but never had tool access to GitHub's
    own Dependabot alerts API, so the gap between GitHub's "72
@@ -2059,7 +2148,7 @@ punt on the rest pending dedicated major-version-bump work):
    see at all). Whoever has GitHub UI/API access should pull the real
    list before assuming the `npm audit`-visible findings are the whole
    picture.
-7. The large, deliberately-deferred major-version bumps themselves:
+6. The large, deliberately-deferred major-version bumps themselves:
    Next.js 14→16 (`apps/web`, user-facing, worth prioritizing first) and
    the NestJS 10→12 ecosystem (`@nestjs/core`/`platform-express`/
    `common`/`config`/`swagger`/`testing`/`cli`, `turbo`). Both need their

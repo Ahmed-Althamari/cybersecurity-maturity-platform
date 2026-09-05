@@ -86,8 +86,11 @@ export default function RiskDetailPage({ risk, accessToken, canEdit, canDelete, 
 
           <div className="bg-slate-800 rounded-lg p-6 border border-slate-700 space-y-4">
             <div>
-              <label className="block text-sm text-slate-300 mb-1">Title</label>
+              <label htmlFor="risk-title" className="block text-sm text-slate-300 mb-1">
+                Title
+              </label>
               <input
+                id="risk-title"
                 disabled={!canEdit}
                 value={title}
                 onChange={(e) => setTitle(e.target.value)}
@@ -95,8 +98,11 @@ export default function RiskDetailPage({ risk, accessToken, canEdit, canDelete, 
               />
             </div>
             <div>
-              <label className="block text-sm text-slate-300 mb-1">Description</label>
+              <label htmlFor="risk-description" className="block text-sm text-slate-300 mb-1">
+                Description
+              </label>
               <textarea
+                id="risk-description"
                 disabled={!canEdit}
                 value={description}
                 onChange={(e) => setDescription(e.target.value)}
@@ -106,8 +112,11 @@ export default function RiskDetailPage({ risk, accessToken, canEdit, canDelete, 
             </div>
             <div className="grid grid-cols-2 gap-4">
               <div>
-                <label className="block text-sm text-slate-300 mb-1">Likelihood</label>
+                <label htmlFor="risk-likelihood" className="block text-sm text-slate-300 mb-1">
+                  Likelihood
+                </label>
                 <select
+                  id="risk-likelihood"
                   disabled={!canEdit}
                   value={likelihood}
                   onChange={(e) => setLikelihood(Number(e.target.value))}
@@ -121,8 +130,11 @@ export default function RiskDetailPage({ risk, accessToken, canEdit, canDelete, 
                 </select>
               </div>
               <div>
-                <label className="block text-sm text-slate-300 mb-1">Impact</label>
+                <label htmlFor="risk-impact" className="block text-sm text-slate-300 mb-1">
+                  Impact
+                </label>
                 <select
+                  id="risk-impact"
                   disabled={!canEdit}
                   value={impact}
                   onChange={(e) => setImpact(Number(e.target.value))}
@@ -147,8 +159,11 @@ export default function RiskDetailPage({ risk, accessToken, canEdit, canDelete, 
             </p>
             <div className="grid grid-cols-2 gap-4">
               <div>
-                <label className="block text-sm text-slate-300 mb-1">Status</label>
+                <label htmlFor="risk-status" className="block text-sm text-slate-300 mb-1">
+                  Status
+                </label>
                 <select
+                  id="risk-status"
                   disabled={!canEdit}
                   value={status}
                   onChange={(e) => setStatus(e.target.value)}
@@ -162,8 +177,11 @@ export default function RiskDetailPage({ risk, accessToken, canEdit, canDelete, 
                 </select>
               </div>
               <div>
-                <label className="block text-sm text-slate-300 mb-1">Treatment</label>
+                <label htmlFor="risk-treatment" className="block text-sm text-slate-300 mb-1">
+                  Treatment
+                </label>
                 <select
+                  id="risk-treatment"
                   disabled={!canEdit}
                   value={treatment}
                   onChange={(e) => setTreatment(e.target.value)}
@@ -178,8 +196,11 @@ export default function RiskDetailPage({ risk, accessToken, canEdit, canDelete, 
               </div>
             </div>
             <div>
-              <label className="block text-sm text-slate-300 mb-1">Owner</label>
+              <label htmlFor="risk-owner" className="block text-sm text-slate-300 mb-1">
+                Owner
+              </label>
               <input
+                id="risk-owner"
                 disabled={!canEdit}
                 value={owner}
                 onChange={(e) => setOwner(e.target.value)}

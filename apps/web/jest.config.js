@@ -8,7 +8,7 @@ const createJestConfig = nextJest({ dir: './' });
 const customJestConfig = {
   setupFilesAfterEnv: ['<rootDir>/jest.setup.js'],
   testEnvironment: 'jest-environment-jsdom',
-  testPathIgnorePatterns: ['<rootDir>/.next/', '<rootDir>/node_modules/', '<rootDir>/test-e2e/'],
+  testPathIgnorePatterns: ['<rootDir>/.next/', '<rootDir>/node_modules/', '<rootDir>/e2e/'],
   // Without this, Jest's haste module map also scans build output and warns about a naming
   // collision between the real package.json and the one turbo/Next's own `.next/standalone`
   // output copies alongside it — the build artifacts were never something to run tests against.

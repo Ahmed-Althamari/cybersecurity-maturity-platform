@@ -105,3 +105,56 @@ jobs:
       # no tenant-creation API), so this is safe to run against a shared service container.
       - run: cd packages/database && npx prisma migrate deploy
       - run: npm run test:e2e
+
+  web-e2e:
+    name: Web E2E Tests (Playwright)
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: cmmp_user
+          POSTGRES_PASSWORD: cmmp_password
+          POSTGRES_DB: cmmp_db
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U cmmp_user -d cmmp_db"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      DATABASE_URL: postgresql://cmmp_user:cmmp_password@localhost:5432/cmmp_db?schema=public
+      JWT_SECRET: ci-e2e-secret-not-for-production-min-32-chars
+      NEXTAUTH_URL: http://localhost:3000
+      NEXTAUTH_SECRET: ci-e2e-nextauth-secret-not-for-production-min-32-chars
+      API_URL: http://localhost:3001
+      NEXT_PUBLIC_API_URL: http://localhost:3001
+      DEMO_USER_PASSWORD: DemoPassword123!
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+      - run: npm ci
+      - run: npm run db:generate
+      - run: cd packages/database && npx prisma migrate deploy
+      # Seeds the demo tenant/organisation/users (admin@example.local, ciso@example.local,
+      # viewer@example.local, ...) that apps/web/e2e/global-setup.ts signs in as.
+      - run: npm run db:seed
+      - run: npx turbo run build --filter=@cmmp/api... --filter=@cmmp/web
+      - name: Install Playwright's Chromium
+        run: npx playwright install --with-deps chromium
+      # playwright.config.ts's webServer entries start `node dist/main` (apps/api) and
+      # `npm run start` (apps/web, i.e. `next start`) against the builds from the step above —
+      # this is a real browser driving two real HTTP servers against the real Postgres service
+      # above, not a mocked stack.
+      - run: npm run test:e2e --workspace=@cmmp/web
+      - name: Upload Playwright report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: apps/web/playwright-report
+          retention-days: 14
