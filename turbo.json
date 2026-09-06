@@ -3,11 +3,10 @@
   "globalEnv": [
     "NODE_ENV"
   ],
-  "pipeline": {
+  "tasks": {
     "build": {
       "dependsOn": ["^build"],
-      "outputs": [".next/**", "dist/**", "build/**"],
-      "outputMode": "full"
+      "outputs": [".next/**", "dist/**", "build/**"]
     },
     "lint": {
       "outputs": []

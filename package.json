@@ -3,6 +3,7 @@
   "version": "0.1.0",
   "description": "Enterprise Cybersecurity Maturity Assessment & Management Platform",
   "private": true,
+  "packageManager": "npm@10.9.7",
   "workspaces": {
     "packages": [
       "apps/*",
