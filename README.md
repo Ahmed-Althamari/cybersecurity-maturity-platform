@@ -21,24 +21,64 @@ CMMP is a comprehensive platform that enables organizations to:
 
 ## Architecture
 
+### System Overview
+
+```mermaid
+flowchart TD
+    U["Users (browser)<br/>Platform/Org Admin · CISO · Security Architect<br/>GRC Manager · Assessor · Control/Remediation Owner<br/>Auditor · Executive/Read-Only Viewer"]
+
+    subgraph WEB["apps/web — Next.js 16 (React 18), pages router — :3000"]
+        direction TB
+        AUTH["NextAuth.js — Credentials Provider"]
+        PAGES["Dashboard · Assessments · Frameworks<br/>Risk Register · Remediation Roadmap<br/>Excel/CSV Import Wizard · Data Analysis"]
+    end
+
+    subgraph API["apps/api — NestJS 12 — :3001<br/>/api/v1/* (health stays unprefixed)"]
+        direction TB
+        GUARDS["Request pipeline, in order:<br/>Helmet security headers → CORS allowlist<br/>→ global rate limit (ThrottlerGuard)<br/>→ per-route JWT auth → per-route RBAC<br/>→ validation pipe → audit logging (decorated routes)"]
+        MODULES["Auth · Assessments · Frameworks · Scoring<br/>Risks · Remediation Initiatives · Dashboard<br/>Import Mapping (LLM-assisted) · Data Analysis proxy"]
+    end
+
+    DB[("PostgreSQL 16<br/>Prisma ORM, multi-tenant, tenant-scoped queries")]
+
+    subgraph DA["services/data-analysis — Python/FastAPI — :8000<br/>internal Docker network only, no DB access, no auth of its own"]
+        LOCAL["'local' mode — AutoViz<br/>(zero external calls)"]
+        AI["'ai' mode — PandasAI + LiteLLM"]
+    end
+
+    LLM["Configured LLM provider chain<br/>OpenRouter free → Groq free → Claude<br/>(any subset configured)"]
+
+    U -- HTTPS --> WEB
+    AUTH -- "POST /api/v1/auth/login" --> API
+    PAGES -- "REST, JWT bearer" --> API
+    API -- Prisma --> DB
+    API -- "REST, internal network only" --> DA
+    AI -- "'ai' mode only" --> LLM
+```
+
+`packages/reporting`, `packages/security`, and `packages/ui` exist as
+workspace packages but nothing currently imports them yet — see
+`docs/architecture.md` for the full, always-up-to-date system
+description this diagram is drawn from.
+
 ### Technology Stack
 
 **Frontend:**
-- Next.js 14+ with TypeScript
-- React 18+
+- Next.js 16 with TypeScript
+- React 18
 - Tailwind CSS
 - shadcn/ui
 - Recharts for visualizations
 
 **Backend:**
-- NestJS
-- Node.js 18+
+- NestJS 12
+- Node.js 20+
 - TypeScript
 - Express
 
 **Database:**
 - PostgreSQL 16
-- Prisma ORM
+- Prisma ORM 7
 
 **Data Analysis Service** (`services/data-analysis`, a separate microservice, not part of the Node/npm workspaces above):
 - Python 3.11, FastAPI
@@ -80,7 +120,7 @@ cybersecurity-maturity-platform/
 
 ### Prerequisites
 
-- Node.js 18+ and npm 9+
+- Node.js 20+ and npm 9+
 - A PostgreSQL 16 instance (local install or any reachable server) —
   only Docker/Docker Compose if going that route instead (Option 2 below)
 - Git
@@ -164,8 +204,11 @@ npm run docker:down
 ### Database Management
 
 ```bash
+# All prisma commands run from packages/database — that's where both
+# prisma/schema.prisma and the required prisma.config.ts live.
+cd packages/database
+
 # Create new migration
-cd apps/api
 npx prisma migrate dev --name migration_name
 
 # Push schema changes to database
@@ -195,7 +238,7 @@ After `npm run db:seed`, four demo users exist, all with password
 ## Project Structure Details
 
 ### `/apps/web`
-Next.js 14 frontend application with:
+Next.js 16 frontend application with:
 - Pages for dashboard, assessments, frameworks, risks, roadmap
 - React components built with shadcn/ui
 - Tailwind CSS styling
