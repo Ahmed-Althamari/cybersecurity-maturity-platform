@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 // Runs as a Docker CMD step before apps/web/server.js starts (see
 // infrastructure/Dockerfile.web). output: "standalone" resolves
-// next.config.js at *build* time and bakes the result into the generated
-// server.js, which never re-requires next.config.js at runtime -- so a
+// next.config.mjs at *build* time and bakes the result into the generated
+// server.js, which never re-requires next.config.mjs at runtime -- so a
 // check placed there (kept anyway, for the non-Docker `next start` path)
 // never actually runs for this, the real deployment path. This script is
 // the one that does.

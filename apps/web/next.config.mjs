@@ -11,7 +11,6 @@ const KNOWN_NEXTAUTH_SECRET_PLACEHOLDERS = new Set([
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   reactStrictMode: true,
-  swcMinify: true,
   // Traces only the dependencies each page actually needs into .next/standalone, so the
   // production Docker image doesn't have to carry the full node_modules tree.
   output: "standalone",

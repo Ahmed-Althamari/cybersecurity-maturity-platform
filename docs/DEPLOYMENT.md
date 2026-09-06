@@ -74,7 +74,7 @@ images ship the compiled app, not a migration step in the startup
 command. Run them explicitly after the stack is up:
 
 ```bash
-docker compose exec api npx prisma migrate deploy --schema packages/database/prisma/schema.prisma
+docker compose exec api sh -c "cd packages/database && npx prisma migrate deploy"
 ```
 
 (The `api` image includes the full `prisma` CLI as a devDependency —

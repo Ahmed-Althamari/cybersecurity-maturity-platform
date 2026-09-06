@@ -34,7 +34,10 @@ COPY --from=pruner /app/out/full/ .
 # a separate script, normally invoked via the root `db:generate`), so without this step
 # @cmmp/database's build fails to type-check the `export * from '@prisma/client'` re-export, and
 # even if it didn't, node_modules/.prisma/client would be missing at runtime.
-RUN npx prisma generate --schema packages/database/prisma/schema.prisma
+# Run from packages/database (not --schema from the repo root) since Prisma 7 discovers
+# prisma.config.ts relative to the CLI's cwd, and that config is what now supplies the
+# datasource URL (schema.prisma can no longer declare one — see the schema's own comment).
+RUN cd packages/database && npx prisma generate
 # `...` pulls in every workspace @cmmp/api depends on, in dependency order, not just @cmmp/api itself.
 RUN npx turbo run build --filter=@cmmp/api...
 

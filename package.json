@@ -20,7 +20,7 @@
     "type-check": "turbo run type-check",
     "clean": "turbo run clean && rm -rf node_modules",
     "format": "prettier --write \"**/*.{ts,tsx,js,jsx,json,md}\"",
-    "db:generate": "npx prisma generate --schema packages/database/prisma/schema.prisma",
+    "db:generate": "cd packages/database && npx prisma generate",
     "db:migrate": "cd packages/database && npx prisma migrate deploy",
     "db:seed": "npm run build --workspace=@cmmp/framework-engine --workspace=@cmmp/database && cd packages/database && npx prisma db seed",
     "db:studio": "cd packages/database && npx prisma studio",
@@ -31,8 +31,6 @@
   },
   "devDependencies": {
     "eslint-plugin-import": "^2.29.1",
-    "eslint-plugin-react": "^7.33.2",
-    "eslint-plugin-react-hooks": "^4.6.0",
     "eslint-plugin-security": "^1.7.1",
     "prettier": "^3.0.2",
     "turbo": "^1.10.16",
@@ -53,7 +51,7 @@
     "prisma": true
   },
   "dependencies": {
-    "@prisma/client": "^5.22.0"
+    "@prisma/client": "^7.10.0"
   },
   "overrides": {
     "multer": "^2.3.0",
