@@ -3,12 +3,17 @@
 
 import { buildFrameworkCreateInput, frameworkTreeInclude } from "@cmmp/database";
 import { parseFrameworkDefinition } from "@cmmp/framework-engine";
+import { PrismaPg } from "@prisma/adapter-pg";
 import { PrismaClient, MaturityLevel, RiskLevel, ControlStatus } from "@prisma/client";
 import * as bcrypt from "bcryptjs";
 
 import nistCsf2Definition from "./fixtures/nist-csf-2.0.json";
 
-const prisma = new PrismaClient();
+// Prisma 7 requires a driver adapter for every PrismaClient instance -- see
+// apps/api/src/prisma/prisma.service.ts for the app's own equivalent.
+const prisma = new PrismaClient({
+  adapter: new PrismaPg({ connectionString: process.env.DATABASE_URL }),
+});
 
 // Local-development-only demo password. Never used in production: production
 // deployments must create users with their own credentials via the API.

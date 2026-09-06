@@ -1,6 +1,6 @@
 # CMMP Implementation Status
 
-Last Updated: 2026-09-05 (Next.js 14 → 16 upgrade — see that section below)
+Last Updated: 2026-09-06 (Prisma 5 → 7 upgrade — see that section below)
 
 ## Overall Progress
 
@@ -2946,6 +2946,116 @@ harmless missing-favicon 404 (this repo's `apps/web/public/` is empty).
 once `eslint-plugin-react` publishes a release compatible with it — not
 urgent, ESLint 9 remains on npm's own `maintenance` track, just not the
 newest line anymore.
+
+## Prisma 5 → 7 Upgrade (2026-09-06)
+
+`prisma`/`@prisma/client` bumped from 5.22.0 to 7.10.0 (skipping 6
+entirely, matching Dependabot PR #14's real target) across every
+workspace that touches them: `packages/database` (schema owner),
+`apps/api` (the actual runtime consumer via `PrismaService`), and
+`apps/web` (declares `@prisma/client` but — confirmed by grep — never
+actually imports from it; bumped for version consistency only, zero
+behavior change there).
+
+**The generator provider was deliberately left on `prisma-client-js`,
+not moved to Prisma 7's new default (`prisma-client`).** The new
+provider is a ground-up rearchitecture — ESM-only output, generated
+`.ts` files (not compiled JS) that must live inside a `rootDir` and get
+compiled by the consuming package's own `tsc`, `.ts`-extension relative
+imports requiring TypeScript 5.7+'s `rewriteRelativeImportExtensions`,
+`import.meta.url` requiring an ESM-compatible `module` target throughout
+`packages/database` (currently `commonjs`, needed by `apps/api`'s own
+CommonJS NestJS build) — verified hands-on in a scratch project before
+deciding against it, not assumed. `prisma-client-js` still works
+unmodified under Prisma 7 (confirmed the same way) and avoids all of
+that; the two breaking changes that apply regardless of generator
+provider (below) were still real and had to be fixed.
+
+**Real breaking changes found and fixed (both confirmed by hand against
+a real Prisma 7 CLI install before touching this repo, not assumed from
+release notes alone):**
+
+1. **`datasource.url` in `schema.prisma` is now a hard schema-validation
+   error** (`P1012`), not a deprecation — confirmed by triggering it
+   directly. The connection string moves to a new, now-mandatory
+   `prisma.config.ts` (read by CLI commands: generate/migrate/studio/db
+   seed) and, separately, to a driver adapter passed to the
+   `PrismaClient` constructor (read by the running app). Added
+   `packages/database/prisma.config.ts` — loads this repo's single
+   root-level `.env` explicitly via `dotenv` (Prisma no longer
+   auto-loads `.env` at all, and `dotenv`'s own cwd-relative default
+   would miss a repo-root file from every invocation, which all `cd
+   packages/database` first), and moved the seed command there
+   (`migrations.seed`) since Prisma 7 also dropped reading
+   `package.json`'s `"prisma"` key entirely (confirmed: it's in the
+   release notes' own "Removed Features" list).
+2. **`new PrismaClient()` with no arguments now throws
+   `PrismaClientInitializationError`** ("A driver adapter is required")
+   — confirmed at runtime, not just read about. Added
+   `@prisma/adapter-pg` (bundles `pg` itself, no separate dependency
+   needed) and updated both of this codebase's two instantiation sites:
+   `apps/api/src/prisma/prisma.service.ts` (`extends PrismaClient`,
+   needed an explicit `constructor()` calling `super({ adapter: new
+   PrismaPg(...) })` where there was none before) and
+   `packages/database/prisma/seed.ts`.
+
+**A latent, pre-existing bug this upgrade's clean reinstall exposed (not
+caused by Prisma, but found and fixed in the same pass):** a full `rm
+-rf node_modules && npm install` — needed to clear an unrelated stale
+`node_modules/prisma@5.22.0` lockfile artifact blocking `prisma
+generate` from resolving `@prisma/client` (`Could not resolve
+@prisma/client`, traced to Prisma's own hoisting-depth sanity check in
+`prisma/build/index.js`; fixed by deleting `package-lock.json` and
+`node_modules` everywhere and reinstalling clean, not by hand-editing
+the lockfile) — flipped which of `apps/api`'s ESLint 8 or `apps/web`'s
+ESLint 9 happened to land at the repo root instead of nested. The root
+`.eslintrc.json` added by the Next.js upgrade above was, by then, only
+still used by `apps/api` (`apps/web` has its own flat
+`eslint.config.mjs`) — but ESLint 8 resolves a config's `plugins` list
+relative to *that config file's own location*, not the linting
+package's. With `.eslintrc.json` sitting at the repo root, `apps/api`'s
+`@typescript-eslint` plugin lookup was resolving relative to the repo
+root, not `apps/api/` — silently correct only for as long as hoisting
+happened to put `apps/api`'s own `@typescript-eslint/eslint-plugin@6.x`
+there instead of `apps/web`'s incompatible `@typescript-eslint/eslint-plugin@8.x`
+(pulled in transitively via `eslint-config-next`). This reinstall
+flipped that coin toss, crashing `apps/api`'s lint with `Cannot read
+properties of undefined (reading 'allowShortCircuit')` inside
+`@typescript-eslint/eslint-plugin`'s `no-unused-expressions` rule — a
+real, reproducible bug in already-merged work, not a Prisma regression,
+just uncovered by this session's reinstall. Fixed properly rather than
+re-rolling the dice: moved `.eslintrc.json` into `apps/api/.eslintrc.json`
+itself (`apps/api` is its sole remaining consumer now), so plugin
+resolution is anchored to `apps/api/node_modules` deterministically
+regardless of what npm's hoisting decides to do on any future install.
+
+**Verification:** `npx turbo run type-check lint build test --force`
+clean across all 29 tasks in every workspace (170 `apps/api` unit
+tests included) on a byte-for-byte fresh `node_modules`/lockfile: `cd
+packages/database && npx prisma generate` (confirms `prisma.config.ts`
+discovery and `@prisma/client` resolution both work from the CLI's
+actual invocation directory), `prisma migrate deploy` against the same
+already-migrated local Postgres 16 (no pending migrations — schema
+shape itself never changed, only how it's configured), `prisma db seed`
+via the new `migrations.seed` config path with the adapter-based
+`PrismaClient` (full seed completes, same output as before), the real
+compiled `apps/api` server boots and reports `{"status":"ok","database":"up"}`
+on `/health`, `apps/api`'s full e2e suite (48/48) against that same
+Postgres, and — again with a real Chromium browser against the real
+Next.js standalone production server, not a mock — `apps/web`'s full
+Playwright suite (10/10).
+
+**Left for human review:** none specific to this upgrade — both
+Dockerfile/CI invocations (`infrastructure/Dockerfile.api`,
+`.github/workflows/ci.yml`, `.github/workflows/dast.yml`) were checked
+against the new `cd packages/database && npx prisma generate` / `...
+migrate deploy` pattern the config-file discovery now requires, not
+just left on the old `--schema` flag form; the two `docker compose exec
+api ...` commands in `README.md`/`docs/DEPLOYMENT.md` were updated the
+same way. The `prisma-client-js` vs `prisma-client` generator decision
+above is worth revisiting on its own once TypeScript 5.7+ and an ESM
+build story for `packages/database`/`apps/api` are things this repo
+actually wants — not before, and not bundled into a dependency-bump PR.
 
 ## Contact & Questions
 

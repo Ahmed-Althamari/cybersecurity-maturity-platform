@@ -20,7 +20,7 @@
     "type-check": "turbo run type-check",
     "clean": "turbo run clean && rm -rf node_modules",
     "format": "prettier --write \"**/*.{ts,tsx,js,jsx,json,md}\"",
-    "db:generate": "npx prisma generate --schema packages/database/prisma/schema.prisma",
+    "db:generate": "cd packages/database && npx prisma generate",
     "db:migrate": "cd packages/database && npx prisma migrate deploy",
     "db:seed": "npm run build --workspace=@cmmp/framework-engine --workspace=@cmmp/database && cd packages/database && npx prisma db seed",
     "db:studio": "cd packages/database && npx prisma studio",
@@ -51,7 +51,7 @@
     "prisma": true
   },
   "dependencies": {
-    "@prisma/client": "^5.22.0"
+    "@prisma/client": "^7.10.0"
   },
   "overrides": {
     "multer": "^2.3.0",

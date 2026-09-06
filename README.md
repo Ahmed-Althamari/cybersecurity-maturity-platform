@@ -111,7 +111,7 @@ Web UI at http://localhost:3000, API at http://localhost:3001.
 cp .env.example .env      # edit JWT_SECRET / NEXTAUTH_SECRET to real values first
 npm run docker:build
 npm run docker:up
-docker compose exec api npx prisma migrate deploy --schema packages/database/prisma/schema.prisma
+docker compose exec api sh -c "cd packages/database && npx prisma migrate deploy"
 ```
 
 Brings up four services: `postgres`, `api`, `web`, and `data-analysis`
