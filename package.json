@@ -31,8 +31,6 @@
     "docker:down": "docker compose down"
   },
   "devDependencies": {
-    "eslint-plugin-import": "^2.29.1",
-    "eslint-plugin-security": "^1.7.1",
     "prettier": "^3.0.2",
     "turbo": "^2.9.14",
     "typescript": "^5.2.2"
