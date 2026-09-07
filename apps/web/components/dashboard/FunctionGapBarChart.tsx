@@ -24,7 +24,7 @@ export function FunctionGapBarChart({ functions }: FunctionGapBarChartProps) {
             <YAxis type="category" dataKey="code" tick={{ fill: '#c3c2b7', fontSize: 13 }} width={40} />
             <Tooltip
               contentStyle={{ background: '#1a1a19', border: '1px solid #383835', color: '#ffffff' }}
-              formatter={(value: number) => [value.toFixed(2), 'Gap']}
+              formatter={(value) => [typeof value === 'number' ? value.toFixed(2) : String(value ?? ''), 'Gap']}
             />
             <Bar dataKey="gap" radius={[0, 4, 4, 0]}>
               {data.map((entry) => (
