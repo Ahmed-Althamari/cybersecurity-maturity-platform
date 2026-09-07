@@ -12,7 +12,7 @@
   },
   "dependencies": {
     "@cmmp/shared": "*",
-    "pdfkit": "^0.13.0"
+    "pdfkit": "^0.20.2"
   },
   "devDependencies": {
     "@types/node": "^20.9.0",
