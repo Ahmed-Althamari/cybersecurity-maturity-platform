@@ -61,7 +61,7 @@ jobs:
       # which isn't available on this private repo without a paid add-on
       # (see the same note in security.yml's CodeQL job). Archiving as an
       # artifact instead until that's enabled.
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: trivy-${{ matrix.image }}-sarif
           path: trivy-${{ matrix.image }}.sarif
