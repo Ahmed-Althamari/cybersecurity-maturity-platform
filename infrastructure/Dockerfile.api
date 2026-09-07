@@ -16,7 +16,7 @@ FROM node:26-alpine AS base
 FROM base AS pruner
 RUN apk add --no-cache libc6-compat
 WORKDIR /app
-RUN npm install -g turbo@1.13.4
+RUN npm install -g turbo@2.9.14
 COPY . .
 RUN turbo prune @cmmp/api --docker
 
