@@ -1,5 +1,7 @@
 import { BadGatewayException, BadRequestException, Injectable, ServiceUnavailableException } from '@nestjs/common';
 
+import { LlmSettingsService } from '../llm-settings/llm-settings.service';
+
 export type AnalysisMode = 'local' | 'ai';
 
 export interface AnalysisColumn {
@@ -38,7 +40,9 @@ const REQUEST_TIMEOUT_MS = 120_000;
 export class DataAnalysisService {
   private readonly serviceUrl = process.env.DATA_ANALYSIS_SERVICE_URL || 'http://localhost:8000';
 
-  async analyze(file: Express.Multer.File, mode: AnalysisMode, question?: string): Promise<AnalysisResult> {
+  constructor(private readonly llmSettingsService: LlmSettingsService) {}
+
+  async analyze(file: Express.Multer.File, mode: AnalysisMode, question: string | undefined, tenantId: string): Promise<AnalysisResult> {
     const form = new FormData();
     // Buffer's `.buffer` is typed as ArrayBufferLike (it can back onto a SharedArrayBuffer),
     // which Blob's constructor doesn't accept — Uint8Array.from() copies into a plain,
@@ -47,6 +51,19 @@ export class DataAnalysisService {
     form.append('mode', mode);
     if (question) {
       form.append('question', question);
+    }
+
+    // "ai" mode only: forward this tenant's own UI-configured provider chain (see
+    // apps/web/pages/settings/ai.tsx) if it has one, so the analysis actually runs on the
+    // tenant's own credentials rather than the platform-wide env vars. `null` here (nothing
+    // configured) means "let the Python service fall back to its own env-based resolution",
+    // identical to this feature's behaviour before UI-configurable settings existed.
+    if (mode === 'ai') {
+      const providers = await this.llmSettingsService.resolveProviderChainForAnalysis(tenantId);
+      if (providers) {
+        // snake_case to match the Python service's FastAPI Form field name (main.py's `llm_providers`).
+        form.append('llm_providers', JSON.stringify(providers));
+      }
     }
 
     const controller = new AbortController();

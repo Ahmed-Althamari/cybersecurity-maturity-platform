@@ -1,5 +1,7 @@
 import { BadGatewayException, BadRequestException, ServiceUnavailableException } from '@nestjs/common';
 
+import type { LlmSettingsService } from '../llm-settings/llm-settings.service';
+
 import { DataAnalysisService } from './data-analysis.service';
 
 function fakeFile(): Express.Multer.File {
@@ -7,6 +9,12 @@ function fakeFile(): Express.Multer.File {
     buffer: Buffer.from('a,b\n1,2\n'),
     originalname: 'data.csv',
   } as Express.Multer.File;
+}
+
+const TENANT_ID = 'tenant-1';
+
+function fakeLlmSettingsService(providers: unknown = null): LlmSettingsService {
+  return { resolveProviderChainForAnalysis: jest.fn().mockResolvedValue(providers) } as unknown as LlmSettingsService;
 }
 
 describe('DataAnalysisService', () => {
@@ -26,8 +34,8 @@ describe('DataAnalysisService', () => {
     });
     global.fetch = fetchMock as unknown as typeof fetch;
 
-    const service = new DataAnalysisService();
-    const result = await service.analyze(fakeFile(), 'local');
+    const service = new DataAnalysisService(fakeLlmSettingsService());
+    const result = await service.analyze(fakeFile(), 'local', undefined, TENANT_ID);
 
     expect(result.mode).toBe('local');
     const [url, init] = fetchMock.mock.calls[0];
@@ -36,11 +44,56 @@ describe('DataAnalysisService', () => {
     expect(init.body).toBeInstanceOf(FormData);
   });
 
+  it('does not look up or forward a provider chain in "local" mode', async () => {
+    const fetchMock = jest.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ mode: 'local', rowCount: 1, columnCount: 2, columns: [], charts: [], answer: null, table: null, error: null }),
+    });
+    global.fetch = fetchMock as unknown as typeof fetch;
+    const llmSettingsService = fakeLlmSettingsService();
+
+    const service = new DataAnalysisService(llmSettingsService);
+    await service.analyze(fakeFile(), 'local', undefined, TENANT_ID);
+
+    expect(llmSettingsService.resolveProviderChainForAnalysis).not.toHaveBeenCalled();
+  });
+
+  it('forwards the tenant\'s configured provider chain as a form field in "ai" mode', async () => {
+    const providers = [{ format: 'anthropic', baseUrl: null, model: 'claude-opus-5', apiKey: 'sk-test' }];
+    const fetchMock = jest.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ mode: 'ai', rowCount: 1, columnCount: 2, columns: [], charts: [], answer: 'ok', table: null, error: null }),
+    });
+    global.fetch = fetchMock as unknown as typeof fetch;
+
+    const service = new DataAnalysisService(fakeLlmSettingsService(providers));
+    await service.analyze(fakeFile(), 'ai', undefined, TENANT_ID);
+
+    const [, init] = fetchMock.mock.calls[0];
+    const form = init.body as FormData;
+    expect(form.get('llm_providers')).toBe(JSON.stringify(providers));
+  });
+
+  it('omits the llmProviders field in "ai" mode when the tenant has configured nothing', async () => {
+    const fetchMock = jest.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ mode: 'ai', rowCount: 1, columnCount: 2, columns: [], charts: [], answer: 'ok', table: null, error: null }),
+    });
+    global.fetch = fetchMock as unknown as typeof fetch;
+
+    const service = new DataAnalysisService(fakeLlmSettingsService(null));
+    await service.analyze(fakeFile(), 'ai', undefined, TENANT_ID);
+
+    const [, init] = fetchMock.mock.calls[0];
+    const form = init.body as FormData;
+    expect(form.get('llm_providers')).toBeNull();
+  });
+
   it('throws ServiceUnavailableException when the service is unreachable', async () => {
     global.fetch = jest.fn().mockRejectedValue(new Error('ECONNREFUSED')) as unknown as typeof fetch;
-    const service = new DataAnalysisService();
+    const service = new DataAnalysisService(fakeLlmSettingsService());
 
-    await expect(service.analyze(fakeFile(), 'local')).rejects.toThrow(ServiceUnavailableException);
+    await expect(service.analyze(fakeFile(), 'local', undefined, TENANT_ID)).rejects.toThrow(ServiceUnavailableException);
   });
 
   it('throws ServiceUnavailableException when the service reports 503 (e.g. no LLM configured)', async () => {
@@ -50,9 +103,9 @@ describe('DataAnalysisService', () => {
       statusText: 'Service Unavailable',
       json: async () => ({ detail: 'No LLM_PROVIDER_<n>_API_KEY is configured' }),
     }) as unknown as typeof fetch;
-    const service = new DataAnalysisService();
+    const service = new DataAnalysisService(fakeLlmSettingsService());
 
-    await expect(service.analyze(fakeFile(), 'ai')).rejects.toThrow(ServiceUnavailableException);
+    await expect(service.analyze(fakeFile(), 'ai', undefined, TENANT_ID)).rejects.toThrow(ServiceUnavailableException);
   });
 
   it('throws BadRequestException on a 4xx from the service', async () => {
@@ -62,9 +115,9 @@ describe('DataAnalysisService', () => {
       statusText: 'Bad Request',
       json: async () => ({ detail: 'Unsupported file type' }),
     }) as unknown as typeof fetch;
-    const service = new DataAnalysisService();
+    const service = new DataAnalysisService(fakeLlmSettingsService());
 
-    await expect(service.analyze(fakeFile(), 'local')).rejects.toThrow(BadRequestException);
+    await expect(service.analyze(fakeFile(), 'local', undefined, TENANT_ID)).rejects.toThrow(BadRequestException);
   });
 
   it('throws BadGatewayException on an unexpected 5xx from the service', async () => {
@@ -74,8 +127,8 @@ describe('DataAnalysisService', () => {
       statusText: 'Internal Server Error',
       json: async () => null,
     }) as unknown as typeof fetch;
-    const service = new DataAnalysisService();
+    const service = new DataAnalysisService(fakeLlmSettingsService());
 
-    await expect(service.analyze(fakeFile(), 'local')).rejects.toThrow(BadGatewayException);
+    await expect(service.analyze(fakeFile(), 'local', undefined, TENANT_ID)).rejects.toThrow(BadGatewayException);
   });
 });

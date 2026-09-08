@@ -42,8 +42,8 @@ class LlmNotConfiguredError(RuntimeError):
     pass
 
 
-def run_ai_analysis(df: pd.DataFrame, question: Optional[str]) -> AiAnalysisResult:
-    llm = resolve_llm()
+def run_ai_analysis(df: pd.DataFrame, question: Optional[str], providers_override: Optional[list[dict]] = None) -> AiAnalysisResult:
+    llm = resolve_llm(providers_override)
     if llm is None:
         raise LlmNotConfiguredError(
             "No LLM_PROVIDER_<n>_API_KEY is configured for this deployment — AI-powered "

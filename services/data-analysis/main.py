@@ -20,6 +20,7 @@ Two analysis modes, both accepting the same upload:
 from __future__ import annotations
 
 import io
+import json
 import logging
 
 import pandas as pd
@@ -57,6 +58,7 @@ async def analyze(
     file: UploadFile = File(...),
     mode: str = Form(...),
     question: str | None = Form(default=None),
+    llm_providers: str | None = Form(default=None),
 ) -> JSONResponse:
     if mode not in SUPPORTED_MODES:
         raise HTTPException(status_code=400, detail=f"mode must be one of {sorted(SUPPORTED_MODES)}, got {mode!r}")
@@ -90,9 +92,19 @@ async def analyze(
             }
         )
 
-    # mode == "ai"
+    # mode == "ai" — `llm_providers`, when present, is a JSON-encoded list of this tenant's own
+    # UI-configured provider credentials (apps/api's DataAnalysisService resolves and forwards
+    # it); malformed JSON is treated the same as "not provided" rather than a hard failure, since
+    # falling back to the env-configured chain is still a reasonable outcome.
+    providers_override = None
+    if llm_providers:
+        try:
+            providers_override = json.loads(llm_providers)
+        except json.JSONDecodeError:
+            logger.warning("Ignoring malformed llm_providers form field (not valid JSON)")
+
     try:
-        ai_result = run_ai_analysis(df, question)
+        ai_result = run_ai_analysis(df, question, providers_override)
     except LlmNotConfiguredError as error:
         raise HTTPException(status_code=503, detail=str(error)) from error
     except Exception as error:

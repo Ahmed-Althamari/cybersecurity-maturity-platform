@@ -4,6 +4,7 @@
 
 export const RISK_WRITE_ROLES = ['PLATFORM_ADMIN', 'ORGANISATION_ADMIN', 'CISO', 'GRC_MANAGER', 'SECURITY_ARCHITECT'];
 export const RISK_DELETE_ROLES = ['PLATFORM_ADMIN', 'ORGANISATION_ADMIN'];
+export const LLM_SETTINGS_WRITE_ROLES = ['PLATFORM_ADMIN', 'ORGANISATION_ADMIN'];
 
 export function hasAnyRole(userRoles: string[], allowed: string[]): boolean {
   return userRoles.some((role) => allowed.includes(role));
