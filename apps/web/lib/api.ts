@@ -377,19 +377,21 @@ export function previewAssessmentImport(accessToken: string, assessmentId: strin
   return apiFetchFormData<ImportPreviewResult>(`/assessments/${assessmentId}/import/preview${query}`, accessToken, formData);
 }
 
-/** `columnMapping` overrides auto-detection for the named canonical columns; pass the (possibly user-edited) mapping from `previewAssessmentImport` to import against exactly what was shown. */
+/** `columnMapping` overrides auto-detection for the named canonical columns; pass the (possibly user-edited) mapping from `previewAssessmentImport` to import against exactly what was shown. `worksheet` selects which sheet of a multi-sheet workbook to import — omit for the first sheet. */
 export function importAssessmentFile(
   accessToken: string,
   assessmentId: string,
   file: File,
   columnMapping?: Record<string, string>,
+  worksheet?: string,
 ) {
   const formData = new FormData();
   formData.append('file', file);
   if (columnMapping) {
     formData.append('columnMapping', JSON.stringify(columnMapping));
   }
-  return apiFetchFormData<ImportResult>(`/assessments/${assessmentId}/import`, accessToken, formData);
+  const query = worksheet ? `?worksheet=${encodeURIComponent(worksheet)}` : '';
+  return apiFetchFormData<ImportResult>(`/assessments/${assessmentId}/import${query}`, accessToken, formData);
 }
 
 export function getDashboardMaturity(accessToken: string, organisationId: string, assessmentId?: string) {
