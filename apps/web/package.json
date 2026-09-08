@@ -44,7 +44,7 @@
     "@types/node": "^20.9.0",
     "@types/react": "^18.2.37",
     "@types/react-dom": "^18.2.15",
-    "autoprefixer": "^10.4.16",
+    "@tailwindcss/postcss": "^4.3.3",
     "eslint": "^9.39.5",
     "eslint-config-next": "^16.3.4",
     "eslint-plugin-security": "^4.0.1",
