@@ -137,9 +137,9 @@ export class FallbackLlmClient implements LlmClient {
 /** DI token for `LlmClient | null` — plain interfaces have no runtime identity, so Nest can't use the type itself as a token. */
 export const LLM_CLIENT = Symbol('LLM_CLIENT');
 
-type ProviderFormat = 'openai' | 'anthropic';
+export type ProviderFormat = 'openai' | 'anthropic';
 
-interface ProviderDefaults {
+export interface ProviderDefaults {
   format: ProviderFormat;
   baseUrl: string;
   model: string;
@@ -148,7 +148,7 @@ interface ProviderDefaults {
 // Free-tier catalogs churn fast enough that hardcoding a specific model (e.g. a named Hermes
 // slot) is a real trap — one such default broke within weeks of being written here. These are
 // starting points for an unconfigured slot, each overridable per-field via env vars.
-const SLOT_DEFAULTS: Record<number, ProviderDefaults> = {
+export const SLOT_DEFAULTS: Record<number, ProviderDefaults> = {
   // OpenRouter's own router-level free entry point — picks among whatever's currently free
   // rather than naming one model, so it survives that churn.
   1: { format: 'openai', baseUrl: 'https://openrouter.ai/api/v1', model: 'openrouter/free' },
@@ -157,9 +157,10 @@ const SLOT_DEFAULTS: Record<number, ProviderDefaults> = {
   // Paid top-tier fallback — only activates if LLM_PROVIDER_3_API_KEY is actually set.
   3: { format: 'anthropic', baseUrl: 'https://api.anthropic.com', model: 'claude-opus-5' },
 };
-const MAX_PROVIDER_SLOTS = 5;
+export const MAX_PROVIDER_SLOTS = 5;
 
-function buildClient(format: ProviderFormat, apiKey: string, baseUrl: string, model: string): LlmClient {
+/** Exported so apps/api/src/llm-settings can build the same client types from DB-stored, tenant-owned credentials instead of env vars. */
+export function buildClient(format: ProviderFormat, apiKey: string, baseUrl: string, model: string): LlmClient {
   switch (format) {
     case 'anthropic':
       return new AnthropicMessagesClient(apiKey, model, baseUrl);

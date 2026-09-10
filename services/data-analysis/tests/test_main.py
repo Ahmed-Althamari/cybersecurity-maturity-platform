@@ -1,4 +1,5 @@
 import io
+import json
 
 import numpy as np
 import pandas as pd
@@ -64,7 +65,7 @@ def test_local_mode_end_to_end():
 
 
 def test_ai_mode_returns_503_when_llm_not_configured(monkeypatch):
-    def raise_not_configured(df, question):
+    def raise_not_configured(df, question, providers_override=None):
         raise LlmNotConfiguredError("no provider configured")
 
     monkeypatch.setattr(main, "run_ai_analysis", raise_not_configured)
@@ -78,7 +79,7 @@ def test_ai_mode_returns_503_when_llm_not_configured(monkeypatch):
 
 
 def test_ai_mode_success_uses_configured_llm(monkeypatch):
-    def fake_run_ai_analysis(df, question):
+    def fake_run_ai_analysis(df, question, providers_override=None):
         return AiAnalysisResult(answer="the data looks fine", table=None, chart_base64=None, error=None)
 
     monkeypatch.setattr(main, "run_ai_analysis", fake_run_ai_analysis)
@@ -92,3 +93,40 @@ def test_ai_mode_success_uses_configured_llm(monkeypatch):
     body = response.json()
     assert body["answer"] == "the data looks fine"
     assert body["charts"] == []
+
+
+def test_ai_mode_forwards_llm_providers_form_field(monkeypatch):
+    received = {}
+
+    def fake_run_ai_analysis(df, question, providers_override=None):
+        received["providers_override"] = providers_override
+        return AiAnalysisResult(answer="ok", table=None, chart_base64=None, error=None)
+
+    monkeypatch.setattr(main, "run_ai_analysis", fake_run_ai_analysis)
+
+    providers = [{"format": "anthropic", "apiKey": "sk-ant-test", "model": "claude-opus-5", "baseUrl": None}]
+    response = client.post(
+        "/analyze",
+        files={"file": ("data.csv", _sample_csv_bytes(), "text/csv")},
+        data={"mode": "ai", "llm_providers": json.dumps(providers)},
+    )
+    assert response.status_code == 200
+    assert received["providers_override"] == providers
+
+
+def test_ai_mode_ignores_malformed_llm_providers_field(monkeypatch):
+    received = {}
+
+    def fake_run_ai_analysis(df, question, providers_override=None):
+        received["providers_override"] = providers_override
+        return AiAnalysisResult(answer="ok", table=None, chart_base64=None, error=None)
+
+    monkeypatch.setattr(main, "run_ai_analysis", fake_run_ai_analysis)
+
+    response = client.post(
+        "/analyze",
+        files={"file": ("data.csv", _sample_csv_bytes(), "text/csv")},
+        data={"mode": "ai", "llm_providers": "not valid json"},
+    )
+    assert response.status_code == 200
+    assert received["providers_override"] is None

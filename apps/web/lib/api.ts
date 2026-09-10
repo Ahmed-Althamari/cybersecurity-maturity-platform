@@ -526,3 +526,53 @@ export function analyzeSpreadsheet(accessToken: string, file: File, mode: Analys
   }
   return apiFetchFormData<AnalysisResult>('/data-analysis/analyze', accessToken, formData);
 }
+
+// ============================================================================
+// LLM SETTINGS — the "AI Assisted" panel. Lets a tenant configure its own provider
+// credentials (Claude, or any OpenAI-compatible endpoint) instead of relying only on the
+// platform-wide LLM_PROVIDER_<n>_* env vars. Once configured, both the import wizard's
+// column-mapping suggestions and Data Analysis's "ai" mode run on these credentials.
+// See apps/api/src/llm-settings.
+// ============================================================================
+
+export type LlmProviderFormat = 'openai' | 'anthropic';
+
+export interface LlmProviderSettingView {
+  slot: number;
+  format: LlmProviderFormat;
+  baseUrl: string | null;
+  model: string;
+  configured: boolean;
+  platformDefaultAvailable: boolean;
+  apiKeyPreview: string | null;
+  updatedAt: string | null;
+}
+
+export interface UpsertLlmProviderSettingInput {
+  format: LlmProviderFormat;
+  baseUrl?: string;
+  model: string;
+  apiKey: string;
+}
+
+export function listLlmProviderSettings(accessToken: string) {
+  return apiFetch<LlmProviderSettingView[]>('/llm-settings', accessToken);
+}
+
+export function upsertLlmProviderSetting(accessToken: string, slot: number, input: UpsertLlmProviderSettingInput) {
+  return apiFetch<LlmProviderSettingView>(`/llm-settings/${slot}`, accessToken, {
+    method: 'PUT',
+    body: JSON.stringify(input),
+  });
+}
+
+export function deleteLlmProviderSetting(accessToken: string, slot: number) {
+  return apiFetch<{ message: string }>(`/llm-settings/${slot}`, accessToken, { method: 'DELETE' });
+}
+
+export function testLlmProviderSetting(accessToken: string, slot: number, input?: Partial<UpsertLlmProviderSettingInput>) {
+  return apiFetch<{ ok: boolean; error?: string }>(`/llm-settings/${slot}/test`, accessToken, {
+    method: 'POST',
+    body: JSON.stringify(input ?? {}),
+  });
+}

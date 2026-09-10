@@ -97,6 +97,11 @@ jobs:
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: npm
+      # Encrypts tenant-saved LLM provider API keys at rest (apps/api/src/llm-settings).
+      # Generated fresh per run rather than a fixed value committed here, which a secret scanner
+      # would (correctly) flag as a high-entropy key-shaped literal even though it's not a real
+      # secret — this way there's nothing hardcoded to flag.
+      - run: echo "SETTINGS_ENCRYPTION_KEY=$(openssl rand -hex 32)" >> "$GITHUB_ENV"
       - run: npm ci
       - run: npm run db:generate
       # apps/api/test/*.e2e-spec.ts boots the real AppModule against this service container —
@@ -133,6 +138,11 @@ jobs:
       DEMO_USER_PASSWORD: DemoPassword123!
     steps:
       - uses: actions/checkout@v7
+      # Encrypts tenant-saved LLM provider API keys at rest (apps/api/src/llm-settings).
+      # Generated fresh per run rather than a fixed value committed here, which a secret scanner
+      # would (correctly) flag as a high-entropy key-shaped literal even though it's not a real
+      # secret — this way there's nothing hardcoded to flag.
+      - run: echo "SETTINGS_ENCRYPTION_KEY=$(openssl rand -hex 32)" >> "$GITHUB_ENV"
       - uses: actions/setup-node@v7
         with:
           node-version: ${{ env.NODE_VERSION }}

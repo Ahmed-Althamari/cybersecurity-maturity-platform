@@ -79,10 +79,32 @@ class FallbackLLM(LLM):
         raise last_error
 
 
-def resolve_llm() -> Optional[LLM]:
+def resolve_llm(providers_override: Optional[list[dict]] = None) -> Optional[LLM]:
     """Reads LLM_PROVIDER_<n>_* env vars (n = 1..5) into an ordered provider chain. Returns
     None — not a raised error — when no slot is configured, so callers can treat "ai" mode as
-    simply unavailable rather than crash the whole service over an optional feature."""
+    simply unavailable rather than crash the whole service over an optional feature.
+
+    `providers_override`, when given, is used instead of the env vars entirely — this is how a
+    tenant's own UI-configured credentials (apps/web/pages/settings/ai.tsx) reach this service:
+    apps/api's DataAnalysisService resolves them from the database and forwards the decrypted,
+    ordered list over the existing internal HTTP call to this service's /analyze endpoint (see
+    main.py's `llm_providers` form field). Each dict needs "format", "apiKey" and "model";
+    "baseUrl" is optional (required in practice for "openai", unused for "anthropic").
+    """
+    if providers_override is not None:
+        override_clients: list[LiteLLM] = []
+        for provider in providers_override:
+            fmt = provider.get("format")
+            api_key = provider.get("apiKey")
+            model = provider.get("model")
+            if not fmt or not api_key or not model:
+                logger.warning("Skipping a provider override entry missing format/apiKey/model: %r", provider)
+                continue
+            override_clients.append(_build_litellm(fmt, api_key, provider.get("baseUrl"), model))
+        if not override_clients:
+            return None
+        return override_clients[0] if len(override_clients) == 1 else FallbackLLM(override_clients)
+
     clients: list[LiteLLM] = []
 
     for slot in range(1, MAX_PROVIDER_SLOTS + 1):

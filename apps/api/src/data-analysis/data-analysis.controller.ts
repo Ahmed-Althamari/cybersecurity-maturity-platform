@@ -4,7 +4,9 @@ import { FileInterceptor } from '@nestjs/platform-express';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { memoryStorage } from 'multer';
 
+import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import type { RequestUser } from '../auth/types/authenticated-request';
 
 import { AnalysisMode, DataAnalysisService } from './data-analysis.service';
 
@@ -29,13 +31,18 @@ export class DataAnalysisController {
       limits: { fileSize: MAX_FILE_SIZE_BYTES },
     }),
   )
-  async analyze(@UploadedFile() file: Express.Multer.File, @Body('mode') mode?: string, @Body('question') question?: string) {
+  async analyze(
+    @UploadedFile() file: Express.Multer.File,
+    @CurrentUser() user: RequestUser,
+    @Body('mode') mode?: string,
+    @Body('question') question?: string,
+  ) {
     if (!file) {
       throw new BadRequestException('No file uploaded (expected a multipart field named "file")');
     }
     if (!VALID_MODES.includes(mode as AnalysisMode)) {
       throw new BadRequestException(`mode must be one of ${VALID_MODES.join(', ')}`);
     }
-    return this.dataAnalysisService.analyze(file, mode as AnalysisMode, question);
+    return this.dataAnalysisService.analyze(file, mode as AnalysisMode, question, user.tenantId);
   }
 }

@@ -33,6 +33,10 @@ services:
       PORT: 3001
       DATABASE_URL: postgresql://${POSTGRES_USER:-cmmp_user}:${POSTGRES_PASSWORD:-cmmp_password}@postgres:5432/${POSTGRES_DB:-cmmp_db}?schema=public
       JWT_SECRET: ${JWT_SECRET:?JWT_SECRET must be set (see .env.example) — refusing to fall back to a shared default in a container build}
+      # Encrypts tenant-saved LLM provider API keys at rest (apps/api/src/llm-settings) — only
+      # actually read when a tenant configures a credential from the "AI Assisted" UI panel, but
+      # required up front since generating it later would leave existing rows undecryptable.
+      SETTINGS_ENCRYPTION_KEY: ${SETTINGS_ENCRYPTION_KEY:?SETTINGS_ENCRYPTION_KEY must be set (see .env.example) — generate with `openssl rand -hex 32`}
       CORS_ORIGIN: ${NEXTAUTH_URL:-http://localhost:3000}
       # Internal-network address of the isolated data-analysis service below — never the host-published
       # form, since this service is never published on a host port at all.

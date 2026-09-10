@@ -11,9 +11,23 @@ def _sample_df() -> pd.DataFrame:
 
 
 def test_raises_when_no_llm_configured(monkeypatch):
-    monkeypatch.setattr(ai_mode, "resolve_llm", lambda: None)
+    monkeypatch.setattr(ai_mode, "resolve_llm", lambda providers_override=None: None)
     with pytest.raises(LlmNotConfiguredError):
         run_ai_analysis(_sample_df(), question="anything")
+
+
+def test_forwards_providers_override_to_resolve_llm(monkeypatch):
+    received = {}
+
+    def fake_resolve_llm(providers_override=None):
+        received["providers_override"] = providers_override
+        return None
+
+    monkeypatch.setattr(ai_mode, "resolve_llm", fake_resolve_llm)
+    override = [{"format": "anthropic", "apiKey": "sk-ant-test", "model": "claude-opus-5"}]
+    with pytest.raises(LlmNotConfiguredError):
+        run_ai_analysis(_sample_df(), question="anything", providers_override=override)
+    assert received["providers_override"] == override
 
 
 def test_string_response_round_trip(monkeypatch):
@@ -39,7 +53,7 @@ def test_string_response_round_trip(monkeypatch):
             table_name = prompt_text[start : prompt_text.index('"', start)]
             return code.replace("__TABLE__", table_name)
 
-    monkeypatch.setattr(ai_mode, "resolve_llm", lambda: _TemplatedFakeLLM())
+    monkeypatch.setattr(ai_mode, "resolve_llm", lambda providers_override=None: _TemplatedFakeLLM())
 
     result = run_ai_analysis(_sample_df(), question="What is the average maturity?")
 

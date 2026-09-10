@@ -29,6 +29,12 @@ jobs:
       - run: npm ci
       - run: npm run db:generate
 
+      # Encrypts tenant-saved LLM provider API keys at rest (apps/api/src/llm-settings) —
+      # required by docker-compose.yml's api service below. Generated fresh per run rather than a
+      # fixed value committed here, which a secret scanner would (correctly) flag as a
+      # high-entropy key-shaped literal even though it's not a real secret.
+      - run: echo "SETTINGS_ENCRYPTION_KEY=$(openssl rand -hex 32)" >> "$GITHUB_ENV"
+
       - name: Start stack
         run: docker compose up -d --build
         env:

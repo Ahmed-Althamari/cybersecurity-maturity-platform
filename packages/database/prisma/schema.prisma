@@ -93,11 +93,12 @@ model Tenant {
   deletedAt   DateTime?
 
   // Relations
-  organisations Organisation[]
-  users         User[]
-  frameworks    Framework[]
-  auditEvents   AuditEvent[]
-  Benchmark     Benchmark[]
+  organisations       Organisation[]
+  users               User[]
+  frameworks          Framework[]
+  auditEvents         AuditEvent[]
+  Benchmark           Benchmark[]
+  llmProviderSettings LlmProviderSetting[]
 
   @@index([isActive])
   @@map("tenants")
@@ -769,6 +770,40 @@ model DashboardConfiguration {
   @@unique([organisationId, name])
   @@index([organisationId])
   @@map("dashboard_configurations")
+}
+
+// ============================================================================
+// AI-ASSISTED SETTINGS
+// ============================================================================
+
+/// A tenant's own LLM provider credential for one "slot" (1-5, same slot numbering as the
+/// LLM_PROVIDER_<n>_* env vars — see apps/api/src/assessments/import-mapping/llm-client.ts).
+/// When a tenant has configured at least one slot, it takes over that tenant's provider chain
+/// entirely in place of the platform-wide env vars, so a tenant with billing-sensitive keys of
+/// their own never has their usage mixed with (or billed to) the platform default.
+model LlmProviderSetting {
+  id       String @id @default(uuid())
+  tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  slot   Int // 1-5
+  format String // "openai" | "anthropic"
+  baseUrl String?
+  model   String
+
+  /// AES-256-GCM ciphertext (see packages/security's encryptSecret) — never the raw key.
+  apiKeyEncrypted String
+  /// Last 4 characters of the plaintext key, for masked display ("••••ab12") without decrypting.
+  apiKeyPreview String
+
+  updatedById String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([tenantId, slot])
+  @@index([tenantId])
+  @@map("llm_provider_settings")
 }
 
 // ============================================================================

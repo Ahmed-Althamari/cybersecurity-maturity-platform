@@ -1,4 +1,4 @@
-import { ClipboardList, LayoutDashboard, LogOut, ShieldCheck, ShieldHalf, Boxes, Sparkles } from 'lucide-react';
+import { ClipboardList, LayoutDashboard, LogOut, ShieldCheck, ShieldHalf, Boxes, Sparkles, Settings } from 'lucide-react';
 import Link from 'next/link';
 import { useRouter } from 'next/router';
 import { signOut } from 'next-auth/react';
@@ -10,6 +10,7 @@ const NAV_ITEMS = [
   { href: '/assessments', label: 'Assessments', icon: ClipboardList },
   { href: '/frameworks', label: 'Frameworks', icon: Boxes },
   { href: '/data-analysis', label: 'Data Analysis', icon: Sparkles },
+  { href: '/settings/ai', label: 'AI Settings', icon: Settings },
 ] as const;
 
 interface AppHeaderProps {

@@ -96,3 +96,29 @@ class TestResolveLlm:
         result = resolve_llm()
         assert result is not None
         assert result.model == "openai/custom-model"
+
+
+class TestResolveLlmProvidersOverride:
+    """`providers_override` — a tenant's own UI-configured credentials, forwarded per-request
+    from apps/api's DataAnalysisService — takes priority over env vars entirely when given."""
+
+    def test_ignores_env_vars_when_override_is_given(self, monkeypatch):
+        monkeypatch.setenv("LLM_PROVIDER_1_API_KEY", "should-be-ignored")
+        result = resolve_llm([{"format": "anthropic", "apiKey": "sk-ant-tenant", "model": "claude-opus-5"}])
+        assert result is not None
+        assert result.model == "anthropic/claude-opus-5"
+
+    def test_multiple_override_entries_wrap_in_fallback(self):
+        result = resolve_llm(
+            [
+                {"format": "openai", "apiKey": "k1", "model": "m1", "baseUrl": "https://example.test/v1"},
+                {"format": "anthropic", "apiKey": "k2", "model": "m2"},
+            ]
+        )
+        assert isinstance(result, FallbackLLM)
+
+    def test_skips_entries_missing_required_fields(self):
+        assert resolve_llm([{"format": "anthropic", "model": "claude-opus-5"}]) is None
+
+    def test_empty_override_list_returns_none(self):
+        assert resolve_llm([]) is None
