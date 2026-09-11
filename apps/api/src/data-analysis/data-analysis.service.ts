@@ -66,7 +66,12 @@ export class DataAnalysisService {
     // identical to this feature's behaviour before UI-configurable settings existed. `slot`,
     // when given, restricts this to the one provider the user picked instead of the default
     // full fallback chain.
+    //
+    // Checked before ever calling the Python service (an explicit, user-initiated request,
+    // unlike the best-effort import-mapping suggester) — a capped tenant gets a clear 429
+    // instead of a wasted round trip.
     if (mode === 'ai') {
+      await this.llmSettingsService.assertUnderUsageLimit(tenantId);
       const providers = await this.llmSettingsService.resolveProviderChainForAnalysis(tenantId, slot);
       if (providers) {
         // snake_case to match the Python service's FastAPI Form field name (main.py's `llm_providers`).
@@ -103,6 +108,15 @@ export class DataAnalysisService {
       }
       throw new BadGatewayException(`Data analysis service returned ${response.status}: ${detail}`);
     }
+
+    // Only a 200 response reaching here means a provider was actually invoked (a 503 above means
+    // LlmNotConfiguredError — no attempt was ever made, so it's not counted). The response's own
+    // `error` field distinguishes a successful call from one that reached a provider and failed.
+    if (mode === 'ai') {
+      const analysisError = body && typeof body === 'object' && 'error' in body ? (body as AnalysisResult).error : null;
+      void this.llmSettingsService.recordUsage(tenantId, 'data-analysis', !analysisError);
+    }
+
     return body as AnalysisResult;
   }
 }

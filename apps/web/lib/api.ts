@@ -582,6 +582,23 @@ export function testLlmProviderSetting(accessToken: string, slot: number, input?
   });
 }
 
+/** Call-count-based, not token/cost-based — see apps/api/src/llm-settings/llm-settings.service.ts. */
+export interface LlmUsageSummary {
+  dailyCallLimit: number | null;
+  todayCallCount: number;
+}
+
+export function getLlmUsageSummary(accessToken: string) {
+  return apiFetch<LlmUsageSummary>('/llm-settings/usage', accessToken);
+}
+
+export function updateLlmUsageLimit(accessToken: string, dailyCallLimit: number | null) {
+  return apiFetch<LlmUsageSummary>('/llm-settings/usage', accessToken, {
+    method: 'PUT',
+    body: JSON.stringify({ dailyCallLimit }),
+  });
+}
+
 // ============================================================================
 // AUDIT LOG — every CREATE/UPDATE/DELETE/LOGIN/etc. action, recorded server-side
 // by @AuditLog() (apps/api/src/audit). Read-only from the UI; rows are immutable.

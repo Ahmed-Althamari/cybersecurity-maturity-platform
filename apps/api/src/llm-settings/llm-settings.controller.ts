@@ -9,6 +9,7 @@ import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import type { RequestUser } from '../auth/types/authenticated-request';
 
+import { UpdateUsageLimitDto } from './dto/update-usage-limit.dto';
 import { TestLlmProviderSettingDto, UpsertLlmProviderSettingDto } from './dto/upsert-llm-provider-setting.dto';
 import { LlmSettingsService } from './llm-settings.service';
 
@@ -24,6 +25,22 @@ import { LlmSettingsService } from './llm-settings.service';
 @UseGuards(JwtAuthGuard)
 export class LlmSettingsController {
   constructor(private readonly llmSettingsService: LlmSettingsService) {}
+
+  // Declared before the ':slot' routes below — Nest matches routes in registration order, and
+  // 'usage' would otherwise be swallowed by ':slot' (ParseIntPipe rejecting it as non-numeric)
+  // rather than ever reaching these handlers.
+  @Get('usage')
+  async getUsage(@CurrentUser() user: RequestUser) {
+    return this.llmSettingsService.getUsageSummary(user.tenantId);
+  }
+
+  @Put('usage')
+  @UseGuards(RolesGuard)
+  @Roles(UserRole.PLATFORM_ADMIN, UserRole.ORGANISATION_ADMIN)
+  @AuditLog('UPDATE', 'LlmUsageLimit')
+  async setUsage(@Body() dto: UpdateUsageLimitDto, @CurrentUser() user: RequestUser) {
+    return this.llmSettingsService.setUsageLimit(user.tenantId, dto.dailyCallLimit);
+  }
 
   @Get()
   async list(@CurrentUser() user: RequestUser) {

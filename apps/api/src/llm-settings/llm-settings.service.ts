@@ -1,5 +1,5 @@
 import { decryptSecret, encryptSecret, previewSecret } from '@cmmp/security';
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, HttpException, HttpStatus, Injectable, Logger, NotFoundException } from '@nestjs/common';
 
 import {
   buildClient,
@@ -34,6 +34,19 @@ export interface AnalysisProviderConfig {
   apiKey: string;
 }
 
+export type LlmUsageFeature = 'import-mapping' | 'data-analysis';
+
+export interface LlmUsageSummary {
+  dailyCallLimit: number | null;
+  todayCallCount: number;
+}
+
+/** Midnight UTC for "today" — a fixed, unambiguous boundary rather than per-tenant local time. */
+function startOfTodayUtc(): Date {
+  const now = new Date();
+  return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
+}
+
 const TEST_SYSTEM_PROMPT = 'You are a connectivity test. Reply with exactly one word.';
 const TEST_USER_PROMPT = 'Reply with exactly: OK';
 
@@ -51,6 +64,8 @@ function assertValidSlot(slot: number): void {
  */
 @Injectable()
 export class LlmSettingsService {
+  private readonly logger = new Logger(LlmSettingsService.name);
+
   constructor(private readonly prisma: PrismaService) {}
 
   async list(tenantId: string): Promise<LlmProviderSettingView[]> {
@@ -231,5 +246,60 @@ export class LlmSettingsService {
       model: row.model,
       apiKey: decryptSecret(row.apiKeyEncrypted),
     }));
+  }
+
+  async getUsageSummary(tenantId: string): Promise<LlmUsageSummary> {
+    const [limitRow, todayCallCount] = await Promise.all([
+      this.prisma.llmUsageLimit.findUnique({ where: { tenantId } }),
+      this.prisma.llmUsageEvent.count({ where: { tenantId, createdAt: { gte: startOfTodayUtc() } } }),
+    ]);
+    return { dailyCallLimit: limitRow?.dailyCallLimit ?? null, todayCallCount };
+  }
+
+  async setUsageLimit(tenantId: string, dailyCallLimit: number | null): Promise<LlmUsageSummary> {
+    if (dailyCallLimit !== null && (!Number.isInteger(dailyCallLimit) || dailyCallLimit < 1)) {
+      throw new BadRequestException('dailyCallLimit must be a positive integer, or null for unlimited');
+    }
+    await this.prisma.llmUsageLimit.upsert({
+      where: { tenantId },
+      create: { tenantId, dailyCallLimit },
+      update: { dailyCallLimit },
+    });
+    return this.getUsageSummary(tenantId);
+  }
+
+  /**
+   * Throws (HTTP 429) if the tenant's daily LLM-call cap is already reached — call this before
+   * actually invoking a provider, not after, so a capped tenant never pays for (or waits on) a
+   * call that was always going to be refused. No row for the tenant means unlimited, matching
+   * this feature's behaviour before usage limits existed.
+   */
+  async assertUnderUsageLimit(tenantId: string): Promise<void> {
+    const limitRow = await this.prisma.llmUsageLimit.findUnique({ where: { tenantId } });
+    if (!limitRow?.dailyCallLimit) {
+      return;
+    }
+    const todayCallCount = await this.prisma.llmUsageEvent.count({
+      where: { tenantId, createdAt: { gte: startOfTodayUtc() } },
+    });
+    if (todayCallCount >= limitRow.dailyCallLimit) {
+      throw new HttpException(
+        `Daily AI usage limit of ${limitRow.dailyCallLimit} calls reached for this organisation. Try again tomorrow, or ask an admin to raise the limit.`,
+        HttpStatus.TOO_MANY_REQUESTS,
+      );
+    }
+  }
+
+  /**
+   * Append-only usage log, same "never break the caller" convention as AuditService.record —
+   * losing a usage row on a transient DB error is far cheaper than failing (or worse,
+   * double-charging) the feature it's describing.
+   */
+  async recordUsage(tenantId: string, feature: LlmUsageFeature, success: boolean): Promise<void> {
+    try {
+      await this.prisma.llmUsageEvent.create({ data: { tenantId, feature, success } });
+    } catch (error) {
+      this.logger.error(`Failed to record LLM usage event (${feature}): ${error instanceof Error ? error.message : String(error)}`);
+    }
   }
 }

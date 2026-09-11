@@ -1,5 +1,5 @@
 import { encryptSecret } from '@cmmp/security';
-import { BadRequestException, NotFoundException } from '@nestjs/common';
+import { BadRequestException, HttpException, NotFoundException } from '@nestjs/common';
 
 import type { PrismaService } from '../prisma/prisma.service';
 
@@ -11,7 +11,7 @@ const TENANT_ID = 'tenant-1';
 
 describe('LlmSettingsService', () => {
   let service: LlmSettingsService;
-  let prisma: { llmProviderSetting: MockModel };
+  let prisma: { llmProviderSetting: MockModel; llmUsageLimit: MockModel; llmUsageEvent: MockModel };
 
   beforeEach(() => {
     process.env.SETTINGS_ENCRYPTION_KEY = 'a'.repeat(64); // 32 bytes hex, test-only
@@ -21,6 +21,14 @@ describe('LlmSettingsService', () => {
         findUnique: jest.fn(),
         upsert: jest.fn(),
         deleteMany: jest.fn(),
+      },
+      llmUsageLimit: {
+        findUnique: jest.fn().mockResolvedValue(null),
+        upsert: jest.fn(),
+      },
+      llmUsageEvent: {
+        count: jest.fn().mockResolvedValue(0),
+        create: jest.fn().mockResolvedValue({}),
       },
     };
     service = new LlmSettingsService(prisma as unknown as PrismaService);
@@ -147,6 +155,86 @@ describe('LlmSettingsService', () => {
     it('throws NotFoundException when no row is saved and no override credential is supplied', async () => {
       prisma.llmProviderSetting.findUnique.mockResolvedValue(null);
       await expect(service.testConnection(TENANT_ID, 1, {})).rejects.toThrow(NotFoundException);
+    });
+  });
+
+  describe('getUsageSummary', () => {
+    it('reports unlimited (null) and today\'s count when no limit row exists', async () => {
+      prisma.llmUsageEvent.count.mockResolvedValue(7);
+      const summary = await service.getUsageSummary(TENANT_ID);
+      expect(summary).toEqual({ dailyCallLimit: null, todayCallCount: 7 });
+    });
+
+    it('reports the saved limit alongside today\'s count', async () => {
+      prisma.llmUsageLimit.findUnique.mockResolvedValue({ dailyCallLimit: 50 });
+      prisma.llmUsageEvent.count.mockResolvedValue(12);
+      const summary = await service.getUsageSummary(TENANT_ID);
+      expect(summary).toEqual({ dailyCallLimit: 50, todayCallCount: 12 });
+    });
+
+    it('scopes the count to events created since midnight UTC today', async () => {
+      await service.getUsageSummary(TENANT_ID);
+      const whereArg = prisma.llmUsageEvent.count.mock.calls[0][0].where;
+      expect(whereArg.tenantId).toBe(TENANT_ID);
+      expect(whereArg.createdAt.gte.getUTCHours()).toBe(0);
+      expect(whereArg.createdAt.gte.getUTCMinutes()).toBe(0);
+    });
+  });
+
+  describe('setUsageLimit', () => {
+    it('saves a positive integer limit', async () => {
+      prisma.llmUsageLimit.upsert.mockResolvedValue({ dailyCallLimit: 25 });
+      await service.setUsageLimit(TENANT_ID, 25);
+      expect(prisma.llmUsageLimit.upsert).toHaveBeenCalledWith({
+        where: { tenantId: TENANT_ID },
+        create: { tenantId: TENANT_ID, dailyCallLimit: 25 },
+        update: { dailyCallLimit: 25 },
+      });
+    });
+
+    it('saves null to mean unlimited', async () => {
+      await service.setUsageLimit(TENANT_ID, null);
+      expect(prisma.llmUsageLimit.upsert).toHaveBeenCalledWith(
+        expect.objectContaining({ create: { tenantId: TENANT_ID, dailyCallLimit: null } }),
+      );
+    });
+
+    it('rejects zero or a negative limit', async () => {
+      await expect(service.setUsageLimit(TENANT_ID, 0)).rejects.toThrow(BadRequestException);
+      await expect(service.setUsageLimit(TENANT_ID, -1)).rejects.toThrow(BadRequestException);
+    });
+  });
+
+  describe('assertUnderUsageLimit', () => {
+    it('passes silently when no limit row exists', async () => {
+      await expect(service.assertUnderUsageLimit(TENANT_ID)).resolves.toBeUndefined();
+    });
+
+    it('passes silently when under the limit', async () => {
+      prisma.llmUsageLimit.findUnique.mockResolvedValue({ dailyCallLimit: 10 });
+      prisma.llmUsageEvent.count.mockResolvedValue(9);
+      await expect(service.assertUnderUsageLimit(TENANT_ID)).resolves.toBeUndefined();
+    });
+
+    it('throws a 429 once the limit is reached', async () => {
+      prisma.llmUsageLimit.findUnique.mockResolvedValue({ dailyCallLimit: 10 });
+      prisma.llmUsageEvent.count.mockResolvedValue(10);
+      await expect(service.assertUnderUsageLimit(TENANT_ID)).rejects.toThrow(HttpException);
+      await expect(service.assertUnderUsageLimit(TENANT_ID)).rejects.toMatchObject({ status: 429 });
+    });
+  });
+
+  describe('recordUsage', () => {
+    it('writes a usage event row', async () => {
+      await service.recordUsage(TENANT_ID, 'data-analysis', true);
+      expect(prisma.llmUsageEvent.create).toHaveBeenCalledWith({
+        data: { tenantId: TENANT_ID, feature: 'data-analysis', success: true },
+      });
+    });
+
+    it('swallows a write failure rather than throwing', async () => {
+      prisma.llmUsageEvent.create.mockRejectedValueOnce(new Error('db down'));
+      await expect(service.recordUsage(TENANT_ID, 'import-mapping', false)).resolves.toBeUndefined();
     });
   });
 });

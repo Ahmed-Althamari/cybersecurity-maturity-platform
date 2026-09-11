@@ -14,7 +14,11 @@ function fakeFile(): Express.Multer.File {
 const TENANT_ID = 'tenant-1';
 
 function fakeLlmSettingsService(providers: unknown = null): LlmSettingsService {
-  return { resolveProviderChainForAnalysis: jest.fn().mockResolvedValue(providers) } as unknown as LlmSettingsService;
+  return {
+    resolveProviderChainForAnalysis: jest.fn().mockResolvedValue(providers),
+    assertUnderUsageLimit: jest.fn().mockResolvedValue(undefined),
+    recordUsage: jest.fn().mockResolvedValue(undefined),
+  } as unknown as LlmSettingsService;
 }
 
 describe('DataAnalysisService', () => {
@@ -105,6 +109,87 @@ describe('DataAnalysisService', () => {
     const [, init] = fetchMock.mock.calls[0];
     const form = init.body as FormData;
     expect(form.get('llm_providers')).toBeNull();
+  });
+
+  it('checks the usage limit before ever calling the service in "ai" mode', async () => {
+    const fetchMock = jest.fn();
+    global.fetch = fetchMock as unknown as typeof fetch;
+    const llmSettingsService = fakeLlmSettingsService();
+    llmSettingsService.assertUnderUsageLimit = jest.fn().mockRejectedValue(new Error('Daily AI usage limit of 10 calls reached'));
+    const service = new DataAnalysisService(llmSettingsService);
+
+    await expect(service.analyze(fakeFile(), 'ai', undefined, TENANT_ID)).rejects.toThrow('Daily AI usage limit');
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('does not check the usage limit in "local" mode', async () => {
+    const fetchMock = jest.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ mode: 'local', rowCount: 1, columnCount: 2, columns: [], charts: [], answer: null, table: null, error: null }),
+    });
+    global.fetch = fetchMock as unknown as typeof fetch;
+    const llmSettingsService = fakeLlmSettingsService();
+
+    const service = new DataAnalysisService(llmSettingsService);
+    await service.analyze(fakeFile(), 'local', undefined, TENANT_ID);
+
+    expect(llmSettingsService.assertUnderUsageLimit).not.toHaveBeenCalled();
+  });
+
+  it('records a successful usage event when "ai" mode returns a clean result', async () => {
+    const fetchMock = jest.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ mode: 'ai', rowCount: 1, columnCount: 2, columns: [], charts: [], answer: 'ok', table: null, error: null }),
+    });
+    global.fetch = fetchMock as unknown as typeof fetch;
+    const llmSettingsService = fakeLlmSettingsService();
+
+    const service = new DataAnalysisService(llmSettingsService);
+    await service.analyze(fakeFile(), 'ai', undefined, TENANT_ID);
+
+    expect(llmSettingsService.recordUsage).toHaveBeenCalledWith(TENANT_ID, 'data-analysis', true);
+  });
+
+  it('records a failed usage event when "ai" mode reaches a provider but returns an error', async () => {
+    const fetchMock = jest.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ mode: 'ai', rowCount: 1, columnCount: 2, columns: [], charts: [], answer: null, table: null, error: 'boom' }),
+    });
+    global.fetch = fetchMock as unknown as typeof fetch;
+    const llmSettingsService = fakeLlmSettingsService();
+
+    const service = new DataAnalysisService(llmSettingsService);
+    await service.analyze(fakeFile(), 'ai', undefined, TENANT_ID);
+
+    expect(llmSettingsService.recordUsage).toHaveBeenCalledWith(TENANT_ID, 'data-analysis', false);
+  });
+
+  it('does not record usage in "local" mode', async () => {
+    const fetchMock = jest.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ mode: 'local', rowCount: 1, columnCount: 2, columns: [], charts: [], answer: null, table: null, error: null }),
+    });
+    global.fetch = fetchMock as unknown as typeof fetch;
+    const llmSettingsService = fakeLlmSettingsService();
+
+    const service = new DataAnalysisService(llmSettingsService);
+    await service.analyze(fakeFile(), 'local', undefined, TENANT_ID);
+
+    expect(llmSettingsService.recordUsage).not.toHaveBeenCalled();
+  });
+
+  it('does not record usage when the service reports 503 (no attempt was made)', async () => {
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: false,
+      status: 503,
+      statusText: 'Service Unavailable',
+      json: async () => ({ detail: 'No LLM_PROVIDER_<n>_API_KEY is configured' }),
+    }) as unknown as typeof fetch;
+    const llmSettingsService = fakeLlmSettingsService();
+    const service = new DataAnalysisService(llmSettingsService);
+
+    await expect(service.analyze(fakeFile(), 'ai', undefined, TENANT_ID)).rejects.toThrow(ServiceUnavailableException);
+    expect(llmSettingsService.recordUsage).not.toHaveBeenCalled();
   });
 
   it('throws ServiceUnavailableException when the service is unreachable', async () => {
