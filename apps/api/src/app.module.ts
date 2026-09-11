@@ -13,6 +13,7 @@ import { DataAnalysisModule } from './data-analysis/data-analysis.module';
 import { FrameworksModule } from './frameworks/frameworks.module';
 import { HealthModule } from './health/health.module';
 import { LlmSettingsModule } from './llm-settings/llm-settings.module';
+import { NotificationsModule } from './notifications/notifications.module';
 import { PrismaModule } from './prisma/prisma.module';
 import { RemediationInitiativesModule } from './remediation-initiatives/remediation-initiatives.module';
 import { RisksModule } from './risks/risks.module';
@@ -49,6 +50,7 @@ import { UsersModule } from './users/users.module';
     DashboardModule,
     RisksModule,
     RemediationInitiativesModule,
+    NotificationsModule,
     LlmSettingsModule,
     DataAnalysisModule,
   ],

@@ -706,3 +706,26 @@ export function createControlMapping(accessToken: string, input: CreateControlMa
 export function deleteControlMapping(accessToken: string, id: string) {
   return apiFetch<{ message: string }>(`/control-mappings/${id}`, accessToken, { method: 'DELETE' });
 }
+
+// ============================================================================
+// NOTIFICATIONS — a live, computed view of risks and remediation initiatives whose due date has
+// passed or is coming up soon. See apps/api/src/notifications.
+// ============================================================================
+
+export type DueDateAlertType = 'RISK' | 'REMEDIATION_INITIATIVE';
+export type DueDateAlertUrgency = 'OVERDUE' | 'DUE_SOON';
+
+export interface DueDateAlert {
+  id: string;
+  type: DueDateAlertType;
+  title: string;
+  status: string;
+  dueDate: string;
+  urgency: DueDateAlertUrgency;
+  daysUntilDue: number;
+}
+
+export function getDueDateAlerts(accessToken: string, organisationId: string) {
+  const query = new URLSearchParams({ organisationId });
+  return apiFetch<DueDateAlert[]>(`/notifications/due-dates?${query}`, accessToken);
+}
