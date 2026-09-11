@@ -9,6 +9,7 @@ import { KpiCard } from '../components/dashboard/KpiCard';
 import { MaturityDistributionChart } from '../components/dashboard/MaturityDistributionChart';
 import { MaturityHeatmap } from '../components/dashboard/MaturityHeatmap';
 import { MaturityRadarChart } from '../components/dashboard/MaturityRadarChart';
+import { PinnedInsightsSection } from '../components/dashboard/PinnedInsightsSection';
 import { TopGapsTable } from '../components/dashboard/TopGapsTable';
 import { AppHeader } from '../components/layout/AppHeader';
 import { EmptyState } from '../components/layout/EmptyState';
@@ -18,24 +19,40 @@ import {
   getDashboardFunctions,
   getDashboardGaps,
   getDashboardMaturity,
+  listPinnedInsights,
   type AssessmentResults,
   type FunctionMaturity,
   type GapAnalysisEntry,
   type MaturityOverview,
+  type PinnedInsightRecord,
 } from '../lib/api';
 import { getAuthSession } from '../lib/auth';
+import { hasAnyRole, PINNED_INSIGHT_WRITE_ROLES } from '../lib/roles';
 
 interface DashboardPageProps {
+  accessToken: string;
   userEmail: string;
   organisationId: string;
+  canManagePinnedInsights: boolean;
   overview: MaturityOverview | null;
   functions: FunctionMaturity[];
   gaps: GapAnalysisEntry[];
   results: AssessmentResults | null;
+  pinnedInsights: PinnedInsightRecord[];
   errorMessage: string | null;
 }
 
-export default function DashboardPage({ userEmail, overview, functions, gaps, results, errorMessage }: DashboardPageProps) {
+export default function DashboardPage({
+  accessToken,
+  userEmail,
+  canManagePinnedInsights,
+  overview,
+  functions,
+  gaps,
+  results,
+  pinnedInsights,
+  errorMessage,
+}: DashboardPageProps) {
   return (
     <>
       <Head>
@@ -100,6 +117,8 @@ export default function DashboardPage({ userEmail, overview, functions, gaps, re
             </div>
           )}
 
+          <PinnedInsightsSection accessToken={accessToken} canDelete={canManagePinnedInsights} insights={pinnedInsights} />
+
           {!overview && !errorMessage && (
             <EmptyState
               icon={BarChart3}
@@ -121,18 +140,31 @@ export const getServerSideProps: GetServerSideProps<DashboardPageProps> = async 
   }
 
   const organisationId = session.organisationId;
+  const canManagePinnedInsights = hasAnyRole(session.roles ?? [], PINNED_INSIGHT_WRITE_ROLES);
   if (!organisationId) {
     return {
       props: {
+        accessToken: session.accessToken,
         userEmail: session.user?.email ?? '',
         organisationId: '',
+        canManagePinnedInsights,
         overview: null,
         functions: [],
         gaps: [],
         results: null,
+        pinnedInsights: [],
         errorMessage: 'Your account has no organisation assigned, so no dashboard data can be shown.',
       },
     };
+  }
+
+  // Best-effort, like the slot picker on the Data Analysis page — a failed lookup here just
+  // means the section doesn't render, not a broken dashboard.
+  let pinnedInsights: PinnedInsightRecord[] = [];
+  try {
+    pinnedInsights = await listPinnedInsights(session.accessToken, organisationId);
+  } catch {
+    pinnedInsights = [];
   }
 
   try {
@@ -145,12 +177,15 @@ export const getServerSideProps: GetServerSideProps<DashboardPageProps> = async 
 
     return {
       props: {
+        accessToken: session.accessToken,
         userEmail: session.user?.email ?? '',
         organisationId,
+        canManagePinnedInsights,
         overview,
         functions,
         gaps,
         results,
+        pinnedInsights,
         errorMessage: null,
       },
     };
@@ -158,12 +193,15 @@ export const getServerSideProps: GetServerSideProps<DashboardPageProps> = async 
     const message = error instanceof ApiError ? error.message : 'Failed to load dashboard data.';
     return {
       props: {
+        accessToken: session.accessToken,
         userEmail: session.user?.email ?? '',
         organisationId,
+        canManagePinnedInsights,
         overview: null,
         functions: [],
         gaps: [],
         results: null,
+        pinnedInsights,
         errorMessage: message,
       },
     };

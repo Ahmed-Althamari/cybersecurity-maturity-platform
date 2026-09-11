@@ -130,6 +130,7 @@ model Organisation {
   remediationInitiatives RemediationInitiative[]
   securityCapabilities   SecurityCapability[]
   benchmarks             Benchmark[]
+  pinnedInsights         PinnedInsight[]
 
   @@unique([tenantId, slug])
   @@index([tenantId])
@@ -807,6 +808,30 @@ model DashboardConfiguration {
   @@unique([organisationId, name])
   @@index([organisationId])
   @@map("dashboard_configurations")
+}
+
+/// A chart a user explicitly chose to "pin" from the Data Analysis page onto the tenant's shared
+/// dashboard — see apps/api/src/pinned-insights. Never created automatically: pinning is always a
+/// deliberate action, never a side effect of running an analysis. `chartData` is only present for
+/// charts extracted from a workbook's own embedded dashboard-sheet charts (we know their real
+/// category/series values in that case); AutoViz/PandasAI-generated charts are image-only, so
+/// their `chartData` is null and the dashboard renders them without a click-to-expand affordance.
+model PinnedInsight {
+  id             String       @id @default(uuid())
+  tenantId       String
+  organisationId String
+  organisation   Organisation @relation(fields: [organisationId], references: [id], onDelete: Cascade)
+
+  title          String
+  imageBase64    String
+  chartData      String? // JSON: { categories: string[], series: { name: string, values: number[] }[] }
+  sourceFileName String?
+  createdById    String?
+
+  createdAt DateTime @default(now())
+
+  @@index([tenantId, organisationId])
+  @@map("pinned_insights")
 }
 
 // ============================================================================

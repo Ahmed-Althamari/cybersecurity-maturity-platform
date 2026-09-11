@@ -58,6 +58,23 @@ jobs:
           path: apps/api/coverage
           retention-days: 14
 
+  python-tests:
+    name: Python Tests (data-analysis)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+      # Matches services/data-analysis/Dockerfile's runtime image exactly (python:3.11-slim +
+      # this one system package) so the versions pytest runs against here are the ones actually
+      # shipped, not just whatever happens to resolve on the runner's default Python.
+      - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libgomp1
+      - run: pip install -r requirements.txt
+        working-directory: services/data-analysis
+      - run: pytest
+        working-directory: services/data-analysis
+
   build:
     name: Build
     runs-on: ubuntu-latest
@@ -136,6 +153,10 @@ jobs:
       API_URL: http://localhost:3001
       NEXT_PUBLIC_API_URL: http://localhost:3001
       DEMO_USER_PASSWORD: DemoPassword123!
+      # apps/api/src/data-analysis/data-analysis.service.ts defaults to this same value when the
+      # var is unset, but naming it explicitly here documents that this job depends on the
+      # data-analysis service being started (below) at exactly this address.
+      DATA_ANALYSIS_SERVICE_URL: http://localhost:8000
     steps:
       - uses: actions/checkout@v7
       # Encrypts tenant-saved LLM provider API keys at rest (apps/api/src/llm-settings).
@@ -147,6 +168,9 @@ jobs:
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: npm
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
       - run: npm ci
       - run: npm run db:generate
       - run: cd packages/database && npx prisma migrate deploy
@@ -156,10 +180,26 @@ jobs:
       - run: npx turbo run build --filter=@cmmp/api... --filter=@cmmp/web
       - name: Install Playwright's Chromium
         run: npx playwright install --with-deps chromium
+      # data-analysis-*.spec.ts (dashboard-sheet extraction, slot picker) upload real workbooks
+      # through the actual NestJS proxy — that proxy has no fallback if this service isn't
+      # reachable at DATA_ANALYSIS_SERVICE_URL, so it has to be up before Playwright starts, same
+      # as the API/web servers below.
+      - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libgomp1
+      - run: pip install -r requirements.txt
+        working-directory: services/data-analysis
+      - name: Start the data-analysis service
+        working-directory: services/data-analysis
+        run: |
+          nohup uvicorn main:app --host 0.0.0.0 --port 8000 > /tmp/data-analysis.log 2>&1 &
+          for i in $(seq 1 30); do
+            curl -sf http://localhost:8000/health && exit 0
+            sleep 1
+          done
+          echo "data-analysis service did not become healthy in time"; cat /tmp/data-analysis.log; exit 1
       # playwright.config.ts's webServer entries start `node dist/main` (apps/api) and
       # `npm run start` (apps/web, i.e. `next start`) against the builds from the step above —
-      # this is a real browser driving two real HTTP servers against the real Postgres service
-      # above, not a mocked stack.
+      # this is a real browser driving two real HTTP servers against the real Postgres and
+      # data-analysis services above, not a mocked stack.
       - run: npm run test:e2e --workspace=@cmmp/web
       - name: Upload Playwright report
         if: always()
