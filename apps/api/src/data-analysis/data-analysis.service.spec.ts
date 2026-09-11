@@ -234,4 +234,80 @@ describe('DataAnalysisService', () => {
 
     await expect(service.analyze(fakeFile(), 'local', undefined, TENANT_ID)).rejects.toThrow(BadGatewayException);
   });
+
+  it('forwards sheetName as a form field when analyzing a specific sheet', async () => {
+    const fetchMock = jest.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ mode: 'local', rowCount: 1, columnCount: 2, columns: [], charts: [], answer: null, table: null, error: null }),
+    });
+    global.fetch = fetchMock as unknown as typeof fetch;
+
+    const service = new DataAnalysisService(fakeLlmSettingsService());
+    await service.analyze(fakeFile(), 'local', undefined, TENANT_ID, undefined, 'SheetB');
+
+    const [, init] = fetchMock.mock.calls[0];
+    const form = init.body as FormData;
+    expect(form.get('sheet_name')).toBe('SheetB');
+  });
+
+  it('omits sheet_name when no sheet was picked', async () => {
+    const fetchMock = jest.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ mode: 'local', rowCount: 1, columnCount: 2, columns: [], charts: [], answer: null, table: null, error: null }),
+    });
+    global.fetch = fetchMock as unknown as typeof fetch;
+
+    const service = new DataAnalysisService(fakeLlmSettingsService());
+    await service.analyze(fakeFile(), 'local', undefined, TENANT_ID);
+
+    const [, init] = fetchMock.mock.calls[0];
+    const form = init.body as FormData;
+    expect(form.get('sheet_name')).toBeNull();
+  });
+
+  describe('getSheets', () => {
+    it('posts the file to the service\'s /sheets endpoint and returns its JSON body', async () => {
+      process.env.DATA_ANALYSIS_SERVICE_URL = 'https://analysis.example.test';
+      const sheetsBody = {
+        sheets: [{ name: 'Sheet1', rowCount: 3, columnCount: 2, type: 'TABLE' }],
+        extractedCharts: [],
+      };
+      const fetchMock = jest.fn().mockResolvedValue({ ok: true, json: async () => sheetsBody });
+      global.fetch = fetchMock as unknown as typeof fetch;
+
+      const service = new DataAnalysisService(fakeLlmSettingsService());
+      const result = await service.getSheets(fakeFile());
+
+      expect(result).toEqual(sheetsBody);
+      const [url, init] = fetchMock.mock.calls[0];
+      expect(url).toBe('https://analysis.example.test/sheets');
+      expect(init.method).toBe('POST');
+      expect(init.body).toBeInstanceOf(FormData);
+    });
+
+    it('never touches LlmSettingsService — no usage limit, no provider resolution', async () => {
+      const fetchMock = jest.fn().mockResolvedValue({ ok: true, json: async () => ({ sheets: [], extractedCharts: [] }) });
+      global.fetch = fetchMock as unknown as typeof fetch;
+      const llmSettingsService = fakeLlmSettingsService();
+
+      const service = new DataAnalysisService(llmSettingsService);
+      await service.getSheets(fakeFile());
+
+      expect(llmSettingsService.assertUnderUsageLimit).not.toHaveBeenCalled();
+      expect(llmSettingsService.resolveProviderChainForAnalysis).not.toHaveBeenCalled();
+      expect(llmSettingsService.recordUsage).not.toHaveBeenCalled();
+    });
+
+    it('throws BadRequestException on a 4xx from the service', async () => {
+      global.fetch = jest.fn().mockResolvedValue({
+        ok: false,
+        status: 400,
+        statusText: 'Bad Request',
+        json: async () => ({ detail: 'Unsupported file type' }),
+      }) as unknown as typeof fetch;
+      const service = new DataAnalysisService(fakeLlmSettingsService());
+
+      await expect(service.getSheets(fakeFile())).rejects.toThrow(BadRequestException);
+    });
+  });
 });

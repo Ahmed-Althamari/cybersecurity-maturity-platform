@@ -24,6 +24,20 @@ const VALID_MODES: AnalysisMode[] = ['local', 'ai'];
 export class DataAnalysisController {
   constructor(private dataAnalysisService: DataAnalysisService) {}
 
+  @Post('sheets')
+  @UseInterceptors(
+    FileInterceptor('file', {
+      storage: memoryStorage(),
+      limits: { fileSize: MAX_FILE_SIZE_BYTES },
+    }),
+  )
+  async sheets(@UploadedFile() file: Express.Multer.File) {
+    if (!file) {
+      throw new BadRequestException('No file uploaded (expected a multipart field named "file")');
+    }
+    return this.dataAnalysisService.getSheets(file);
+  }
+
   @Post('analyze')
   @UseInterceptors(
     FileInterceptor('file', {
@@ -37,6 +51,7 @@ export class DataAnalysisController {
     @Body('mode') mode?: string,
     @Body('question') question?: string,
     @Body('slot') slotRaw?: string,
+    @Body('sheetName') sheetName?: string,
   ) {
     if (!file) {
       throw new BadRequestException('No file uploaded (expected a multipart field named "file")');
@@ -48,6 +63,6 @@ export class DataAnalysisController {
     // fallback chain (see the Data Analysis page's slot picker). Range/existence validated by
     // LlmSettingsService.resolveProviderChainForAnalysis.
     const slot = slotRaw ? Number(slotRaw) : undefined;
-    return this.dataAnalysisService.analyze(file, mode as AnalysisMode, question, user.tenantId, slot);
+    return this.dataAnalysisService.analyze(file, mode as AnalysisMode, question, user.tenantId, slot, sheetName);
   }
 }

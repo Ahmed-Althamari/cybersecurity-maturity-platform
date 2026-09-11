@@ -515,9 +515,18 @@ export interface AnalysisResult {
  * `mode: "local"` runs AutoViz only — zero LLM calls, zero network calls of any kind — for
  * tenants who don't want their spreadsheet data leaving the platform. `mode: "ai"` sends the
  * data to whichever LLM chain the server has configured (see llm-client.ts) for natural-language
- * analysis beyond AutoViz's fixed chart set; `question` is only used in this mode.
+ * analysis beyond AutoViz's fixed chart set; `question` is only used in this mode. `sheetName`
+ * targets one sheet of a multi-sheet workbook (see getWorkbookSheets below) instead of always
+ * defaulting to the first.
  */
-export function analyzeSpreadsheet(accessToken: string, file: File, mode: AnalysisMode, question?: string, slot?: number) {
+export function analyzeSpreadsheet(
+  accessToken: string,
+  file: File,
+  mode: AnalysisMode,
+  question?: string,
+  slot?: number,
+  sheetName?: string,
+) {
   const formData = new FormData();
   formData.append('file', file);
   formData.append('mode', mode);
@@ -529,7 +538,85 @@ export function analyzeSpreadsheet(accessToken: string, file: File, mode: Analys
   if (slot) {
     formData.append('slot', String(slot));
   }
+  if (sheetName) {
+    formData.append('sheetName', sheetName);
+  }
   return apiFetchFormData<AnalysisResult>('/data-analysis/analyze', accessToken, formData);
+}
+
+export type WorkbookSheetType = 'TABLE' | 'DASHBOARD';
+
+export interface WorkbookSheetSummary {
+  name: string;
+  rowCount: number;
+  columnCount: number;
+  type: WorkbookSheetType;
+}
+
+export interface ExtractedChartSeries {
+  name: string;
+  values: number[];
+}
+
+/** A chart found already embedded in one of the workbook's own "dashboard" sheets — unlike
+ * AnalysisChart (AutoViz/PandasAI's generated images), this carries the chart's real plotted
+ * data, which is what lets it support a "click through to the data" view. */
+export interface ExtractedChart {
+  sheetName: string;
+  title: string;
+  chartType: string;
+  imageBase64: string;
+  categories: string[];
+  series: ExtractedChartSeries[];
+}
+
+export interface WorkbookSheetsResult {
+  sheets: WorkbookSheetSummary[];
+  extractedCharts: ExtractedChart[];
+}
+
+/** Enumerates a workbook's sheets and classifies each as a data table or a dashboard sheet,
+ * before the caller picks one to hand to analyzeSpreadsheet — see the Data Analysis page's
+ * sheet-picker step. Not meaningful for a .csv upload (always a single implicit table). */
+export function getWorkbookSheets(accessToken: string, file: File) {
+  const formData = new FormData();
+  formData.append('file', file);
+  return apiFetchFormData<WorkbookSheetsResult>('/data-analysis/sheets', accessToken, formData);
+}
+
+// ============================================================================
+// PINNED INSIGHTS — a chart explicitly "pinned" from the Data Analysis page onto the tenant's
+// shared dashboard. See apps/api/src/pinned-insights.
+// ============================================================================
+
+export interface PinnedInsightRecord {
+  id: string;
+  title: string;
+  imageBase64: string;
+  chartData: string | null;
+  sourceFileName: string | null;
+  createdAt: string;
+}
+
+export interface CreatePinnedInsightInput {
+  organisationId: string;
+  title: string;
+  imageBase64: string;
+  chartData?: string;
+  sourceFileName?: string;
+}
+
+export function listPinnedInsights(accessToken: string, organisationId: string) {
+  const query = new URLSearchParams({ organisationId });
+  return apiFetch<PinnedInsightRecord[]>(`/pinned-insights?${query}`, accessToken);
+}
+
+export function createPinnedInsight(accessToken: string, input: CreatePinnedInsightInput) {
+  return apiFetch<PinnedInsightRecord>('/pinned-insights', accessToken, { method: 'POST', body: JSON.stringify(input) });
+}
+
+export function deletePinnedInsight(accessToken: string, id: string) {
+  return apiFetch<{ message: string }>(`/pinned-insights/${id}`, accessToken, { method: 'DELETE' });
 }
 
 // ============================================================================

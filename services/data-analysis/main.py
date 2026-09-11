@@ -29,6 +29,7 @@ from fastapi.responses import JSONResponse
 
 from analysis.ai_mode import LlmNotConfiguredError, run_ai_analysis
 from analysis.local_mode import run_local_analysis
+from analysis.workbook_sheets import extract_workbook_sheets
 
 logger = logging.getLogger("data-analysis")
 
@@ -38,13 +39,16 @@ MAX_UPLOAD_BYTES = 10 * 1024 * 1024  # matches @cmmp/import-engine's MAX_FILE_SI
 SUPPORTED_MODES = {"local", "ai"}
 
 
-def _read_dataframe(filename: str, content: bytes) -> pd.DataFrame:
+def _read_dataframe(filename: str, content: bytes, sheet_name: str | None = None) -> pd.DataFrame:
     lower = filename.lower()
     buffer = io.BytesIO(content)
     if lower.endswith(".csv"):
         return pd.read_csv(buffer)
     if lower.endswith(".xlsx") or lower.endswith(".xls"):
-        return pd.read_excel(buffer)
+        # sheet_name=None (the default when the caller hasn't picked one — e.g. a single-sheet
+        # workbook, or a caller predating the sheet picker) reads sheet index 0, matching the
+        # previous behavior exactly.
+        return pd.read_excel(buffer, sheet_name=sheet_name if sheet_name else 0)
     raise HTTPException(status_code=400, detail=f"Unsupported file type: {filename} (expected .csv, .xlsx or .xls)")
 
 
@@ -53,12 +57,48 @@ async def health() -> dict:
     return {"status": "ok"}
 
 
+@app.post("/sheets")
+async def sheets(file: UploadFile = File(...)) -> JSONResponse:
+    """Enumerates a workbook's sheets and classifies each as a plain data table or a
+    "dashboard" sheet (contains a native chart/pivot table) — called before /analyze so the
+    caller can show a sheet picker and, for dashboard sheets, the charts already embedded in
+    them (extracted with their real underlying data, not just a picture)."""
+    content = await file.read()
+    if len(content) > MAX_UPLOAD_BYTES:
+        raise HTTPException(status_code=413, detail=f"File exceeds the maximum allowed size of {MAX_UPLOAD_BYTES // (1024 * 1024)}MB")
+
+    try:
+        result = extract_workbook_sheets(file.filename or "upload", content)
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+    except Exception as error:
+        raise HTTPException(status_code=400, detail=f"Could not parse file as a spreadsheet: {error}") from error
+
+    return JSONResponse(
+        {
+            "sheets": [{"name": s.name, "rowCount": s.row_count, "columnCount": s.column_count, "type": s.type} for s in result.sheets],
+            "extractedCharts": [
+                {
+                    "sheetName": c.sheet_name,
+                    "title": c.title,
+                    "chartType": c.chart_type,
+                    "imageBase64": c.image_base64,
+                    "categories": c.categories,
+                    "series": [{"name": s.name, "values": s.values} for s in c.series],
+                }
+                for c in result.extracted_charts
+            ],
+        }
+    )
+
+
 @app.post("/analyze")
 async def analyze(
     file: UploadFile = File(...),
     mode: str = Form(...),
     question: str | None = Form(default=None),
     llm_providers: str | None = Form(default=None),
+    sheet_name: str | None = Form(default=None),
 ) -> JSONResponse:
     if mode not in SUPPORTED_MODES:
         raise HTTPException(status_code=400, detail=f"mode must be one of {sorted(SUPPORTED_MODES)}, got {mode!r}")
@@ -68,9 +108,12 @@ async def analyze(
         raise HTTPException(status_code=413, detail=f"File exceeds the maximum allowed size of {MAX_UPLOAD_BYTES // (1024 * 1024)}MB")
 
     try:
-        df = _read_dataframe(file.filename or "upload", content)
+        df = _read_dataframe(file.filename or "upload", content, sheet_name)
     except HTTPException:
         raise
+    except ValueError as error:
+        # pandas raises this for a sheet_name that doesn't exist in the workbook.
+        raise HTTPException(status_code=400, detail=str(error)) from error
     except Exception as error:
         raise HTTPException(status_code=400, detail=f"Could not parse file as a spreadsheet: {error}") from error
 

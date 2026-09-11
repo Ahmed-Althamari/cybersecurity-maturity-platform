@@ -12,14 +12,16 @@ import { hasAnyRole, RISK_WRITE_ROLES } from '../../lib/roles';
 interface NewRiskPageProps {
   organisationId: string;
   accessToken: string;
+  prefillTitle: string;
+  prefillDescription: string;
 }
 
 const SCALE = [1, 2, 3, 4, 5];
 
-export default function NewRiskPage({ organisationId, accessToken }: NewRiskPageProps) {
+export default function NewRiskPage({ organisationId, accessToken, prefillTitle, prefillDescription }: NewRiskPageProps) {
   const router = useRouter();
-  const [title, setTitle] = useState('');
-  const [description, setDescription] = useState('');
+  const [title, setTitle] = useState(prefillTitle);
+  const [description, setDescription] = useState(prefillDescription);
   const [likelihood, setLikelihood] = useState(3);
   const [impact, setImpact] = useState(3);
   const [owner, setOwner] = useState('');
@@ -173,5 +175,13 @@ export const getServerSideProps: GetServerSideProps<NewRiskPageProps> = async (c
     return { redirect: { destination: '/risks', permanent: false } };
   }
 
-  return { props: { organisationId: session.organisationId, accessToken: session.accessToken } };
+  // Lets the Data Analysis page's "Add to Risk Register" action hand off a suggested title/
+  // description for the user to review and edit before saving — never auto-created, always a
+  // normal form submission from here.
+  const prefillTitle = typeof context.query.prefillTitle === 'string' ? context.query.prefillTitle : '';
+  const prefillDescription = typeof context.query.prefillDescription === 'string' ? context.query.prefillDescription : '';
+
+  return {
+    props: { organisationId: session.organisationId, accessToken: session.accessToken, prefillTitle, prefillDescription },
+  };
 };

@@ -25,6 +25,34 @@ export interface AnalysisResult {
   error: string | null;
 }
 
+export type WorkbookSheetType = 'TABLE' | 'DASHBOARD';
+
+export interface WorkbookSheetSummary {
+  name: string;
+  rowCount: number;
+  columnCount: number;
+  type: WorkbookSheetType;
+}
+
+export interface ExtractedChartSeries {
+  name: string;
+  values: number[];
+}
+
+export interface ExtractedChart {
+  sheetName: string;
+  title: string;
+  chartType: string;
+  imageBase64: string;
+  categories: string[];
+  series: ExtractedChartSeries[];
+}
+
+export interface WorkbookSheetsResult {
+  sheets: WorkbookSheetSummary[];
+  extractedCharts: ExtractedChart[];
+}
+
 // AutoViz (local mode) and PandasAI's code-gen retries (ai mode) can both legitimately take
 // well over the platform's usual few-second API budget on a large sheet.
 const REQUEST_TIMEOUT_MS = 120_000;
@@ -42,12 +70,24 @@ export class DataAnalysisService {
 
   constructor(private readonly llmSettingsService: LlmSettingsService) {}
 
+  /** Enumerates a workbook's sheets and classifies each as a data table or a "dashboard" sheet
+   * (contains a native chart/pivot table), extracting any embedded charts' real data along the
+   * way — see services/data-analysis's /sheets. No LLM involved either way, so no usage-limit
+   * check: this is pure structural inspection of the file the user just uploaded. */
+  async getSheets(file: Express.Multer.File): Promise<WorkbookSheetsResult> {
+    const form = new FormData();
+    form.append('file', new Blob([Uint8Array.from(file.buffer)]), file.originalname);
+    const body = await this.callService('/sheets', form);
+    return body as WorkbookSheetsResult;
+  }
+
   async analyze(
     file: Express.Multer.File,
     mode: AnalysisMode,
     question: string | undefined,
     tenantId: string,
     slot?: number,
+    sheetName?: string,
   ): Promise<AnalysisResult> {
     const form = new FormData();
     // Buffer's `.buffer` is typed as ArrayBufferLike (it can back onto a SharedArrayBuffer),
@@ -57,6 +97,13 @@ export class DataAnalysisService {
     form.append('mode', mode);
     if (question) {
       form.append('question', question);
+    }
+    // Which sheet to run local/ai analysis against — the sheet picker (GET .../sheets above)
+    // lets the user choose one of the workbook's TABLE sheets rather than always defaulting to
+    // the first. Omitted entirely for a single-sheet upload or a caller that skipped the picker,
+    // in which case the Python service falls back to its pre-existing "sheet 0" default.
+    if (sheetName) {
+      form.append('sheet_name', sheetName);
     }
 
     // "ai" mode only: forward this tenant's own UI-configured provider chain (see
@@ -79,11 +126,25 @@ export class DataAnalysisService {
       }
     }
 
+    const body = await this.callService('/analyze', form);
+
+    // Only reaching here means a provider was actually invoked (a 503 below means
+    // LlmNotConfiguredError — no attempt was ever made, so it's not counted). The response's own
+    // `error` field distinguishes a successful call from one that reached a provider and failed.
+    if (mode === 'ai') {
+      const analysisError = body && typeof body === 'object' && 'error' in body ? (body as AnalysisResult).error : null;
+      void this.llmSettingsService.recordUsage(tenantId, 'data-analysis', !analysisError);
+    }
+
+    return body as AnalysisResult;
+  }
+
+  private async callService(path: string, form: FormData): Promise<unknown> {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
     let response: Response;
     try {
-      response = await fetch(`${this.serviceUrl}/analyze`, {
+      response = await fetch(`${this.serviceUrl}${path}`, {
         method: 'POST',
         body: form,
         signal: controller.signal,
@@ -109,14 +170,6 @@ export class DataAnalysisService {
       throw new BadGatewayException(`Data analysis service returned ${response.status}: ${detail}`);
     }
 
-    // Only a 200 response reaching here means a provider was actually invoked (a 503 above means
-    // LlmNotConfiguredError — no attempt was ever made, so it's not counted). The response's own
-    // `error` field distinguishes a successful call from one that reached a provider and failed.
-    if (mode === 'ai') {
-      const analysisError = body && typeof body === 'object' && 'error' in body ? (body as AnalysisResult).error : null;
-      void this.llmSettingsService.recordUsage(tenantId, 'data-analysis', !analysisError);
-    }
-
-    return body as AnalysisResult;
+    return body;
   }
 }

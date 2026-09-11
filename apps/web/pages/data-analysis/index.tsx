@@ -1,27 +1,34 @@
-import { Lock, Sparkles } from 'lucide-react';
+import { Check, Lock, Pin, ShieldHalf, Sparkles } from 'lucide-react';
 import type { GetServerSideProps } from 'next';
 import Head from 'next/head';
+import { useRouter } from 'next/router';
 import React, { useState } from 'react';
 
+import { ChartDataTable } from '../../components/data-analysis/ChartDataTable';
 import { AppHeader } from '../../components/layout/AppHeader';
 import { EmptyState } from '../../components/layout/EmptyState';
 import {
   analyzeSpreadsheet,
   ApiError,
+  createPinnedInsight,
+  getWorkbookSheets,
   listLlmProviderSettings,
   type AnalysisMode,
   type AnalysisResult,
+  type ExtractedChart,
   type LlmProviderSettingView,
+  type WorkbookSheetsResult,
 } from '../../lib/api';
 import { getAuthSession } from '../../lib/auth';
 
 interface DataAnalysisPageProps {
   accessToken: string;
   userEmail: string;
+  organisationId: string;
   configuredSlots: LlmProviderSettingView[];
 }
 
-type Step = 'select' | 'analyzing' | 'result';
+type Step = 'select' | 'reading' | 'sheets' | 'analyzing' | 'result';
 
 /**
  * A new, isolated feature: upload a spreadsheet and get either a zero-LLM, fully offline
@@ -29,8 +36,16 @@ type Step = 'select' | 'analyzing' | 'result';
  * natural-language analysis ("ai" — data is sent to whichever LLM chain the server has
  * configured). Deliberately its own page/route, not folded into the assessments import wizard —
  * this analyzes an arbitrary spreadsheet, not an assessment-shaped one.
+ *
+ * A real workbook is rarely one clean table: it commonly mixes data sheets with sheets someone
+ * already built as a dashboard (native charts/pivot tables). For an .xlsx/.xls with more than
+ * one sheet, or any dashboard sheet, this shows a sheet picker before analyzing — dashboard
+ * sheets' own charts are extracted with their real plotted data (not just a picture) and shown
+ * immediately, while a single ordinary table sheet skips the picker entirely to keep the
+ * one-click feel for the common case.
  */
-export default function DataAnalysisPage({ accessToken, userEmail, configuredSlots }: DataAnalysisPageProps) {
+export default function DataAnalysisPage({ accessToken, userEmail, organisationId, configuredSlots }: DataAnalysisPageProps) {
+  const router = useRouter();
   const [mode, setMode] = useState<AnalysisMode>('local');
   const [file, setFile] = useState<File | null>(null);
   const [question, setQuestion] = useState('');
@@ -39,16 +54,57 @@ export default function DataAnalysisPage({ accessToken, userEmail, configuredSlo
   const [result, setResult] = useState<AnalysisResult | null>(null);
   const [stepError, setStepError] = useState<string | null>(null);
 
-  async function handleAnalyze() {
+  const [sheetsResult, setSheetsResult] = useState<WorkbookSheetsResult | null>(null);
+  const [selectedSheet, setSelectedSheet] = useState<string | null>(null);
+  const [expandedChartKey, setExpandedChartKey] = useState<string | null>(null);
+  const [pinnedKeys, setPinnedKeys] = useState<Set<string>>(new Set());
+  const [pinBusyKey, setPinBusyKey] = useState<string | null>(null);
+
+  async function runAnalysis(sheetName: string | undefined) {
     if (!file) return;
     setStep('analyzing');
     setStepError(null);
     try {
-      const response = await analyzeSpreadsheet(accessToken, file, mode, mode === 'ai' ? question || undefined : undefined, mode === 'ai' ? slot : undefined);
+      const response = await analyzeSpreadsheet(
+        accessToken,
+        file,
+        mode,
+        mode === 'ai' ? question || undefined : undefined,
+        mode === 'ai' ? slot : undefined,
+        sheetName,
+      );
       setResult(response);
       setStep('result');
     } catch (err) {
       setStepError(err instanceof ApiError ? err.message : 'Analysis failed.');
+      setStep(sheetsResult ? 'sheets' : 'select');
+    }
+  }
+
+  async function handleContinue() {
+    if (!file) return;
+    setStepError(null);
+
+    if (file.name.toLowerCase().endsWith('.csv')) {
+      await runAnalysis(undefined);
+      return;
+    }
+
+    setStep('reading');
+    try {
+      const sheets = await getWorkbookSheets(accessToken, file);
+      const tableSheets = sheets.sheets.filter((s) => s.type === 'TABLE');
+      if (sheets.sheets.length === 1 && tableSheets.length === 1) {
+        // The common case — one ordinary table sheet, nothing to pick — skips straight to
+        // analysis rather than showing a picker with only one option in it.
+        await runAnalysis(tableSheets[0].name);
+        return;
+      }
+      setSheetsResult(sheets);
+      setSelectedSheet(tableSheets[0]?.name ?? null);
+      setStep('sheets');
+    } catch (err) {
+      setStepError(err instanceof ApiError ? err.message : 'Failed to read the workbook.');
       setStep('select');
     }
   }
@@ -59,7 +115,88 @@ export default function DataAnalysisPage({ accessToken, userEmail, configuredSlo
     setSlot(undefined);
     setResult(null);
     setStepError(null);
+    setSheetsResult(null);
+    setSelectedSheet(null);
+    setExpandedChartKey(null);
+    setPinnedKeys(new Set());
     setStep('select');
+  }
+
+  async function handlePin(key: string, title: string, imageBase64: string, chartData?: { categories: string[]; series: { name: string; values: number[] }[] }) {
+    setPinBusyKey(key);
+    setStepError(null);
+    try {
+      await createPinnedInsight(accessToken, {
+        organisationId,
+        title,
+        imageBase64,
+        chartData: chartData ? JSON.stringify(chartData) : undefined,
+        sourceFileName: file?.name,
+      });
+      setPinnedKeys((prev) => new Set(prev).add(key));
+    } catch (err) {
+      setStepError(err instanceof ApiError ? err.message : 'Failed to pin this chart to the dashboard.');
+    } finally {
+      setPinBusyKey(null);
+    }
+  }
+
+  function handleAddToRiskRegister() {
+    if (!result?.answer) return;
+    const firstLine = result.answer.split('\n')[0].slice(0, 100);
+    router.push({
+      pathname: '/risks/new',
+      query: { prefillTitle: `Finding from Data Analysis: ${firstLine}`, prefillDescription: result.answer },
+    });
+  }
+
+  function PinButton({ pinKey, title, imageBase64, chartData }: { pinKey: string; title: string; imageBase64: string; chartData?: { categories: string[]; series: { name: string; values: number[] }[] } }) {
+    const isPinned = pinnedKeys.has(pinKey);
+    return (
+      <button
+        type="button"
+        onClick={() => handlePin(pinKey, title, imageBase64, chartData)}
+        disabled={isPinned || pinBusyKey === pinKey}
+        className="flex items-center gap-1 text-xs text-slate-300 hover:text-white disabled:opacity-60 disabled:cursor-default transition-colors"
+      >
+        {isPinned ? (
+          <>
+            <Check className="h-3 w-3 text-emerald-400" /> Pinned to Dashboard
+          </>
+        ) : (
+          <>
+            <Pin className="h-3 w-3" /> Pin to Dashboard
+          </>
+        )}
+      </button>
+    );
+  }
+
+  function ExtractedChartCard({ chart, index }: { chart: ExtractedChart; index: number }) {
+    const key = `extracted-${chart.sheetName}-${index}`;
+    const isExpanded = expandedChartKey === key;
+    return (
+      <div className="bg-slate-900/60 rounded-md p-3 border border-slate-700">
+        <p className="text-slate-300 text-xs font-medium mb-2">
+          {chart.title} <span className="text-slate-500">· {chart.sheetName}</span>
+        </p>
+        <button type="button" onClick={() => setExpandedChartKey(isExpanded ? null : key)} className="block w-full">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src={`data:image/png;base64,${chart.imageBase64}`}
+            alt={chart.title}
+            className="w-full rounded cursor-pointer hover:opacity-90 transition-opacity"
+          />
+        </button>
+        <div className="flex items-center justify-between mt-2">
+          <button type="button" onClick={() => setExpandedChartKey(isExpanded ? null : key)} className="text-xs text-blue-400 hover:text-blue-300">
+            {isExpanded ? 'Hide data' : 'View underlying data'}
+          </button>
+          <PinButton pinKey={key} title={chart.title} imageBase64={chart.imageBase64} chartData={{ categories: chart.categories, series: chart.series }} />
+        </div>
+        {isExpanded && <ChartDataTable categories={chart.categories} series={chart.series} />}
+      </div>
+    );
   }
 
   return (
@@ -167,12 +304,100 @@ export default function DataAnalysisPage({ accessToken, userEmail, configuredSlo
               {stepError && <p className="text-sm text-red-400">{stepError}</p>}
 
               <button
-                onClick={handleAnalyze}
+                onClick={handleContinue}
                 disabled={!file}
                 className="bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white text-sm font-medium py-2 px-4 rounded-md transition-colors"
               >
                 Analyze
               </button>
+            </div>
+          )}
+
+          {step === 'reading' && (
+            <div className="bg-slate-800 rounded-lg p-8 border border-slate-700 text-center text-slate-400">
+              Reading the workbook&apos;s sheets…
+            </div>
+          )}
+
+          {step === 'sheets' && sheetsResult && (
+            <div className="space-y-4">
+              <div className="bg-slate-800 rounded-lg p-6 border border-slate-700">
+                <h2 className="text-white font-semibold mb-1">Choose a sheet to analyze</h2>
+                <p className="text-slate-400 text-sm mb-4">
+                  This workbook has {sheetsResult.sheets.length} sheets. Dashboard sheets already contain their own charts, shown
+                  below as-is; pick one of the data table sheets to run {mode === 'local' ? 'AutoViz' : 'AI'} analysis on.
+                </p>
+
+                <div className="space-y-2 mb-4">
+                  {sheetsResult.sheets.map((sheet) => (
+                    <label
+                      key={sheet.name}
+                      className={`flex items-center justify-between rounded-md border p-3 ${sheet.type === 'TABLE' ? 'cursor-pointer' : 'cursor-default opacity-80'} ${
+                        selectedSheet === sheet.name ? 'border-blue-500 bg-blue-950/20' : 'border-slate-700'
+                      }`}
+                    >
+                      <div className="flex items-center gap-3">
+                        {sheet.type === 'TABLE' && (
+                          <input
+                            type="radio"
+                            name="sheet"
+                            checked={selectedSheet === sheet.name}
+                            onChange={() => setSelectedSheet(sheet.name)}
+                          />
+                        )}
+                        <div>
+                          <p className="text-white text-sm font-medium">{sheet.name}</p>
+                          <p className="text-slate-500 text-xs">
+                            ~{sheet.rowCount} rows · {sheet.columnCount} columns
+                          </p>
+                        </div>
+                      </div>
+                      <span
+                        className={`text-xs px-2 py-1 rounded-full whitespace-nowrap ${
+                          sheet.type === 'DASHBOARD'
+                            ? 'bg-indigo-950/40 text-indigo-300 border border-indigo-800'
+                            : 'bg-slate-700 text-slate-300'
+                        }`}
+                      >
+                        {sheet.type === 'DASHBOARD' ? 'Dashboard sheet' : 'Data table'}
+                      </span>
+                    </label>
+                  ))}
+                </div>
+
+                {stepError && <p className="text-sm text-red-400 mb-3">{stepError}</p>}
+
+                <div className="flex items-center gap-2">
+                  {sheetsResult.sheets.some((s) => s.type === 'TABLE') ? (
+                    <button
+                      onClick={() => runAnalysis(selectedSheet ?? undefined)}
+                      disabled={!selectedSheet}
+                      className="bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white text-sm font-medium py-2 px-4 rounded-md transition-colors"
+                    >
+                      Analyze &quot;{selectedSheet}&quot;
+                    </button>
+                  ) : (
+                    <p className="text-slate-500 text-sm">No data table sheet found — only this workbook&apos;s own charts are shown below.</p>
+                  )}
+                  <button
+                    onClick={handleReset}
+                    className="bg-slate-700 hover:bg-slate-600 text-white text-sm font-medium py-2 px-4 rounded-md transition-colors"
+                  >
+                    Start Over
+                  </button>
+                </div>
+              </div>
+
+              {sheetsResult.extractedCharts.length > 0 && (
+                <div className="bg-slate-800 rounded-lg p-6 border border-slate-700">
+                  <h2 className="text-white font-semibold mb-4">Charts already in this workbook</h2>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    {sheetsResult.extractedCharts.map((chart, i) => (
+                      <ExtractedChartCard key={`${chart.sheetName}-${i}`} chart={chart} index={i} />
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
           )}
 
@@ -204,7 +429,17 @@ export default function DataAnalysisPage({ accessToken, userEmail, configuredSlo
                 {result.error && <p className="text-sm text-red-400 mb-4">{result.error}</p>}
 
                 {result.answer && (
-                  <div className="bg-slate-900/60 rounded-md p-4 mb-4 text-slate-200 text-sm whitespace-pre-wrap">{result.answer}</div>
+                  <div className="bg-slate-900/60 rounded-md p-4 mb-4">
+                    <p className="text-slate-200 text-sm whitespace-pre-wrap">{result.answer}</p>
+                    <button
+                      type="button"
+                      onClick={handleAddToRiskRegister}
+                      className="mt-3 flex items-center gap-1.5 text-xs text-blue-400 hover:text-blue-300 transition-colors"
+                    >
+                      <ShieldHalf className="h-3.5 w-3.5" />
+                      Add to Risk Register
+                    </button>
+                  </div>
                 )}
 
                 {result.table && result.table.length > 0 && (
@@ -240,15 +475,26 @@ export default function DataAnalysisPage({ accessToken, userEmail, configuredSlo
 
                 {result.charts.length > 0 && (
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                    {result.charts.map((chart, i) => (
-                      <div key={i} className="bg-slate-900/60 rounded-md p-3 border border-slate-700">
-                        <p className="text-slate-300 text-xs font-medium mb-2">{chart.title}</p>
-                        {/* eslint-disable-next-line @next/next/no-img-element */}
-                        <img src={`data:image/png;base64,${chart.imageBase64}`} alt={chart.title} className="w-full rounded" />
-                      </div>
-                    ))}
+                    {result.charts.map((chart, i) => {
+                      const key = `generated-${i}`;
+                      return (
+                        <div key={i} className="bg-slate-900/60 rounded-md p-3 border border-slate-700">
+                          <p className="text-slate-300 text-xs font-medium mb-2">{chart.title}</p>
+                          {/* eslint-disable-next-line @next/next/no-img-element */}
+                          <img src={`data:image/png;base64,${chart.imageBase64}`} alt={chart.title} className="w-full rounded" />
+                          {/* No click-to-expand here — AutoViz/PandasAI hand back a rendered image only, with no
+                              way to recover which exact data points it plotted, unlike a workbook's own embedded
+                              dashboard-sheet charts above. */}
+                          <div className="mt-2">
+                            <PinButton pinKey={key} title={chart.title} imageBase64={chart.imageBase64} />
+                          </div>
+                        </div>
+                      );
+                    })}
                   </div>
                 )}
+
+                {stepError && <p className="text-sm text-red-400 mt-4">{stepError}</p>}
               </div>
 
               <button
@@ -282,5 +528,12 @@ export const getServerSideProps: GetServerSideProps<DataAnalysisPageProps> = asy
     configuredSlots = [];
   }
 
-  return { props: { accessToken: session.accessToken, userEmail: session.user?.email ?? '', configuredSlots } };
+  return {
+    props: {
+      accessToken: session.accessToken,
+      userEmail: session.user?.email ?? '',
+      organisationId: session.organisationId ?? '',
+      configuredSlots,
+    },
+  };
 };
