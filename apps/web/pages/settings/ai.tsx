@@ -1,4 +1,4 @@
-import { CheckCircle2, KeyRound, Loader2, Sparkles, Trash2, XCircle } from 'lucide-react';
+import { CheckCircle2, Gauge, KeyRound, Loader2, Sparkles, Trash2, XCircle } from 'lucide-react';
 import type { GetServerSideProps } from 'next';
 import Head from 'next/head';
 import React, { useState } from 'react';
@@ -7,11 +7,14 @@ import { AppHeader } from '../../components/layout/AppHeader';
 import {
   ApiError,
   deleteLlmProviderSetting,
+  getLlmUsageSummary,
   listLlmProviderSettings,
   testLlmProviderSetting,
+  updateLlmUsageLimit,
   upsertLlmProviderSetting,
   type LlmProviderFormat,
   type LlmProviderSettingView,
+  type LlmUsageSummary,
 } from '../../lib/api';
 import { getAuthSession } from '../../lib/auth';
 import { hasAnyRole, LLM_SETTINGS_WRITE_ROLES } from '../../lib/roles';
@@ -21,6 +24,7 @@ interface AiSettingsPageProps {
   userEmail: string;
   canEdit: boolean;
   initialSettings: LlmProviderSettingView[];
+  initialUsage: LlmUsageSummary | null;
   loadError: string | null;
 }
 
@@ -59,7 +63,7 @@ function statusBadge(setting: LlmProviderSettingView) {
  * Once a slot is configured here, both the import wizard's column-mapping suggestions and the
  * Data Analysis page's "ai" mode run on this tenant's own key (see apps/api/src/llm-settings).
  */
-export default function AiSettingsPage({ accessToken, userEmail, canEdit, initialSettings, loadError }: AiSettingsPageProps) {
+export default function AiSettingsPage({ accessToken, userEmail, canEdit, initialSettings, initialUsage, loadError }: AiSettingsPageProps) {
   const [settings, setSettings] = useState(initialSettings);
   const [forms, setForms] = useState<Record<number, SlotFormState>>(() =>
     Object.fromEntries(initialSettings.map((s) => [s.slot, emptyForm(s)])),
@@ -68,6 +72,25 @@ export default function AiSettingsPage({ accessToken, userEmail, canEdit, initia
   const [busySlot, setBusySlot] = useState<number | null>(null);
   const [testResults, setTestResults] = useState<Record<number, { ok: boolean; error?: string } | undefined>>({});
   const [errors, setErrors] = useState<Record<number, string | undefined>>({});
+
+  const [usage, setUsage] = useState(initialUsage);
+  const [limitInput, setLimitInput] = useState(initialUsage?.dailyCallLimit ? String(initialUsage.dailyCallLimit) : '');
+  const [usageBusy, setUsageBusy] = useState(false);
+  const [usageError, setUsageError] = useState<string | null>(null);
+
+  async function handleSaveLimit() {
+    setUsageBusy(true);
+    setUsageError(null);
+    try {
+      const dailyCallLimit = limitInput.trim() ? Number(limitInput) : null;
+      const updated = await updateLlmUsageLimit(accessToken, dailyCallLimit);
+      setUsage(updated);
+    } catch (err) {
+      setUsageError(err instanceof ApiError ? err.message : 'Failed to update the usage limit.');
+    } finally {
+      setUsageBusy(false);
+    }
+  }
 
   function updateForm(slot: number, patch: Partial<SlotFormState>) {
     setForms((prev) => ({ ...prev, [slot]: { ...prev[slot], ...patch } }));
@@ -155,6 +178,55 @@ export default function AiSettingsPage({ accessToken, userEmail, canEdit, initia
           )}
 
           {loadError && <p className="text-sm text-red-400 mb-6">{loadError}</p>}
+
+          {usage && (
+            <div className="bg-slate-800 rounded-lg p-5 border border-slate-700 mb-6">
+              <div className="flex items-center gap-2 mb-3">
+                <Gauge className="h-4 w-4 text-slate-400" />
+                <h2 className="text-white font-semibold">Usage Today</h2>
+              </div>
+              <p className="text-sm text-slate-300 mb-3">
+                <span className="text-2xl font-semibold text-white">{usage.todayCallCount}</span>{' '}
+                {usage.dailyCallLimit ? `/ ${usage.dailyCallLimit}` : ''} AI-assisted calls today (column-mapping suggestions +
+                Data Analysis&apos;s AI-Powered mode combined). {usage.dailyCallLimit ? '' : 'No daily limit is set — unlimited.'}
+              </p>
+              {canEdit && (
+                <div className="flex items-center gap-2">
+                  <label htmlFor="daily-limit-input" className="text-xs font-medium text-slate-400">
+                    Daily limit
+                  </label>
+                  <input
+                    id="daily-limit-input"
+                    type="number"
+                    min={1}
+                    value={limitInput}
+                    onChange={(e) => setLimitInput(e.target.value)}
+                    placeholder="Unlimited"
+                    className="w-28 rounded-md bg-slate-900 border border-slate-600 px-3 py-1.5 text-sm text-white placeholder:text-slate-600"
+                  />
+                  <button
+                    onClick={handleSaveLimit}
+                    disabled={usageBusy}
+                    className="bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white text-sm font-medium py-1.5 px-3 rounded-md transition-colors flex items-center gap-1.5"
+                  >
+                    {usageBusy && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+                    Save
+                  </button>
+                  {limitInput && (
+                    <button
+                      onClick={() => {
+                        setLimitInput('');
+                      }}
+                      className="text-slate-400 hover:text-white text-sm py-1.5 px-2"
+                    >
+                      Clear (unlimited)
+                    </button>
+                  )}
+                </div>
+              )}
+              {usageError && <p className="mt-2 text-sm text-red-400">{usageError}</p>}
+            </div>
+          )}
 
           <div className="space-y-4">
             {settings.map((setting) => {
@@ -332,8 +404,13 @@ export const getServerSideProps: GetServerSideProps<AiSettingsPageProps> = async
 
   const canEdit = hasAnyRole(session.roles ?? [], LLM_SETTINGS_WRITE_ROLES);
   try {
-    const initialSettings = await listLlmProviderSettings(session.accessToken);
-    return { props: { accessToken: session.accessToken, userEmail: session.user?.email ?? '', canEdit, initialSettings, loadError: null } };
+    const [initialSettings, initialUsage] = await Promise.all([
+      listLlmProviderSettings(session.accessToken),
+      getLlmUsageSummary(session.accessToken),
+    ]);
+    return {
+      props: { accessToken: session.accessToken, userEmail: session.user?.email ?? '', canEdit, initialSettings, initialUsage, loadError: null },
+    };
   } catch (error) {
     return {
       props: {
@@ -341,6 +418,7 @@ export const getServerSideProps: GetServerSideProps<AiSettingsPageProps> = async
         userEmail: session.user?.email ?? '',
         canEdit,
         initialSettings: [],
+        initialUsage: null,
         loadError: error instanceof ApiError ? error.message : 'Failed to load AI settings.',
       },
     };

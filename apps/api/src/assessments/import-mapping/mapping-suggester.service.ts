@@ -50,11 +50,22 @@ export class ImportMappingSuggesterService {
       return { mapping: {}, configured: true };
     }
 
+    // A capped tenant degrades the same as any other failure mode here — this is a best-effort
+    // assist, not something worth surfacing a hard error over on an otherwise-working import.
+    try {
+      await this.llmSettingsService.assertUnderUsageLimit(tenantId);
+    } catch (error) {
+      llmClientLogger.warn(`Column-mapping suggestion skipped: ${error instanceof Error ? error.message : String(error)}`);
+      return { mapping: {}, configured: true };
+    }
+
     try {
       const userPrompt = this.buildUserPrompt(headers, sampleRows, unmappedColumns);
       const raw = await client.complete(SYSTEM_PROMPT, userPrompt);
+      void this.llmSettingsService.recordUsage(tenantId, 'import-mapping', true);
       return { mapping: this.parseAndValidate(raw, headers, unmappedColumns), configured: true };
     } catch (error) {
+      void this.llmSettingsService.recordUsage(tenantId, 'import-mapping', false);
       llmClientLogger.warn(`Column-mapping suggestion skipped: ${error instanceof Error ? error.message : String(error)}`);
       return { mapping: {}, configured: true };
     }

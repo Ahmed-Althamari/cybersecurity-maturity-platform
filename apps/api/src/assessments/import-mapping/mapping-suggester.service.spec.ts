@@ -17,7 +17,11 @@ function fakeClient(response: string | Error): LlmClient {
 }
 
 function fakeLlmSettingsService(client: LlmClient | null): LlmSettingsService {
-  return { resolveClientForTenant: jest.fn().mockResolvedValue(client) } as unknown as LlmSettingsService;
+  return {
+    resolveClientForTenant: jest.fn().mockResolvedValue(client),
+    assertUnderUsageLimit: jest.fn().mockResolvedValue(undefined),
+    recordUsage: jest.fn().mockResolvedValue(undefined),
+  } as unknown as LlmSettingsService;
 }
 
 describe('ImportMappingSuggesterService', () => {
@@ -88,5 +92,37 @@ describe('ImportMappingSuggesterService', () => {
     const service = new ImportMappingSuggesterService(llmSettingsService);
     await service.suggestMapping(['A'], [['1']], [], TENANT_ID);
     expect(llmSettingsService.resolveClientForTenant).toHaveBeenCalledWith(TENANT_ID);
+  });
+
+  it('degrades to an empty mapping, without calling the client, when the tenant is over its usage limit', async () => {
+    const client = fakeClient('{"Current_Maturity":"Score"}');
+    const llmSettingsService = fakeLlmSettingsService(client);
+    llmSettingsService.assertUnderUsageLimit = jest.fn().mockRejectedValue(new Error('Daily AI usage limit of 10 calls reached'));
+    const service = new ImportMappingSuggesterService(llmSettingsService);
+
+    const result = await service.suggestMapping(['Score'], [['3']], ['Current_Maturity'], TENANT_ID);
+
+    expect(result).toEqual({ mapping: {}, configured: true });
+    expect(client.complete).not.toHaveBeenCalled();
+  });
+
+  it('records a successful usage event after a real completion', async () => {
+    const client = fakeClient('{}');
+    const llmSettingsService = fakeLlmSettingsService(client);
+    const service = new ImportMappingSuggesterService(llmSettingsService);
+
+    await service.suggestMapping(['A'], [['1']], ['Current_Maturity'], TENANT_ID);
+
+    expect(llmSettingsService.recordUsage).toHaveBeenCalledWith(TENANT_ID, 'import-mapping', true);
+  });
+
+  it('records a failed usage event when the client errors', async () => {
+    const client = fakeClient(new Error('network down'));
+    const llmSettingsService = fakeLlmSettingsService(client);
+    const service = new ImportMappingSuggesterService(llmSettingsService);
+
+    await service.suggestMapping(['A'], [['1']], ['Current_Maturity'], TENANT_ID);
+
+    expect(llmSettingsService.recordUsage).toHaveBeenCalledWith(TENANT_ID, 'import-mapping', false);
   });
 });
