@@ -5,6 +5,8 @@
 export const RISK_WRITE_ROLES = ['PLATFORM_ADMIN', 'ORGANISATION_ADMIN', 'CISO', 'GRC_MANAGER', 'SECURITY_ARCHITECT'];
 export const RISK_DELETE_ROLES = ['PLATFORM_ADMIN', 'ORGANISATION_ADMIN'];
 export const LLM_SETTINGS_WRITE_ROLES = ['PLATFORM_ADMIN', 'ORGANISATION_ADMIN'];
+// Mirrors AUDIT_READ_ROLES in apps/api/src/audit/audit.controller.ts.
+export const AUDIT_READ_ROLES = ['PLATFORM_ADMIN', 'ORGANISATION_ADMIN', 'CISO', 'AUDITOR', 'GRC_MANAGER'];
 
 export function hasAnyRole(userRoles: string[], allowed: string[]): boolean {
   return userRoles.some((role) => allowed.includes(role));

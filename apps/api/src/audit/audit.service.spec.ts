@@ -11,7 +11,8 @@ describe('AuditService', () => {
   let prisma: { auditEvent: MockModel };
 
   beforeEach(() => {
-    prisma = { auditEvent: { create: jest.fn(), findMany: jest.fn(), findFirst: jest.fn() } };
+    prisma = { auditEvent: { create: jest.fn(), findMany: jest.fn(), findFirst: jest.fn(), count: jest.fn() } };
+    prisma.auditEvent.count.mockResolvedValue(0);
     service = new AuditService(prisma as unknown as PrismaService);
   });
 
@@ -56,6 +57,17 @@ describe('AuditService', () => {
 
       const whereArg = prisma.auditEvent.findMany.mock.calls[0][0].where;
       expect(whereArg.createdAt).toEqual({ gte: new Date('2026-01-01T00:00:00.000Z'), lte: new Date('2026-02-01T00:00:00.000Z') });
+    });
+
+    it('returns both the page of rows and the total matching count', async () => {
+      const rows = [{ id: 'event-1' }];
+      prisma.auditEvent.findMany.mockResolvedValueOnce(rows);
+      prisma.auditEvent.count.mockResolvedValueOnce(42);
+
+      const result = await service.findAll('tenant-a', {});
+
+      expect(result).toEqual({ data: rows, total: 42 });
+      expect(prisma.auditEvent.count).toHaveBeenCalledWith({ where: expect.objectContaining({ tenantId: 'tenant-a' }) });
     });
   });
 
