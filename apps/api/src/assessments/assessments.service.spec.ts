@@ -35,7 +35,7 @@ const scoreableFramework = {
 
 describe('AssessmentsService', () => {
   let service: AssessmentsService;
-  let mappingSuggester: { isConfigured: boolean; suggestMapping: jest.Mock };
+  let mappingSuggester: { suggestMapping: jest.Mock };
   let prisma: {
     organisation: MockModel;
     framework: MockModel;
@@ -59,7 +59,7 @@ describe('AssessmentsService', () => {
       $transaction: jest.fn((operations: unknown[]) => Promise.all(operations)),
     };
 
-    mappingSuggester = { isConfigured: false, suggestMapping: jest.fn().mockResolvedValue({}) };
+    mappingSuggester = { suggestMapping: jest.fn().mockResolvedValue({ mapping: {}, configured: false }) };
     service = new AssessmentsService(prisma as unknown as PrismaService, mappingSuggester as unknown as ImportMappingSuggesterService);
   });
 
@@ -478,7 +478,7 @@ describe('AssessmentsService', () => {
 
     it('reports the LLM as unconfigured and skips calling it when nothing is unmapped', async () => {
       prisma.assessment.findFirst.mockResolvedValueOnce(baseAssessment);
-      mappingSuggester.isConfigured = false;
+      mappingSuggester.suggestMapping.mockResolvedValueOnce({ mapping: {}, configured: false });
 
       const result = await service.previewImport('a1', 'tenant-a', csvFile('Control_ID,Current_Maturity\nGV.RM-01,DEVELOPING'));
 
@@ -489,14 +489,30 @@ describe('AssessmentsService', () => {
 
     it('merges an LLM-suggested mapping into the final result when one is returned', async () => {
       prisma.assessment.findFirst.mockResolvedValueOnce(baseAssessment);
-      mappingSuggester.isConfigured = true;
-      mappingSuggester.suggestMapping.mockResolvedValueOnce({ Current_Maturity: 'Maturity Score (Now)' });
+      mappingSuggester.suggestMapping.mockResolvedValueOnce({
+        mapping: { Current_Maturity: 'Maturity Score (Now)' },
+        configured: true,
+      });
 
       const result = await service.previewImport('a1', 'tenant-a', csvFile('Control_ID,Maturity Score (Now)\nGV.RM-01,DEVELOPING'));
 
+      expect(result.llmConfigured).toBe(true);
       expect(result.llmSuggestedColumns).toEqual(['Current_Maturity']);
       expect(result.columnMapping.Current_Maturity).toBe('Maturity Score (Now)');
       expect(result.unmappedColumns).not.toContain('Current_Maturity');
+    });
+
+    it('passes the tenant id through to the mapping suggester', async () => {
+      prisma.assessment.findFirst.mockResolvedValueOnce(baseAssessment);
+
+      await service.previewImport('a1', 'tenant-a', csvFile('Control_ID,Current_Maturity\nGV.RM-01,DEVELOPING'));
+
+      expect(mappingSuggester.suggestMapping).toHaveBeenCalledWith(
+        expect.any(Array),
+        expect.any(Array),
+        expect.any(Array),
+        'tenant-a',
+      );
     });
   });
 });
