@@ -576,3 +576,51 @@ export function testLlmProviderSetting(accessToken: string, slot: number, input?
     body: JSON.stringify(input ?? {}),
   });
 }
+
+// ============================================================================
+// AUDIT LOG — every CREATE/UPDATE/DELETE/LOGIN/etc. action, recorded server-side
+// by @AuditLog() (apps/api/src/audit). Read-only from the UI; rows are immutable.
+// ============================================================================
+
+export type AuditAction = 'LOGIN' | 'LOGOUT' | 'CREATE' | 'UPDATE' | 'DELETE' | 'UPLOAD' | 'DOWNLOAD' | 'EXPORT' | 'IMPORT';
+
+export interface AuditEventRecord {
+  id: string;
+  action: AuditAction;
+  resource: string;
+  resourceId: string | null;
+  description: string | null;
+  previousValue: string | null;
+  newValue: string | null;
+  ipAddress: string | null;
+  userAgent: string | null;
+  correlationId: string | null;
+  createdAt: string;
+  user: { id: string; name: string; email: string } | null;
+}
+
+export interface AuditEventPage {
+  data: AuditEventRecord[];
+  total: number;
+}
+
+export interface AuditEventFilters {
+  action?: AuditAction;
+  resource?: string;
+  from?: string;
+  to?: string;
+  limit?: number;
+  offset?: number;
+}
+
+export function listAuditEvents(accessToken: string, filters: AuditEventFilters = {}) {
+  const params: Record<string, string> = {};
+  if (filters.action) params.action = filters.action;
+  if (filters.resource) params.resource = filters.resource;
+  if (filters.from) params.from = filters.from;
+  if (filters.to) params.to = filters.to;
+  if (filters.limit) params.limit = String(filters.limit);
+  if (filters.offset) params.offset = String(filters.offset);
+  const query = new URLSearchParams(params);
+  return apiFetch<AuditEventPage>(`/audit-events?${query}`, accessToken);
+}

@@ -43,20 +43,27 @@ export class AuditService {
   async findAll(tenantId: string, filters: QueryAuditEventsDto = {}) {
     const { userId, action, resource, resourceId, from, to, limit = 50, offset = 0 } = filters;
 
-    return this.prisma.auditEvent.findMany({
-      where: {
-        tenantId,
-        userId,
-        action,
-        resource,
-        resourceId,
-        createdAt: from || to ? { gte: from ? new Date(from) : undefined, lte: to ? new Date(to) : undefined } : undefined,
-      },
-      include: { user: { select: { id: true, name: true, email: true } } },
-      orderBy: { createdAt: 'desc' },
-      take: limit,
-      skip: offset,
-    });
+    const where = {
+      tenantId,
+      userId,
+      action,
+      resource,
+      resourceId,
+      createdAt: from || to ? { gte: from ? new Date(from) : undefined, lte: to ? new Date(to) : undefined } : undefined,
+    };
+
+    const [data, total] = await Promise.all([
+      this.prisma.auditEvent.findMany({
+        where,
+        include: { user: { select: { id: true, name: true, email: true } } },
+        orderBy: { createdAt: 'desc' },
+        take: limit,
+        skip: offset,
+      }),
+      this.prisma.auditEvent.count({ where }),
+    ]);
+
+    return { data, total };
   }
 
   async findOne(id: string, tenantId: string) {
