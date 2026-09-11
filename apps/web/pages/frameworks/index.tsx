@@ -1,4 +1,4 @@
-import { Boxes } from 'lucide-react';
+import { Boxes, GitCompare } from 'lucide-react';
 import type { GetServerSideProps } from 'next';
 import Head from 'next/head';
 import Link from 'next/link';
@@ -23,9 +23,20 @@ export default function FrameworksPage({ frameworks, errorMessage }: FrameworksP
       <div className="min-h-screen bg-gradient-to-b from-slate-900 to-slate-800">
         <AppHeader />
         <div className="container mx-auto px-4 py-8">
-          <div className="mb-8">
-            <h1 className="text-3xl font-bold text-white">Frameworks</h1>
-            <p className="text-slate-400 text-sm mt-1">Every framework loaded for your tenant.</p>
+          <div className="mb-8 flex items-start justify-between gap-4">
+            <div>
+              <h1 className="text-3xl font-bold text-white">Frameworks</h1>
+              <p className="text-slate-400 text-sm mt-1">Every framework loaded for your tenant.</p>
+            </div>
+            {frameworks.length >= 2 && (
+              <Link
+                href="/frameworks/mappings"
+                className="inline-flex items-center gap-2 bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 text-sm px-4 py-2 rounded-lg transition-colors shrink-0"
+              >
+                <GitCompare className="w-4 h-4" />
+                Cross-framework mappings
+              </Link>
+            )}
           </div>
 
           {errorMessage && <div className="bg-red-950/40 border border-red-800 text-red-300 rounded-lg p-4 mb-6">{errorMessage}</div>}

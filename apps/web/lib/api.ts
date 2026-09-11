@@ -646,3 +646,63 @@ export function listAuditEvents(accessToken: string, filters: AuditEventFilters 
   const query = new URLSearchParams(params);
   return apiFetch<AuditEventPage>(`/audit-events?${query}`, accessToken);
 }
+
+// ============================================================================
+// CONTROL MAPPINGS — a tenant's own crosswalk between two of its loaded frameworks (e.g. NIST
+// CSF to ISO 27001). See apps/api/src/control-mappings.
+// ============================================================================
+
+export type ControlMappingRelationship = 'EQUIVALENT' | 'PARTIAL' | 'RELATED';
+
+export interface FrameworkSubcategorySummary {
+  id: string;
+  code: string;
+  name: string;
+  categoryCode: string;
+  categoryName: string;
+  functionCode: string;
+  functionName: string;
+}
+
+export interface FrameworkCrosswalkSide {
+  id: string;
+  name: string;
+  subcategories: FrameworkSubcategorySummary[];
+}
+
+export interface ControlMappingRecord {
+  id: string;
+  sourceSubcategoryId: string;
+  targetSubcategoryId: string;
+  relationship: ControlMappingRelationship;
+  notes: string | null;
+}
+
+export interface FrameworkCrosswalk {
+  sourceFramework: FrameworkCrosswalkSide;
+  targetFramework: FrameworkCrosswalkSide;
+  mappings: ControlMappingRecord[];
+}
+
+export function getFrameworkCrosswalk(accessToken: string, sourceFrameworkId: string, targetFrameworkId: string) {
+  const query = new URLSearchParams({ sourceFrameworkId, targetFrameworkId });
+  return apiFetch<FrameworkCrosswalk>(`/control-mappings?${query}`, accessToken);
+}
+
+export interface CreateControlMappingInput {
+  sourceSubcategoryId: string;
+  targetSubcategoryId: string;
+  relationship: ControlMappingRelationship;
+  notes?: string;
+}
+
+export function createControlMapping(accessToken: string, input: CreateControlMappingInput) {
+  return apiFetch<ControlMappingRecord>('/control-mappings', accessToken, {
+    method: 'POST',
+    body: JSON.stringify(input),
+  });
+}
+
+export function deleteControlMapping(accessToken: string, id: string) {
+  return apiFetch<{ message: string }>(`/control-mappings/${id}`, accessToken, { method: 'DELETE' });
+}
