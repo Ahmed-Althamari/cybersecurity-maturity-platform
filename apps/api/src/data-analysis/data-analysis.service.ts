@@ -42,7 +42,13 @@ export class DataAnalysisService {
 
   constructor(private readonly llmSettingsService: LlmSettingsService) {}
 
-  async analyze(file: Express.Multer.File, mode: AnalysisMode, question: string | undefined, tenantId: string): Promise<AnalysisResult> {
+  async analyze(
+    file: Express.Multer.File,
+    mode: AnalysisMode,
+    question: string | undefined,
+    tenantId: string,
+    slot?: number,
+  ): Promise<AnalysisResult> {
     const form = new FormData();
     // Buffer's `.buffer` is typed as ArrayBufferLike (it can back onto a SharedArrayBuffer),
     // which Blob's constructor doesn't accept — Uint8Array.from() copies into a plain,
@@ -57,9 +63,11 @@ export class DataAnalysisService {
     // apps/web/pages/settings/ai.tsx) if it has one, so the analysis actually runs on the
     // tenant's own credentials rather than the platform-wide env vars. `null` here (nothing
     // configured) means "let the Python service fall back to its own env-based resolution",
-    // identical to this feature's behaviour before UI-configurable settings existed.
+    // identical to this feature's behaviour before UI-configurable settings existed. `slot`,
+    // when given, restricts this to the one provider the user picked instead of the default
+    // full fallback chain.
     if (mode === 'ai') {
-      const providers = await this.llmSettingsService.resolveProviderChainForAnalysis(tenantId);
+      const providers = await this.llmSettingsService.resolveProviderChainForAnalysis(tenantId, slot);
       if (providers) {
         // snake_case to match the Python service's FastAPI Form field name (main.py's `llm_providers`).
         form.append('llm_providers', JSON.stringify(providers));

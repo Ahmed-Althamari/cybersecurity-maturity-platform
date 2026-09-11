@@ -517,12 +517,17 @@ export interface AnalysisResult {
  * data to whichever LLM chain the server has configured (see llm-client.ts) for natural-language
  * analysis beyond AutoViz's fixed chart set; `question` is only used in this mode.
  */
-export function analyzeSpreadsheet(accessToken: string, file: File, mode: AnalysisMode, question?: string) {
+export function analyzeSpreadsheet(accessToken: string, file: File, mode: AnalysisMode, question?: string, slot?: number) {
   const formData = new FormData();
   formData.append('file', file);
   formData.append('mode', mode);
   if (question) {
     formData.append('question', question);
+  }
+  // "ai" mode only: which single configured provider slot to use instead of the default full
+  // fallback chain (tried in slot order). Ignored server-side for "local" mode.
+  if (slot) {
+    formData.append('slot', String(slot));
   }
   return apiFetchFormData<AnalysisResult>('/data-analysis/analyze', accessToken, formData);
 }

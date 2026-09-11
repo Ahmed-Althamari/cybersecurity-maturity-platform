@@ -74,6 +74,24 @@ describe('DataAnalysisService', () => {
     expect(form.get('llm_providers')).toBe(JSON.stringify(providers));
   });
 
+  it('passes the picked slot through to resolveProviderChainForAnalysis', async () => {
+    const providers = [{ format: 'openai', baseUrl: 'https://api.groq.com/openai/v1', model: 'llama-3.3-70b-versatile', apiKey: 'gsk-test' }];
+    const fetchMock = jest.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ mode: 'ai', rowCount: 1, columnCount: 2, columns: [], charts: [], answer: 'ok', table: null, error: null }),
+    });
+    global.fetch = fetchMock as unknown as typeof fetch;
+    const llmSettingsService = fakeLlmSettingsService(providers);
+
+    const service = new DataAnalysisService(llmSettingsService);
+    await service.analyze(fakeFile(), 'ai', undefined, TENANT_ID, 2);
+
+    expect(llmSettingsService.resolveProviderChainForAnalysis).toHaveBeenCalledWith(TENANT_ID, 2);
+    const [, init] = fetchMock.mock.calls[0];
+    const form = init.body as FormData;
+    expect(form.get('llm_providers')).toBe(JSON.stringify(providers));
+  });
+
   it('omits the llmProviders field in "ai" mode when the tenant has configured nothing', async () => {
     const fetchMock = jest.fn().mockResolvedValue({
       ok: true,
