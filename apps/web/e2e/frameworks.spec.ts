@@ -9,7 +9,9 @@ test.describe('Frameworks', () => {
     await page.goto('/frameworks');
     await expect(page.getByRole('heading', { name: 'Frameworks' })).toBeVisible();
 
-    const firstFramework = page.locator('a[href^="/frameworks/"]').first();
+    // Scoped to h2-bearing cards, not any a[href^="/frameworks/"] — the page also has a top-level
+    // "Cross-framework mappings" link (visible once 2+ frameworks exist) matching that same prefix.
+    const firstFramework = page.locator('a[href^="/frameworks/"]').filter({ has: page.locator('h2') }).first();
     await expect(firstFramework).toBeVisible();
     const frameworkName = await firstFramework.locator('h2').innerText();
     await firstFramework.click();

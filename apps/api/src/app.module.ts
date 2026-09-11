@@ -7,6 +7,7 @@ import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
 import { AssessmentsModule } from './assessments/assessments.module';
 import { AuditModule } from './audit/audit.module';
 import { AuthModule } from './auth/auth.module';
+import { ControlMappingsModule } from './control-mappings/control-mappings.module';
 import { DashboardModule } from './dashboard/dashboard.module';
 import { DataAnalysisModule } from './data-analysis/data-analysis.module';
 import { FrameworksModule } from './frameworks/frameworks.module';
@@ -43,6 +44,7 @@ import { UsersModule } from './users/users.module';
     AuthModule,
     UsersModule,
     FrameworksModule,
+    ControlMappingsModule,
     AssessmentsModule,
     DashboardModule,
     RisksModule,

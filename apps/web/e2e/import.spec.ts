@@ -23,13 +23,17 @@ async function createDraftAssessment(page: Page): Promise<{ id: string; accessTo
     headers: { Authorization: `Bearer ${accessToken}` },
   });
   const frameworks = await frameworksResponse.json();
+  // Not frameworks[0] — control-mappings.spec.ts (and any other spec) may have imported
+  // additional frameworks that sort before NIST CSF alphabetically (GET /frameworks orders by
+  // name). The CSV below uses real NIST CSF subcategory codes, so it must target that framework.
+  const nistFramework = frameworks.find((f: { slug: string }) => f.slug === 'nist-csf');
 
   const assessmentResponse = await fetch(`${API_URL}/api/v1/assessments`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${accessToken}` },
     body: JSON.stringify({
       organisationId: session.organisationId,
-      frameworkId: frameworks[0].id,
+      frameworkId: nistFramework.id,
       name: `E2E import test ${Date.now()}`,
     }),
   });
