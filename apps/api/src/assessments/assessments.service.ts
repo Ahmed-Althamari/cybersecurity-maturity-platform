@@ -303,7 +303,12 @@ export class AssessmentsService {
     const { sheet, sheetNames } = await this.parseUploadedSheet(file, worksheetName);
 
     const autoResult = importFromSheet(sheet);
-    const llmSuggested = await this.mappingSuggester.suggestMapping(sheet.headers, sheet.rows, autoResult.unmappedColumns);
+    const { mapping: llmSuggested, configured: llmConfigured } = await this.mappingSuggester.suggestMapping(
+      sheet.headers,
+      sheet.rows,
+      autoResult.unmappedColumns,
+      tenantId,
+    );
     const finalResult =
       Object.keys(llmSuggested).length > 0 ? importFromSheet(sheet, { columnMapping: llmSuggested }) : autoResult;
 
@@ -312,7 +317,7 @@ export class AssessmentsService {
       headers: sheet.headers,
       columnMapping: finalResult.columnMapping,
       unmappedColumns: finalResult.unmappedColumns,
-      llmConfigured: this.mappingSuggester.isConfigured,
+      llmConfigured,
       llmSuggestedColumns: Object.keys(llmSuggested) as CanonicalColumn[],
       totalRows: finalResult.totalRows,
       validCount: finalResult.valid.length,

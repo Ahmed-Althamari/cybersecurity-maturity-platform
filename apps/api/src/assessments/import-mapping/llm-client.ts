@@ -134,9 +134,6 @@ export class FallbackLlmClient implements LlmClient {
   }
 }
 
-/** DI token for `LlmClient | null` — plain interfaces have no runtime identity, so Nest can't use the type itself as a token. */
-export const LLM_CLIENT = Symbol('LLM_CLIENT');
-
 export type ProviderFormat = 'openai' | 'anthropic';
 
 export interface ProviderDefaults {

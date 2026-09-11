@@ -1,7 +1,9 @@
 import type { CanonicalColumn, ColumnMapping } from '@cmmp/import-engine';
-import { Inject, Injectable } from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
 
-import { LLM_CLIENT, llmClientLogger, type LlmClient } from './llm-client';
+import { LlmSettingsService } from '../../llm-settings/llm-settings.service';
+
+import { llmClientLogger } from './llm-client';
 
 const SAMPLE_ROW_COUNT = 5;
 const MAX_HEADER_LENGTH = 200;
@@ -13,32 +15,48 @@ mapping canonical field name -> the single best-matching header string from the 
 canonical field entirely if nothing in the file plausibly corresponds to it — never invent a header \
 that isn't in the provided list, and never guess when unsure. Reply with JSON only, no prose.`;
 
+export interface MappingSuggestionResult {
+  mapping: ColumnMapping;
+  /** Whether an LLM provider was available for this tenant — independent of whether it actually produced any suggestions. */
+  configured: boolean;
+}
+
 /**
  * Best-effort LLM assist for columns `autoMapColumns` (exact-name/alias matching) couldn't
  * resolve — e.g. a file using "Maturity Score (Now)" instead of any known alias for
  * `Current_Maturity`. Never blocks or fails an import: any error, timeout, or malformed response
  * here just means fewer columns get suggested, not a broken import.
+ *
+ * Resolves its LLM client per tenant via `LlmSettingsService` — a tenant's own UI-configured
+ * credentials (apps/web/pages/settings/ai.tsx) take over when present, otherwise it falls back
+ * to the platform-wide env-based chain, exactly as this feature behaved before tenants could
+ * configure their own.
  */
 @Injectable()
 export class ImportMappingSuggesterService {
-  constructor(@Inject(LLM_CLIENT) private readonly client: LlmClient | null) {}
+  constructor(private readonly llmSettingsService: LlmSettingsService) {}
 
-  get isConfigured(): boolean {
-    return this.client !== null;
-  }
-
-  async suggestMapping(headers: string[], sampleRows: string[][], unmappedColumns: CanonicalColumn[]): Promise<ColumnMapping> {
-    if (!this.client || unmappedColumns.length === 0) {
-      return {};
+  async suggestMapping(
+    headers: string[],
+    sampleRows: string[][],
+    unmappedColumns: CanonicalColumn[],
+    tenantId: string,
+  ): Promise<MappingSuggestionResult> {
+    const client = await this.llmSettingsService.resolveClientForTenant(tenantId);
+    if (!client) {
+      return { mapping: {}, configured: false };
+    }
+    if (unmappedColumns.length === 0) {
+      return { mapping: {}, configured: true };
     }
 
     try {
       const userPrompt = this.buildUserPrompt(headers, sampleRows, unmappedColumns);
-      const raw = await this.client.complete(SYSTEM_PROMPT, userPrompt);
-      return this.parseAndValidate(raw, headers, unmappedColumns);
+      const raw = await client.complete(SYSTEM_PROMPT, userPrompt);
+      return { mapping: this.parseAndValidate(raw, headers, unmappedColumns), configured: true };
     } catch (error) {
       llmClientLogger.warn(`Column-mapping suggestion skipped: ${error instanceof Error ? error.message : String(error)}`);
-      return {};
+      return { mapping: {}, configured: true };
     }
   }
 
