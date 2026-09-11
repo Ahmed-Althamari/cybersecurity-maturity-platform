@@ -40,6 +40,7 @@ export default function RiskDetailPage({ risk, accessToken, canEdit, canDelete, 
   const [likelihood, setLikelihood] = useState(risk?.likelihood ?? 3);
   const [impact, setImpact] = useState(risk?.impact ?? 3);
   const [owner, setOwner] = useState(risk?.owner ?? '');
+  const [targetDate, setTargetDate] = useState(risk?.targetDate ? risk.targetDate.slice(0, 10) : '');
   const [status, setStatus] = useState(risk?.status ?? 'OPEN');
   const [treatment, setTreatment] = useState(risk?.treatment ?? 'MONITOR');
   const [saving, setSaving] = useState(false);
@@ -113,7 +114,17 @@ export default function RiskDetailPage({ risk, accessToken, canEdit, canDelete, 
     setSaving(true);
     setSaveMessage(null);
     try {
-      await updateRisk(accessToken, risk!.id, { title, description, likelihood, impact, owner, status, treatment });
+      await updateRisk(accessToken, risk!.id, {
+        title,
+        description,
+        likelihood,
+        impact,
+        owner,
+        status,
+        treatment,
+        // Date-only input needs a real ISO timestamp for the API's @IsISO8601 target date.
+        targetDate: targetDate ? new Date(`${targetDate}T00:00:00.000Z`).toISOString() : undefined,
+      });
       setSaveMessage('Saved.');
       router.replace(router.asPath);
     } catch (err) {
@@ -284,17 +295,32 @@ export default function RiskDetailPage({ risk, accessToken, canEdit, canDelete, 
                 </select>
               </div>
             </div>
-            <div>
-              <label htmlFor="risk-owner" className="block text-sm text-slate-300 mb-1">
-                Owner
-              </label>
-              <input
-                id="risk-owner"
-                disabled={!canEdit}
-                value={owner}
-                onChange={(e) => setOwner(e.target.value)}
-                className="w-full rounded-md bg-slate-900 border border-slate-600 px-3 py-2 text-white disabled:opacity-60"
-              />
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label htmlFor="risk-owner" className="block text-sm text-slate-300 mb-1">
+                  Owner
+                </label>
+                <input
+                  id="risk-owner"
+                  disabled={!canEdit}
+                  value={owner}
+                  onChange={(e) => setOwner(e.target.value)}
+                  className="w-full rounded-md bg-slate-900 border border-slate-600 px-3 py-2 text-white disabled:opacity-60"
+                />
+              </div>
+              <div>
+                <label htmlFor="risk-target-date" className="block text-sm text-slate-300 mb-1">
+                  Target Date
+                </label>
+                <input
+                  id="risk-target-date"
+                  type="date"
+                  disabled={!canEdit}
+                  value={targetDate}
+                  onChange={(e) => setTargetDate(e.target.value)}
+                  className="w-full rounded-md bg-slate-900 border border-slate-600 px-3 py-2 text-white disabled:opacity-60"
+                />
+              </div>
             </div>
 
             {saveMessage && <p className="text-sm text-slate-300">{saveMessage}</p>}

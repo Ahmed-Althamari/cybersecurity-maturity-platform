@@ -23,6 +23,7 @@ export default function NewRiskPage({ organisationId, accessToken }: NewRiskPage
   const [likelihood, setLikelihood] = useState(3);
   const [impact, setImpact] = useState(3);
   const [owner, setOwner] = useState('');
+  const [targetDate, setTargetDate] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -38,6 +39,8 @@ export default function NewRiskPage({ organisationId, accessToken }: NewRiskPage
         likelihood,
         impact,
         owner: owner || undefined,
+        // Date-only input needs a real ISO timestamp for the API's @IsISO8601 target date.
+        targetDate: targetDate ? new Date(`${targetDate}T00:00:00.000Z`).toISOString() : undefined,
       });
       router.push(`/risks/${risk.id}`);
     } catch (err) {
@@ -119,16 +122,30 @@ export default function NewRiskPage({ organisationId, accessToken }: NewRiskPage
                 </select>
               </div>
             </div>
-            <div>
-              <label htmlFor="risk-owner" className="block text-sm text-slate-300 mb-1">
-                Owner
-              </label>
-              <input
-                id="risk-owner"
-                value={owner}
-                onChange={(e) => setOwner(e.target.value)}
-                className="w-full rounded-md bg-slate-900 border border-slate-600 px-3 py-2 text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
-              />
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label htmlFor="risk-owner" className="block text-sm text-slate-300 mb-1">
+                  Owner
+                </label>
+                <input
+                  id="risk-owner"
+                  value={owner}
+                  onChange={(e) => setOwner(e.target.value)}
+                  className="w-full rounded-md bg-slate-900 border border-slate-600 px-3 py-2 text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+              </div>
+              <div>
+                <label htmlFor="risk-target-date" className="block text-sm text-slate-300 mb-1">
+                  Target Date
+                </label>
+                <input
+                  id="risk-target-date"
+                  type="date"
+                  value={targetDate}
+                  onChange={(e) => setTargetDate(e.target.value)}
+                  className="w-full rounded-md bg-slate-900 border border-slate-600 px-3 py-2 text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+              </div>
             </div>
 
             {error && <p className="text-sm text-red-400">{error}</p>}
