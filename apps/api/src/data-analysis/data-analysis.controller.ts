@@ -36,6 +36,7 @@ export class DataAnalysisController {
     @CurrentUser() user: RequestUser,
     @Body('mode') mode?: string,
     @Body('question') question?: string,
+    @Body('slot') slotRaw?: string,
   ) {
     if (!file) {
       throw new BadRequestException('No file uploaded (expected a multipart field named "file")');
@@ -43,6 +44,10 @@ export class DataAnalysisController {
     if (!VALID_MODES.includes(mode as AnalysisMode)) {
       throw new BadRequestException(`mode must be one of ${VALID_MODES.join(', ')}`);
     }
-    return this.dataAnalysisService.analyze(file, mode as AnalysisMode, question, user.tenantId);
+    // Which single configured provider to use for "ai" mode, instead of the default full
+    // fallback chain (see the Data Analysis page's slot picker). Range/existence validated by
+    // LlmSettingsService.resolveProviderChainForAnalysis.
+    const slot = slotRaw ? Number(slotRaw) : undefined;
+    return this.dataAnalysisService.analyze(file, mode as AnalysisMode, question, user.tenantId, slot);
   }
 }

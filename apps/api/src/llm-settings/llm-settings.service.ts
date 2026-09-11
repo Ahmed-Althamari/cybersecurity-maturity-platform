@@ -199,8 +199,28 @@ export class LlmSettingsService {
    * DataAnalysisService.analyze) so a tenant's own UI-configured key is what actually runs the
    * analysis. Returns `null` when the tenant has configured nothing, so the Python side falls
    * back to its own env-based resolution exactly as before this feature existed.
+   *
+   * When `slot` is given, the user picked one specific provider for this request (see the
+   * Data Analysis page's slot picker) instead of the default full fallback chain — returns just
+   * that one slot's credential, or throws if the tenant hasn't configured it.
    */
-  async resolveProviderChainForAnalysis(tenantId: string): Promise<AnalysisProviderConfig[] | null> {
+  async resolveProviderChainForAnalysis(tenantId: string, slot?: number): Promise<AnalysisProviderConfig[] | null> {
+    if (slot !== undefined) {
+      assertValidSlot(slot);
+      const row = await this.prisma.llmProviderSetting.findUnique({ where: { tenantId_slot: { tenantId, slot } } });
+      if (!row) {
+        throw new NotFoundException(`No saved LLM provider setting for slot ${slot}`);
+      }
+      return [
+        {
+          format: row.format as ProviderFormat,
+          baseUrl: row.baseUrl,
+          model: row.model,
+          apiKey: decryptSecret(row.apiKeyEncrypted),
+        },
+      ];
+    }
+
     const rows = await this.prisma.llmProviderSetting.findMany({ where: { tenantId }, orderBy: { slot: 'asc' } });
     if (rows.length === 0) {
       return null;

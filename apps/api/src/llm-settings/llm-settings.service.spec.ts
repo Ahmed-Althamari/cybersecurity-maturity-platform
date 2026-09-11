@@ -1,3 +1,4 @@
+import { encryptSecret } from '@cmmp/security';
 import { BadRequestException, NotFoundException } from '@nestjs/common';
 
 import type { PrismaService } from '../prisma/prisma.service';
@@ -113,6 +114,32 @@ describe('LlmSettingsService', () => {
 
       const chain = await service.resolveProviderChainForAnalysis(TENANT_ID);
       expect(chain).toEqual([{ format: 'anthropic', baseUrl: null, model: 'claude-opus-5', apiKey: 'sk-ant-secret' }]);
+    });
+
+    it('returns just the requested slot when one is given, ignoring other configured slots', async () => {
+      prisma.llmProviderSetting.findUnique.mockResolvedValue({
+        slot: 2,
+        format: 'openai',
+        baseUrl: 'https://api.groq.com/openai/v1',
+        model: 'llama-3.3-70b-versatile',
+        apiKeyEncrypted: encryptSecret('gsk-secret'),
+      });
+
+      const chain = await service.resolveProviderChainForAnalysis(TENANT_ID, 2);
+
+      expect(chain).toEqual([
+        { format: 'openai', baseUrl: 'https://api.groq.com/openai/v1', model: 'llama-3.3-70b-versatile', apiKey: 'gsk-secret' },
+      ]);
+      expect(prisma.llmProviderSetting.findMany).not.toHaveBeenCalled();
+    });
+
+    it('throws NotFoundException when the requested slot has no saved credential', async () => {
+      prisma.llmProviderSetting.findUnique.mockResolvedValue(null);
+      await expect(service.resolveProviderChainForAnalysis(TENANT_ID, 4)).rejects.toThrow(NotFoundException);
+    });
+
+    it('rejects an out-of-range slot', async () => {
+      await expect(service.resolveProviderChainForAnalysis(TENANT_ID, 6)).rejects.toThrow(BadRequestException);
     });
   });
 

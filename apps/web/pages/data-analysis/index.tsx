@@ -5,12 +5,20 @@ import React, { useState } from 'react';
 
 import { AppHeader } from '../../components/layout/AppHeader';
 import { EmptyState } from '../../components/layout/EmptyState';
-import { analyzeSpreadsheet, ApiError, type AnalysisMode, type AnalysisResult } from '../../lib/api';
+import {
+  analyzeSpreadsheet,
+  ApiError,
+  listLlmProviderSettings,
+  type AnalysisMode,
+  type AnalysisResult,
+  type LlmProviderSettingView,
+} from '../../lib/api';
 import { getAuthSession } from '../../lib/auth';
 
 interface DataAnalysisPageProps {
   accessToken: string;
   userEmail: string;
+  configuredSlots: LlmProviderSettingView[];
 }
 
 type Step = 'select' | 'analyzing' | 'result';
@@ -22,10 +30,11 @@ type Step = 'select' | 'analyzing' | 'result';
  * configured). Deliberately its own page/route, not folded into the assessments import wizard —
  * this analyzes an arbitrary spreadsheet, not an assessment-shaped one.
  */
-export default function DataAnalysisPage({ accessToken, userEmail }: DataAnalysisPageProps) {
+export default function DataAnalysisPage({ accessToken, userEmail, configuredSlots }: DataAnalysisPageProps) {
   const [mode, setMode] = useState<AnalysisMode>('local');
   const [file, setFile] = useState<File | null>(null);
   const [question, setQuestion] = useState('');
+  const [slot, setSlot] = useState<number | undefined>(undefined);
   const [step, setStep] = useState<Step>('select');
   const [result, setResult] = useState<AnalysisResult | null>(null);
   const [stepError, setStepError] = useState<string | null>(null);
@@ -35,7 +44,7 @@ export default function DataAnalysisPage({ accessToken, userEmail }: DataAnalysi
     setStep('analyzing');
     setStepError(null);
     try {
-      const response = await analyzeSpreadsheet(accessToken, file, mode, mode === 'ai' ? question || undefined : undefined);
+      const response = await analyzeSpreadsheet(accessToken, file, mode, mode === 'ai' ? question || undefined : undefined, mode === 'ai' ? slot : undefined);
       setResult(response);
       setStep('result');
     } catch (err) {
@@ -47,6 +56,7 @@ export default function DataAnalysisPage({ accessToken, userEmail }: DataAnalysi
   function handleReset() {
     setFile(null);
     setQuestion('');
+    setSlot(undefined);
     setResult(null);
     setStepError(null);
     setStep('select');
@@ -130,6 +140,27 @@ export default function DataAnalysisPage({ accessToken, userEmail }: DataAnalysi
                     placeholder="e.g. Which category has the highest average score?"
                     className="w-full rounded-md bg-slate-900 border border-slate-600 px-3 py-2 text-sm text-white placeholder:text-slate-600"
                   />
+                </div>
+              )}
+
+              {mode === 'ai' && configuredSlots.length > 0 && (
+                <div>
+                  <label htmlFor="slot-input" className="block text-sm font-medium text-slate-300 mb-2">
+                    Provider <span className="text-slate-500 font-normal">(optional — defaults to trying each configured slot in order)</span>
+                  </label>
+                  <select
+                    id="slot-input"
+                    value={slot ?? ''}
+                    onChange={(e) => setSlot(e.target.value ? Number(e.target.value) : undefined)}
+                    className="w-full rounded-md bg-slate-900 border border-slate-600 px-3 py-2 text-sm text-white"
+                  >
+                    <option value="">Auto (all configured, in order)</option>
+                    {configuredSlots.map((s) => (
+                      <option key={s.slot} value={s.slot}>
+                        Slot {s.slot} — {s.format === 'anthropic' ? 'Claude' : 'OpenAI-compatible'} ({s.model})
+                      </option>
+                    ))}
+                  </select>
                 </div>
               )}
 
@@ -239,5 +270,17 @@ export const getServerSideProps: GetServerSideProps<DataAnalysisPageProps> = asy
   if (!session?.accessToken) {
     return { redirect: { destination: '/auth/signin', permanent: false } };
   }
-  return { props: { accessToken: session.accessToken, userEmail: session.user?.email ?? '' } };
+
+  // Best-effort: the slot picker is a convenience, not required for "ai" mode to work (it still
+  // falls back to trying every configured slot in order) — a failed lookup here just means the
+  // picker doesn't render, not a broken page.
+  let configuredSlots: LlmProviderSettingView[] = [];
+  try {
+    const settings = await listLlmProviderSettings(session.accessToken);
+    configuredSlots = settings.filter((s) => s.configured);
+  } catch {
+    configuredSlots = [];
+  }
+
+  return { props: { accessToken: session.accessToken, userEmail: session.user?.email ?? '', configuredSlots } };
 };
