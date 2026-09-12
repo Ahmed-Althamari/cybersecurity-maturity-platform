@@ -15,6 +15,10 @@ export const PINNED_INSIGHT_WRITE_ROLES = ['PLATFORM_ADMIN', 'ORGANISATION_ADMIN
 export const ASSISTANT_NOTE_WRITE_ROLES = ['PLATFORM_ADMIN', 'ORGANISATION_ADMIN', 'CISO', 'GRC_MANAGER', 'SECURITY_ARCHITECT'];
 // Mirrors DIGEST_MANAGE_ROLES in apps/api/src/assistant-digest/assistant-digest.controller.ts.
 export const DIGEST_MANAGE_ROLES = ['PLATFORM_ADMIN', 'ORGANISATION_ADMIN', 'CISO', 'GRC_MANAGER', 'SECURITY_ARCHITECT'];
+// Mirrors REMEDIATION_WRITE_ROLES in apps/api/src/remediation-initiatives/remediation-initiatives.controller.ts.
+export const REMEDIATION_WRITE_ROLES = ['PLATFORM_ADMIN', 'ORGANISATION_ADMIN', 'CISO', 'GRC_MANAGER', 'SECURITY_ARCHITECT'];
+// Mirrors the @Roles(...) list on RemediationInitiativesController.remove.
+export const REMEDIATION_DELETE_ROLES = ['PLATFORM_ADMIN', 'ORGANISATION_ADMIN'];
 
 export function hasAnyRole(userRoles: string[], allowed: string[]): boolean {
   return userRoles.some((role) => allowed.includes(role));
