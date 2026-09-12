@@ -457,9 +457,11 @@ export interface PaginatedInitiatives {
 export function listInitiatives(
   accessToken: string,
   organisationId: string,
-  options: { search?: string; page?: number; pageSize?: number } = {},
+  options: { status?: string; sort?: 'priority' | 'recent'; search?: string; page?: number; pageSize?: number } = {},
 ) {
   const params: Record<string, string> = { organisationId };
+  if (options.status) params.status = options.status;
+  if (options.sort) params.sort = options.sort;
   if (options.search) params.search = options.search;
   if (options.page) params.page = String(options.page);
   if (options.pageSize) params.pageSize = String(options.pageSize);
@@ -476,6 +478,105 @@ export function linkInitiative(accessToken: string, initiativeId: string, riskId
 
 export function unlinkInitiative(accessToken: string, initiativeId: string, riskId: string) {
   return apiFetch<unknown>(`/remediation-initiatives/${initiativeId}/risks/${riskId}`, accessToken, { method: 'DELETE' });
+}
+
+// ============================================================================
+// REMEDIATION INITIATIVES — the full CRUD surface behind /remediation-initiatives
+// (apps/api/src/remediation-initiatives). RemediationInitiativeSummary/PaginatedInitiatives
+// above are the lightweight shape the risk-detail page's cross-link picker uses;
+// RemediationInitiativeRecord is the full record for this feature's own list/detail/create pages.
+// ============================================================================
+
+export interface LinkedRiskSummary {
+  id: string;
+  title: string;
+  riskLevel: string;
+  status: string;
+}
+
+export interface RemediationInitiativeRecord {
+  id: string;
+  organisationId: string;
+  title: string;
+  description: string | null;
+  securityCapability: string | null;
+  priority: number;
+  complexity: number;
+  currentMaturity: string;
+  targetMaturity: string;
+  estimatedCost: number | null;
+  startDate: string | null;
+  targetCompletionDate: string | null;
+  actualCompletionDate: string | null;
+  status: string;
+  owner: string | null;
+  risks: LinkedRiskSummary[];
+}
+
+export interface CreateRemediationInitiativeInput {
+  organisationId: string;
+  title: string;
+  description?: string;
+  securityCapability?: string;
+  priority?: number;
+  complexity?: number;
+  currentMaturity?: string;
+  targetMaturity?: string;
+  estimatedCost?: number;
+  startDate?: string;
+  targetCompletionDate?: string;
+  owner?: string;
+}
+
+export interface UpdateRemediationInitiativeInput {
+  title?: string;
+  description?: string;
+  securityCapability?: string;
+  priority?: number;
+  complexity?: number;
+  currentMaturity?: string;
+  targetMaturity?: string;
+  estimatedCost?: number;
+  startDate?: string;
+  targetCompletionDate?: string;
+  actualCompletionDate?: string;
+  status?: string;
+  owner?: string;
+}
+
+export function getInitiative(accessToken: string, id: string) {
+  return apiFetch<RemediationInitiativeRecord>(`/remediation-initiatives/${id}`, accessToken);
+}
+
+export function createInitiative(accessToken: string, input: CreateRemediationInitiativeInput) {
+  return apiFetch<RemediationInitiativeRecord>('/remediation-initiatives', accessToken, {
+    method: 'POST',
+    body: JSON.stringify(input),
+  });
+}
+
+export function updateInitiative(accessToken: string, id: string, input: UpdateRemediationInitiativeInput) {
+  return apiFetch<RemediationInitiativeRecord>(`/remediation-initiatives/${id}`, accessToken, {
+    method: 'PATCH',
+    body: JSON.stringify(input),
+  });
+}
+
+export function deleteInitiative(accessToken: string, id: string) {
+  return apiFetch<{ message: string }>(`/remediation-initiatives/${id}`, accessToken, { method: 'DELETE' });
+}
+
+/**
+ * Drafts one PLANNED initiative per largest framework gap from the organisation's latest
+ * submitted assessment (see RemediationInitiativesService.generateFromGaps) — a starting point
+ * to review and flesh out, not a final plan. Skips any subcategory that already has a
+ * non-terminal initiative tracking it, so calling this repeatedly is safe.
+ */
+export function generateInitiativesFromGaps(accessToken: string, organisationId: string) {
+  return apiFetch<RemediationInitiativeRecord[]>('/remediation-initiatives/generate', accessToken, {
+    method: 'POST',
+    body: JSON.stringify({ organisationId }),
+  });
 }
 
 export function getDashboardRoadmap(accessToken: string, organisationId: string) {

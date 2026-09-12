@@ -1,4 +1,4 @@
-import { ClipboardList, LayoutDashboard, LogOut, ShieldCheck, ShieldHalf, Boxes, Sparkles, Settings, ScrollText, Bell } from 'lucide-react';
+import { ClipboardList, LayoutDashboard, LogOut, ShieldCheck, ShieldHalf, Boxes, Sparkles, Settings, ScrollText, Bell, Wrench } from 'lucide-react';
 import Link from 'next/link';
 import { useRouter } from 'next/router';
 import { signOut } from 'next-auth/react';
@@ -7,6 +7,7 @@ import React from 'react';
 const NAV_ITEMS = [
   { href: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
   { href: '/risks', label: 'Risks', icon: ShieldHalf },
+  { href: '/remediation-initiatives', label: 'Remediation', icon: Wrench },
   { href: '/assessments', label: 'Assessments', icon: ClipboardList },
   { href: '/frameworks', label: 'Frameworks', icon: Boxes },
   { href: '/data-analysis', label: 'Data Analysis', icon: Sparkles },
