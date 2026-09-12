@@ -1,4 +1,4 @@
-import { BarChart3 } from 'lucide-react';
+import { AlertTriangle, BarChart3, CheckCircle2, LayoutGrid, Shield, ShieldAlert, Target, TrendingDown, Wrench } from 'lucide-react';
 import type { GetServerSideProps } from 'next';
 import Head from 'next/head';
 import React from 'react';
@@ -7,6 +7,7 @@ import { FunctionDetailCards } from '../components/dashboard/FunctionDetailCards
 import { FunctionGapBarChart } from '../components/dashboard/FunctionGapBarChart';
 import { KpiCard } from '../components/dashboard/KpiCard';
 import { MaturityDistributionChart } from '../components/dashboard/MaturityDistributionChart';
+import { MaturityGauge } from '../components/dashboard/MaturityGauge';
 import { MaturityHeatmap } from '../components/dashboard/MaturityHeatmap';
 import { MaturityRadarChart } from '../components/dashboard/MaturityRadarChart';
 import { PinnedInsightsSection } from '../components/dashboard/PinnedInsightsSection';
@@ -27,6 +28,7 @@ import {
   type PinnedInsightRecord,
 } from '../lib/api';
 import { getAuthSession } from '../lib/auth';
+import { SERIES_COLORS, STATUS_COLORS } from '../lib/maturity-scale';
 import { hasAnyRole, PINNED_INSIGHT_WRITE_ROLES } from '../lib/roles';
 
 interface DashboardPageProps {
@@ -61,7 +63,10 @@ export default function DashboardPage({
       <div className="min-h-screen bg-gradient-to-b from-slate-900 to-slate-800">
         <AppHeader userEmail={userEmail} />
         <div className="container mx-auto px-4 py-8">
-          <h1 className="text-3xl font-bold text-white mb-8">Cybersecurity Maturity Dashboard</h1>
+          <h1 className="flex items-center gap-2.5 text-3xl font-bold text-white mb-8">
+            <Shield className="h-7 w-7 text-blue-400" aria-hidden="true" />
+            Cybersecurity Maturity Dashboard
+          </h1>
 
           {errorMessage && (
             <div className="bg-red-950/40 border border-red-800 text-red-300 rounded-lg p-4 mb-6">{errorMessage}</div>
@@ -74,19 +79,37 @@ export default function DashboardPage({
           )}
 
           {overview && (
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
-              <KpiCard title="Overall Maturity" value={overview.overallMaturity.toFixed(1)} />
-              <KpiCard title="Target Maturity" value={overview.targetMaturity.toFixed(1)} />
-              <KpiCard title="Maturity Gap" value={overview.maturityGap.toFixed(1)} accentColor={overview.maturityGap > 1 ? '#ec835a' : '#0ca30c'} />
-              <KpiCard title="Completion" value={`${overview.completionPercentage}%`} />
-            </div>
-          )}
-
-          {overview && (
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-8">
-              <KpiCard title="Critical Gaps" value={String(overview.criticalGaps)} accentColor="#e66767" />
-              <KpiCard title="High-Risk Findings" value={String(overview.highRiskFindings)} accentColor="#ec835a" />
-              <KpiCard title="Open Remediation Actions" value={String(overview.openRemediationActions)} accentColor="#3987e5" />
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 mb-8">
+              <MaturityGauge current={overview.overallMaturity} target={overview.targetMaturity} />
+              <div className="lg:col-span-2 grid grid-cols-1 sm:grid-cols-3 gap-4">
+                <KpiCard icon={Target} title="Target Maturity" value={overview.targetMaturity.toFixed(1)} />
+                <KpiCard
+                  icon={TrendingDown}
+                  title="Maturity Gap"
+                  value={overview.maturityGap.toFixed(1)}
+                  accentColor={overview.maturityGap > 1 ? STATUS_COLORS.serious : STATUS_COLORS.good}
+                  meterPercent={(overview.maturityGap / 5) * 100}
+                />
+                <KpiCard
+                  icon={CheckCircle2}
+                  title="Completion"
+                  value={`${overview.completionPercentage}%`}
+                  meterPercent={overview.completionPercentage}
+                />
+                <KpiCard icon={AlertTriangle} title="Critical Gaps" value={String(overview.criticalGaps)} accentColor={STATUS_COLORS.critical} />
+                <KpiCard
+                  icon={ShieldAlert}
+                  title="High-Risk Findings"
+                  value={String(overview.highRiskFindings)}
+                  accentColor={STATUS_COLORS.serious}
+                />
+                <KpiCard
+                  icon={Wrench}
+                  title="Open Remediation Actions"
+                  value={String(overview.openRemediationActions)}
+                  accentColor={SERIES_COLORS.current}
+                />
+              </div>
             </div>
           )}
 
@@ -106,7 +129,10 @@ export default function DashboardPage({
 
           {functions.length > 0 && (
             <div className="mb-8">
-              <h2 className="text-white font-semibold text-lg mb-4">Function Detail</h2>
+              <h2 className="flex items-center gap-2 text-white font-semibold text-lg mb-4">
+                <LayoutGrid className="h-4 w-4 text-slate-400" aria-hidden="true" />
+                Function Detail
+              </h2>
               <FunctionDetailCards functions={functions} />
             </div>
           )}
