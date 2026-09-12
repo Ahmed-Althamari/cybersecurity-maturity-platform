@@ -1,4 +1,18 @@
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+
+import { config as loadEnv } from "dotenv";
 import { PHASE_PRODUCTION_BUILD } from "next/constants.js";
+
+// Next.js only auto-loads .env*/.env*.local files from this directory (apps/web) -- there's no
+// config option to point it elsewhere. The documented local dev setup (README's "Local
+// Development") instead creates a single .env at the monorepo root, which apps/web has no way to
+// see on its own, so NEXTAUTH_SECRET/NEXTAUTH_URL/etc. silently fall back to next-auth's own
+// defaults (or a loud "not set" warning) with nothing wrong looking obviously broken until you
+// try to actually sign in. Loading it explicitly here, before Next's own env resolution runs,
+// fixes that: dotenv's default `override: false` means this never clobbers a var the OS/Docker
+// already set, so a real deployment's injected env vars still win exactly as before.
+loadEnv({ path: path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../.env") });
 
 // Kept in sync by hand with scripts/check-env.js's placeholder set -- see
 // that file for why this check also has to exist there, separately, for
