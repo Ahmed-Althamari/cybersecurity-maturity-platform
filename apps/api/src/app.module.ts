@@ -5,6 +5,8 @@ import { ScheduleModule } from '@nestjs/schedule';
 import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
 
 import { AssessmentsModule } from './assessments/assessments.module';
+import { AssistantDigestModule } from './assistant-digest/assistant-digest.module';
+import { AssistantNotesModule } from './assistant-notes/assistant-notes.module';
 import { AuditModule } from './audit/audit.module';
 import { AuthModule } from './auth/auth.module';
 import { ControlMappingsModule } from './control-mappings/control-mappings.module';
@@ -37,8 +39,8 @@ import { UsersModule } from './users/users.module';
         limit: Number(process.env.RATE_LIMIT_MAX_REQUESTS) || 100,
       },
     ]),
-    // Registered once, globally, so any module's @Cron() decorator works — currently only
-    // AuthModule's RevokedTokenCleanupService uses it.
+    // Registered once, globally, so any module's @Cron() decorator works — currently
+    // AuthModule's RevokedTokenCleanupService and AssistantDigestModule's daily digest job use it.
     ScheduleModule.forRoot(),
     PrismaModule,
     HealthModule,
@@ -55,6 +57,8 @@ import { UsersModule } from './users/users.module';
     PinnedInsightsModule,
     LlmSettingsModule,
     DataAnalysisModule,
+    AssistantNotesModule,
+    AssistantDigestModule,
   ],
   controllers: [],
   providers: [{ provide: APP_GUARD, useClass: ThrottlerGuard }],

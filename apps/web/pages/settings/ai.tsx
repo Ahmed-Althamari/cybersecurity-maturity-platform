@@ -1,4 +1,4 @@
-import { CheckCircle2, Gauge, KeyRound, Loader2, Sparkles, Trash2, XCircle } from 'lucide-react';
+import { CheckCircle2, Gauge, KeyRound, Loader2, Sparkles, StickyNote, Trash2, XCircle } from 'lucide-react';
 import type { GetServerSideProps } from 'next';
 import Head from 'next/head';
 import React, { useState } from 'react';
@@ -6,25 +6,32 @@ import React, { useState } from 'react';
 import { AppHeader } from '../../components/layout/AppHeader';
 import {
   ApiError,
+  createAssistantNote,
+  deleteAssistantNote,
   deleteLlmProviderSetting,
   getLlmUsageSummary,
+  listAssistantNotes,
   listLlmProviderSettings,
   testLlmProviderSetting,
   updateLlmUsageLimit,
   upsertLlmProviderSetting,
+  type AssistantNoteRecord,
   type LlmProviderFormat,
   type LlmProviderSettingView,
   type LlmUsageSummary,
 } from '../../lib/api';
 import { getAuthSession } from '../../lib/auth';
-import { hasAnyRole, LLM_SETTINGS_WRITE_ROLES } from '../../lib/roles';
+import { ASSISTANT_NOTE_WRITE_ROLES, hasAnyRole, LLM_SETTINGS_WRITE_ROLES } from '../../lib/roles';
 
 interface AiSettingsPageProps {
   accessToken: string;
   userEmail: string;
+  organisationId: string | null;
   canEdit: boolean;
+  canManageNotes: boolean;
   initialSettings: LlmProviderSettingView[];
   initialUsage: LlmUsageSummary | null;
+  initialNotes: AssistantNoteRecord[];
   loadError: string | null;
 }
 
@@ -63,7 +70,17 @@ function statusBadge(setting: LlmProviderSettingView) {
  * Once a slot is configured here, both the import wizard's column-mapping suggestions and the
  * Data Analysis page's "ai" mode run on this tenant's own key (see apps/api/src/llm-settings).
  */
-export default function AiSettingsPage({ accessToken, userEmail, canEdit, initialSettings, initialUsage, loadError }: AiSettingsPageProps) {
+export default function AiSettingsPage({
+  accessToken,
+  userEmail,
+  organisationId,
+  canEdit,
+  canManageNotes,
+  initialSettings,
+  initialUsage,
+  initialNotes,
+  loadError,
+}: AiSettingsPageProps) {
   const [settings, setSettings] = useState(initialSettings);
   const [forms, setForms] = useState<Record<number, SlotFormState>>(() =>
     Object.fromEntries(initialSettings.map((s) => [s.slot, emptyForm(s)])),
@@ -77,6 +94,38 @@ export default function AiSettingsPage({ accessToken, userEmail, canEdit, initia
   const [limitInput, setLimitInput] = useState(initialUsage?.dailyCallLimit ? String(initialUsage.dailyCallLimit) : '');
   const [usageBusy, setUsageBusy] = useState(false);
   const [usageError, setUsageError] = useState<string | null>(null);
+
+  const [notes, setNotes] = useState(initialNotes);
+  const [noteInput, setNoteInput] = useState('');
+  const [noteBusy, setNoteBusy] = useState(false);
+  const [noteError, setNoteError] = useState<string | null>(null);
+
+  async function handleAddNote() {
+    if (!organisationId || !noteInput.trim()) return;
+    setNoteBusy(true);
+    setNoteError(null);
+    try {
+      const created = await createAssistantNote(accessToken, { organisationId, content: noteInput.trim() });
+      setNotes((prev) => [created, ...prev]);
+      setNoteInput('');
+    } catch (err) {
+      setNoteError(err instanceof ApiError ? err.message : 'Failed to save note.');
+    } finally {
+      setNoteBusy(false);
+    }
+  }
+
+  async function handleDeleteNote(id: string) {
+    setNoteBusy(true);
+    try {
+      await deleteAssistantNote(accessToken, id);
+      setNotes((prev) => prev.filter((n) => n.id !== id));
+    } catch (err) {
+      setNoteError(err instanceof ApiError ? err.message : 'Failed to remove note.');
+    } finally {
+      setNoteBusy(false);
+    }
+  }
 
   async function handleSaveLimit() {
     setUsageBusy(true);
@@ -227,6 +276,66 @@ export default function AiSettingsPage({ accessToken, userEmail, canEdit, initia
               {usageError && <p className="mt-2 text-sm text-red-400">{usageError}</p>}
             </div>
           )}
+
+          <div className="bg-slate-800 rounded-lg p-5 border border-slate-700 mb-6">
+            <div className="flex items-center gap-2 mb-3">
+              <StickyNote className="h-4 w-4 text-slate-400" />
+              <h2 className="text-white font-semibold">Assistant Notes</h2>
+            </div>
+            <p className="text-sm text-slate-400 mb-3">
+              Short standing context the AI-assisted features can draw on — for example &quot;we treat vendor risk as high
+              priority&quot;. Read by the scheduled digest (see Notifications) when writing its summary. Never written
+              automatically; only ever saved here, explicitly.
+            </p>
+
+            {canManageNotes && (
+              <div className="flex items-start gap-2 mb-4">
+                <textarea
+                  value={noteInput}
+                  onChange={(e) => setNoteInput(e.target.value)}
+                  placeholder="e.g. Board review is the first Monday of the quarter"
+                  rows={2}
+                  maxLength={2000}
+                  className="flex-1 rounded-md bg-slate-900 border border-slate-600 px-3 py-2 text-sm text-white placeholder:text-slate-600"
+                />
+                <button
+                  onClick={handleAddNote}
+                  disabled={noteBusy || !noteInput.trim()}
+                  className="bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white text-sm font-medium py-2 px-3 rounded-md transition-colors flex items-center gap-1.5 whitespace-nowrap"
+                >
+                  {noteBusy && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+                  Add note
+                </button>
+              </div>
+            )}
+
+            {noteError && <p className="text-sm text-red-400 mb-3">{noteError}</p>}
+
+            {notes.length === 0 ? (
+              <p className="text-sm text-slate-500">No notes saved yet.</p>
+            ) : (
+              <ul className="space-y-2">
+                {notes.map((note) => (
+                  <li
+                    key={note.id}
+                    className="flex items-start justify-between gap-3 bg-slate-900 border border-slate-700 rounded-md px-3 py-2"
+                  >
+                    <p className="text-sm text-slate-300">{note.content}</p>
+                    {canManageNotes && (
+                      <button
+                        onClick={() => handleDeleteNote(note.id)}
+                        disabled={noteBusy}
+                        aria-label="Remove note"
+                        className="text-slate-500 hover:text-red-400 transition-colors shrink-0"
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </button>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
 
           <div className="space-y-4">
             {settings.map((setting) => {
@@ -402,23 +511,42 @@ export const getServerSideProps: GetServerSideProps<AiSettingsPageProps> = async
     return { redirect: { destination: '/auth/signin', permanent: false } };
   }
 
+  const organisationId = session.organisationId ?? null;
   const canEdit = hasAnyRole(session.roles ?? [], LLM_SETTINGS_WRITE_ROLES);
+  const canManageNotes = hasAnyRole(session.roles ?? [], ASSISTANT_NOTE_WRITE_ROLES);
+  // Best-effort, same pattern as the dashboard's pinned-insights load: a note-fetch failure
+  // shouldn't take down the whole settings page, which is mostly about provider slots.
+  const initialNotes = organisationId ? await listAssistantNotes(session.accessToken, organisationId).catch(() => []) : [];
+
   try {
     const [initialSettings, initialUsage] = await Promise.all([
       listLlmProviderSettings(session.accessToken),
       getLlmUsageSummary(session.accessToken),
     ]);
     return {
-      props: { accessToken: session.accessToken, userEmail: session.user?.email ?? '', canEdit, initialSettings, initialUsage, loadError: null },
+      props: {
+        accessToken: session.accessToken,
+        userEmail: session.user?.email ?? '',
+        organisationId,
+        canEdit,
+        canManageNotes,
+        initialSettings,
+        initialUsage,
+        initialNotes,
+        loadError: null,
+      },
     };
   } catch (error) {
     return {
       props: {
         accessToken: session.accessToken,
         userEmail: session.user?.email ?? '',
+        organisationId,
         canEdit,
+        canManageNotes,
         initialSettings: [],
         initialUsage: null,
+        initialNotes,
         loadError: error instanceof ApiError ? error.message : 'Failed to load AI settings.',
       },
     };

@@ -1,6 +1,6 @@
 # CMMP Implementation Status
 
-Last Updated: 2026-09-06 (Prisma 5 → 7 upgrade — see that section below)
+Last Updated: 2026-09-11 (AI-Assisted Enhancements + Data Analysis Multi-Sheet Extension — see that section below)
 
 ## Overall Progress
 
@@ -9,11 +9,15 @@ Completed section below, plus a "Post-Phase-17 Hardening" section for
 security-gap work done after the master prompt's own scope was covered.
 **Completion**: ~95%. Not 100%: Phase 15's Docker images have still
 never actually been built or run (see that phase's own caveat, restated
-in `docs/DEPLOYMENT.md`), `apps/web` has zero automated tests, and a
-handful of frontend flows (framework navigation, assessment-taking,
-the import wizard's UI) were never built — all tracked below under
-"Next Steps," none silently dropped. "All phases complete" describes
-breadth of coverage, not "nothing left to do."
+in `docs/DEPLOYMENT.md`). `apps/web`'s "zero automated tests" gap noted
+in earlier revisions of this document was closed by the "Frontend test
+coverage" sections below (RTL/Jest component tests plus a persisted
+Playwright e2e suite, both wired into CI); the frontend flows that were
+missing at that time (framework navigation, assessment-taking, the
+import wizard's UI) were subsequently built and are also covered by
+that e2e suite — see "Next Steps" below for what remains open now
+(nothing from that original list, plus whatever each dated section
+below has since called out as its own carried-forward gap).
 
 ## Completed ✅
 
@@ -3056,6 +3060,194 @@ same way. The `prisma-client-js` vs `prisma-client` generator decision
 above is worth revisiting on its own once TypeScript 5.7+ and an ESM
 build story for `packages/database`/`apps/api` are things this repo
 actually wants — not before, and not bundled into a dependency-bump PR.
+
+## AI-Assisted Enhancements + Data Analysis Multi-Sheet Extension (2026-09-11)
+
+Eight PRs (#53–#60), each its own clean, independently reviewable
+change on `claude/continuation-hibdvx`, merged squash-then-reset in
+sequence — every one validated with `npx turbo run type-check lint
+build test --force`, a live pass against a real running Postgres + API
+(+ the Python `data-analysis` service where relevant), and either a new
+or extended Playwright e2e spec, before opening its PR. Two real CI/dev
+gotchas were hit and fixed along the way, not just "tests pass": a
+Gitleaks-flagged hardcoded secret literal that had to be scrubbed from
+history via `git reset --soft` + recommit rather than a forward-fix
+commit (Gitleaks scans each commit's own diff, not just the final
+state), and the `web-e2e` CI job never having started the
+`data-analysis` Python service at all (see PR #60 below — this
+session's own new e2e spec was the first thing to actually exercise
+that path and expose the gap).
+
+### AI Assisted settings panel (#53)
+
+New `apps/api/src/llm-settings` module + `LlmProviderSetting` model —
+lets a tenant configure up to 5 of its own LLM provider credential
+"slots" (Claude/Anthropic or any OpenAI-compatible endpoint) from the
+UI (`apps/web/pages/settings/ai.tsx`) instead of only via
+`LLM_PROVIDER_<n>_*` server env vars. Credentials are encrypted at rest
+via `@cmmp/security`'s `encryptSecret`/`decryptSecret`
+(`SETTINGS_ENCRYPTION_KEY`), with only a non-reversible
+`apiKeyPreview` (last 4 characters) ever sent back to the client.
+Slots are tried in order for automatic fallback; a "Test" action
+round-trips a real connectivity check per slot before saving.
+`resolveClientForTenant()`/`resolveLlmClient()` in
+`llm-settings.service.ts` prefer a tenant's own configured chain over
+the platform-wide env vars, falling back to the latter when a tenant
+has configured nothing — this is the shared resolution path every
+later AI-touching feature below (import mapping, Data Analysis) reuses
+rather than re-implementing.
+
+### Audit log UI (#54)
+
+Pure read-only UI (`apps/web/pages/audit/index.tsx`) over `AuditEvent`
+rows the platform was already recording via `@AuditLog()` on every
+CREATE/UPDATE/DELETE (plus login/logout/import/export) — no new write
+path, since the audit trail already existed with nowhere to actually
+view it. Filterable by action/resource/date range, paginated, gated to
+`AUDIT_READ_ROLES` (platform/org admins, CISO, auditor, GRC manager).
+
+### Import mapping suggester uses tenant AI settings (#55)
+
+`apps/api/src/assessments/import-mapping/mapping-suggester.service.ts`
+now resolves its LLM client via the same `LlmSettingsService` tenant-
+first chain from #53, instead of only ever reading the platform's env
+vars — a tenant with its own configured credentials gets column-mapping
+suggestions billed to its own key. Falls back to auto-mapping (never
+blocks the import) on any failure, cap hit, or missing configuration,
+matching the feature's existing best-effort contract.
+
+### Per-slot model choice in Data Analysis (#56)
+
+A `slot` picker added to the Data Analysis page's `ai` mode
+(`apps/web/pages/data-analysis/index.tsx`) and threaded through
+`POST /data-analysis/analyze`'s `slot` form field to
+`resolveProviderChainForAnalysis(tenantId, slot)` — lets a user pin one
+specific configured provider for a request instead of the default
+"try every configured slot in order" fallback chain. Verified via a
+Playwright spec that intercepts the real `/analyze` request and asserts
+the picked slot's number is what's actually sent, without a real
+outbound call to a provider.
+
+### AI usage/cost guardrails (#57)
+
+New `LlmUsageEvent` (append-only log) and `LlmUsageLimit`
+(per-tenant optional daily cap) models. `assertUnderUsageLimit(tenantId)`
+is checked *before* every AI-provider call in both the import-mapping
+suggester and Data Analysis's `ai` mode — a capped tenant gets a clear
+429 instead of a wasted round trip; `recordUsage()` logs after, and
+both read/write paths swallow their own failures (log-and-continue)
+rather than ever breaking the feature they're instrumenting. The
+`settings/ai.tsx` page gained a "Usage Today" panel showing the
+call count and letting an org/platform admin set or clear the daily
+limit. Deliberately **call-count-based, not token-based** — neither
+`LlmClient.complete()` nor PandasAI's Python-side LLM abstraction
+exposes token/cost metadata, so token-level billing was out of scope by
+design, not an oversight.
+
+### Cross-framework control mapping (#58)
+
+New `ControlMapping` model (tenant-scoped, unique on
+`(tenantId, sourceSubcategoryId, targetSubcategoryId)`) and
+`apps/api/src/control-mappings` module — lets a tenant build its own
+crosswalk between two frameworks it has loaded (e.g. NIST CSF to an
+ISO 27001 catalog imported via the existing `POST /frameworks/import`),
+mapping one subcategory to another as `EQUIVALENT`/`PARTIAL`/`RELATED`,
+with notes. New `apps/web/pages/frameworks/mappings.tsx` page (linked
+from `/frameworks` once a tenant has 2+ frameworks loaded) shows the
+crosswalk as a table with remove buttons and an inline "add mapping"
+form; read is open to any authenticated user, write gated to the same
+GRC-adjacent roles used for risks. `sourceSubcategoryId`/
+`targetSubcategoryId` are deliberately unordered — "source" vs "target"
+is just an artifact of which framework the user picked first, not a
+meaningful directional constraint.
+
+### Notifications for risk/remediation due dates (#59)
+
+`apps/api/src/notifications`'s `getDueDateAlerts()` is a **live,
+computed view**, not a persisted/dismissible feed: it queries open
+risks (`targetDate`) and active remediation initiatives
+(`targetCompletionDate`) that are overdue or due within 14 days, tags
+each `OVERDUE`/`DUE_SOON`, and returns them sorted most-urgent-first —
+recomputed fresh on every request, nothing to go stale or need
+cleanup, matching the fact that there's no email/push infrastructure in
+this app to notify *through* (see `docs/security-architecture.md`).
+Surfaced on a new `/notifications` page linked from the main nav. Also
+added a **Target Date field to the Risk create/edit forms**
+(`apps/web/pages/risks/new.tsx`, `risks/[id].tsx`) — `CreateRiskDto`/
+`UpdateRiskDto` already accepted `targetDate`, but no UI ever exposed
+it, so before this there was no way to actually put a risk on this list
+without calling the API directly.
+
+### Data Analysis: multi-sheet extraction, dashboard pinning, risk-register hand-off (#60)
+
+Extends the Data Analysis feature (see its original write-up above)
+past "every upload is one flat table" — `services/data-analysis`
+previously always ran `pd.read_excel(buffer)` with no `sheet_name`,
+silently reading sheet 0 of any workbook.
+
+- **New `analysis/workbook_sheets.py`** enumerates a workbook's sheets
+  via `openpyxl` and classifies each as `TABLE` or `DASHBOARD` — purely
+  structurally (does the sheet contain a native chart or pivot table
+  object; `ws._charts`/`ws._pivots`), no LLM call, works with zero AI
+  provider configured. For a `DASHBOARD` sheet, each embedded chart's
+  **real plotted data** (title, type, categories, series values) is
+  extracted by reading the chart's cached snapshot
+  (`numCache`/`strCache`), falling back to resolving the chart's own
+  cell-range reference formula and reading those cells directly when no
+  cache is present (true, for example, of any workbook this session's
+  own test fixtures generate via `openpyxl` itself, which never
+  triggers a recalculation) — confirmed by hand that both paths recover
+  the same real numbers. A matching PNG is re-rendered server-side
+  (`matplotlib`; bar/pie/line handled explicitly, anything else falls
+  back to a grouped bar) so display stays consistent with AutoViz's own
+  chart images. New `POST /sheets` endpoint exposes this; `POST
+  /analyze` gained an optional `sheet_name` so analysis can target one
+  specific table sheet.
+- **On the web side**, uploading a workbook with exactly one ordinary
+  table sheet and no dashboard sheets still skips straight to analysis
+  (no added friction for the common case); anything else shows a sheet
+  picker first, with dashboard-sheet charts displayed immediately
+  alongside it.
+- **New `apps/api/src/pinned-insights` module + `PinnedInsight`
+  model** — an explicit "Pin to Dashboard" action (never automatic)
+  that saves a chart (its image, plus real category/series data when
+  known) to the tenant's shared `/dashboard`, in a new "Pinned
+  Insights" section with a click-to-expand data table.
+  AutoViz/PandasAI-generated charts can still be pinned as an image,
+  but have **no** click-through — neither tool exposes which exact data
+  points it plotted, and the UI says so rather than faking it. Read is
+  open to any authenticated user; pin/unpin gated to the same
+  GRC-adjacent write roles as risks and control mappings.
+- **"Add to Risk Register"** — an `ai`-mode text answer gets an action
+  that pre-fills `/risks/new`'s title/description with a suggested
+  finding, for the user to review and edit before saving; nothing is
+  ever created without that review step.
+- **CI gap found and fixed**: this PR's own new Playwright spec
+  (`data-analysis-dashboard-sheet.spec.ts`, driving a committed
+  `openpyxl`-generated fixture workbook with a real embedded chart — 
+  `exceljs`, used elsewhere in this suite, has no API for writing
+  native chart objects) was the first test in the whole suite to send a
+  real request through the NestJS proxy to the `data-analysis` Python
+  service rather than mocking it (as the pre-existing slot-picker spec
+  does) — and that exposed the fact that `.github/workflows/ci.yml`'s
+  `web-e2e` job never actually started the Python service at all.
+  Fixed by starting `uvicorn` with a health-check wait before Playwright
+  runs, and by adding a dedicated `python-tests` CI job for
+  `services/data-analysis`'s own `pytest` suite (37 tests as of this
+  PR), which had **no CI coverage of any kind** before this fix — a
+  pre-existing gap, not something this PR introduced, but one it was
+  responsible for closing once its own tests exposed it.
+
+**Known gap carried forward, same as the original Data Analysis
+write-up**: `ai` mode (both here and in the import-mapping suggester)
+has still never been exercised against a real configured LLM provider
+in any session so far — every AI-path test in this batch uses a
+mocked/intercepted request or a fake LLM, never a real provider call.
+Remediation initiatives also still have no frontend UI at all (list,
+detail, or create) — only the API and a link-existing-initiative-to-a-risk
+picker on the risk detail page — so a parallel "Add to Remediation
+Plan" hand-off (mirroring "Add to Risk Register" above) isn't possible
+yet without building that UI first.
 
 ## Contact & Questions
 
