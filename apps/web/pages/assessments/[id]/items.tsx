@@ -4,7 +4,7 @@ import Head from 'next/head';
 import Link from 'next/link';
 import React from 'react';
 
-import { AssessmentItemsForm } from '../../../components/assessments/AssessmentItemsForm';
+import { AssessmentItemsForm, type QuestionAnswer } from '../../../components/assessments/AssessmentItemsForm';
 import { AppHeader } from '../../../components/layout/AppHeader';
 import { BackLink } from '../../../components/layout/BackLink';
 import { ApiError, getAssessment, getFrameworkTree, type FrameworkTreeFunction } from '../../../lib/api';
@@ -19,7 +19,7 @@ interface AssessmentItemsPageProps {
   editable: boolean;
   accessToken: string;
   tree: FrameworkTreeFunction[];
-  initialAnswers: Record<string, { currentMaturity: string; targetMaturity: string }>;
+  initialAnswers: Record<string, QuestionAnswer>;
   errorMessage: string | null;
 }
 
@@ -104,9 +104,22 @@ export const getServerSideProps: GetServerSideProps<AssessmentItemsPageProps> = 
     }
 
     const frameworkTree = await getFrameworkTree(session.accessToken, assessment.template.frameworkId);
-    const initialAnswers: Record<string, { currentMaturity: string; targetMaturity: string }> = {};
+    const initialAnswers: Record<string, QuestionAnswer> = {};
     for (const item of assessment.items) {
-      initialAnswers[item.questionId] = { currentMaturity: item.currentMaturity, targetMaturity: item.targetMaturity };
+      initialAnswers[item.questionId] = {
+        currentMaturity: item.currentMaturity,
+        targetMaturity: item.targetMaturity,
+        weight: String(item.weight),
+        riskLevel: item.riskLevel,
+        businessCriticality: String(item.businessCriticality),
+        controlStatus: item.controlStatus,
+        rationale: item.rationale ?? '',
+        evidence: item.evidence ?? '',
+        assessorComments: item.assessorComments ?? '',
+        ownerName: item.ownerName ?? '',
+        ownerEmail: item.ownerEmail ?? '',
+        remediationDueDate: item.remediationDueDate ? item.remediationDueDate.slice(0, 10) : '',
+      };
     }
 
     return {

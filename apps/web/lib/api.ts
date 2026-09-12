@@ -87,6 +87,16 @@ export interface AssessmentItemRecord {
   questionId: string;
   currentMaturity: string;
   targetMaturity: string;
+  weight: number;
+  riskLevel: string;
+  businessCriticality: number;
+  controlStatus: string;
+  rationale: string | null;
+  evidence: string | null;
+  assessorComments: string | null;
+  ownerName: string | null;
+  ownerEmail: string | null;
+  remediationDueDate: string | null;
 }
 
 /** GET /assessments/:id — note `items` here (every recorded response), not the list endpoint's `_count`. */
@@ -328,6 +338,17 @@ export interface UpsertAssessmentItemInput {
   questionId: string;
   currentMaturity?: string;
   targetMaturity?: string;
+  weight?: number;
+  riskLevel?: string;
+  businessCriticality?: number;
+  controlStatus?: string;
+  rationale?: string;
+  evidence?: string;
+  assessorComments?: string;
+  ownerName?: string;
+  ownerEmail?: string;
+  /** ISO 8601 date string. The API only ever writes this when present — there's currently no way to clear a due date once set, matching the DTO's own `dto.remediationDueDate ? new Date(...) : undefined` handling. */
+  remediationDueDate?: string;
 }
 
 export function upsertAssessmentItem(accessToken: string, assessmentId: string, input: UpsertAssessmentItemInput) {
