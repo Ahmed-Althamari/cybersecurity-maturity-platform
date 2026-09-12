@@ -11,6 +11,10 @@ export const AUDIT_READ_ROLES = ['PLATFORM_ADMIN', 'ORGANISATION_ADMIN', 'CISO',
 export const CONTROL_MAPPING_WRITE_ROLES = ['PLATFORM_ADMIN', 'ORGANISATION_ADMIN', 'CISO', 'GRC_MANAGER', 'SECURITY_ARCHITECT'];
 // Mirrors PINNED_INSIGHT_WRITE_ROLES in apps/api/src/pinned-insights/pinned-insights.controller.ts.
 export const PINNED_INSIGHT_WRITE_ROLES = ['PLATFORM_ADMIN', 'ORGANISATION_ADMIN', 'CISO', 'GRC_MANAGER', 'SECURITY_ARCHITECT'];
+// Mirrors ASSISTANT_NOTE_WRITE_ROLES in apps/api/src/assistant-notes/assistant-notes.controller.ts.
+export const ASSISTANT_NOTE_WRITE_ROLES = ['PLATFORM_ADMIN', 'ORGANISATION_ADMIN', 'CISO', 'GRC_MANAGER', 'SECURITY_ARCHITECT'];
+// Mirrors DIGEST_MANAGE_ROLES in apps/api/src/assistant-digest/assistant-digest.controller.ts.
+export const DIGEST_MANAGE_ROLES = ['PLATFORM_ADMIN', 'ORGANISATION_ADMIN', 'CISO', 'GRC_MANAGER', 'SECURITY_ARCHITECT'];
 
 export function hasAnyRole(userRoles: string[], allowed: string[]): boolean {
   return userRoles.some((role) => allowed.includes(role));

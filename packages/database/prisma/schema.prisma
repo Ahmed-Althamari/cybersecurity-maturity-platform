@@ -131,6 +131,8 @@ model Organisation {
   securityCapabilities   SecurityCapability[]
   benchmarks             Benchmark[]
   pinnedInsights         PinnedInsight[]
+  assistantNotes         AssistantNote[]
+  assistantDigests       AssistantDigest[]
 
   @@unique([tenantId, slug])
   @@index([tenantId])
@@ -832,6 +834,49 @@ model PinnedInsight {
 
   @@index([tenantId, organisationId])
   @@map("pinned_insights")
+}
+
+/// A short piece of standing context a user explicitly saves for the AI features to draw on —
+/// e.g. "we treat vendor risk as high priority" or "Q3 board review is the first Monday of the
+/// quarter". Never written automatically by an AI call; always a deliberate save, same convention
+/// as PinnedInsight. Read by AssistantDigestService when generating a digest's AI summary.
+model AssistantNote {
+  id             String       @id @default(uuid())
+  tenantId       String
+  organisationId String
+  organisation   Organisation @relation(fields: [organisationId], references: [id], onDelete: Cascade)
+
+  content     String
+  createdById String?
+
+  createdAt DateTime @default(now())
+
+  @@index([tenantId, organisationId])
+  @@map("assistant_notes")
+}
+
+/// One run of the scheduled due-date digest for an organisation (see
+/// apps/api/src/assistant-digest). `summary` is AI-generated when the tenant has a configured LLM
+/// provider chain and falls back to a plain templated summary otherwise — `aiGenerated` records
+/// which happened. Email delivery is always best-effort (see MailService): `emailSent` and
+/// `recipientCount` record the outcome without ever blocking digest generation on SMTP being
+/// configured or reachable.
+model AssistantDigest {
+  id             String       @id @default(uuid())
+  tenantId       String
+  organisationId String
+  organisation   Organisation @relation(fields: [organisationId], references: [id], onDelete: Cascade)
+
+  summary        String
+  alertCount     Int
+  aiGenerated    Boolean @default(false)
+  emailSent      Boolean @default(false)
+  recipientCount Int     @default(0)
+
+  generatedAt DateTime @default(now())
+
+  @@index([tenantId, organisationId])
+  @@map("assistant_digests")
 }
 
 // ============================================================================

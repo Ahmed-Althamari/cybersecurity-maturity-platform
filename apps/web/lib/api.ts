@@ -816,3 +816,58 @@ export function getDueDateAlerts(accessToken: string, organisationId: string) {
   const query = new URLSearchParams({ organisationId });
   return apiFetch<DueDateAlert[]>(`/notifications/due-dates?${query}`, accessToken);
 }
+
+// ============================================================================
+// ASSISTANT NOTES — short standing context a user explicitly saves for the AI features to draw
+// on (e.g. "we treat vendor risk as high priority"), read back by the scheduled digest's AI
+// summary. See apps/api/src/assistant-notes.
+// ============================================================================
+
+export interface AssistantNoteRecord {
+  id: string;
+  content: string;
+  createdAt: string;
+}
+
+export interface CreateAssistantNoteInput {
+  organisationId: string;
+  content: string;
+}
+
+export function listAssistantNotes(accessToken: string, organisationId: string) {
+  const query = new URLSearchParams({ organisationId });
+  return apiFetch<AssistantNoteRecord[]>(`/assistant-notes?${query}`, accessToken);
+}
+
+export function createAssistantNote(accessToken: string, input: CreateAssistantNoteInput) {
+  return apiFetch<AssistantNoteRecord>('/assistant-notes', accessToken, { method: 'POST', body: JSON.stringify(input) });
+}
+
+export function deleteAssistantNote(accessToken: string, id: string) {
+  return apiFetch<{ message: string }>(`/assistant-notes/${id}`, accessToken, { method: 'DELETE' });
+}
+
+// ============================================================================
+// ASSISTANT DIGEST — the scheduled counterpart to Notifications' live due-date view: a daily,
+// persisted, optionally AI-summarized digest per organisation with a best-effort email leg. See
+// apps/api/src/assistant-digest.
+// ============================================================================
+
+export interface AssistantDigestRecord {
+  id: string;
+  summary: string;
+  alertCount: number;
+  aiGenerated: boolean;
+  emailSent: boolean;
+  recipientCount: number;
+  generatedAt: string;
+}
+
+export function listAssistantDigests(accessToken: string, organisationId: string) {
+  const query = new URLSearchParams({ organisationId });
+  return apiFetch<AssistantDigestRecord[]>(`/assistant-digests?${query}`, accessToken);
+}
+
+export function generateAssistantDigest(accessToken: string, organisationId: string) {
+  return apiFetch<AssistantDigestRecord>(`/assistant-digests/${organisationId}/generate`, accessToken, { method: 'POST' });
+}

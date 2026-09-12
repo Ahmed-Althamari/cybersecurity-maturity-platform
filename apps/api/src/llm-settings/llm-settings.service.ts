@@ -34,7 +34,7 @@ export interface AnalysisProviderConfig {
   apiKey: string;
 }
 
-export type LlmUsageFeature = 'import-mapping' | 'data-analysis';
+export type LlmUsageFeature = 'import-mapping' | 'data-analysis' | 'digest';
 
 export interface LlmUsageSummary {
   dailyCallLimit: number | null;
