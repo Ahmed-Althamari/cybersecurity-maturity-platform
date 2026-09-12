@@ -33,9 +33,22 @@ import { JwtStrategy } from './strategies/jwt.strategy';
     // what makes AuthModuleOptions reachable no matter which module ends up
     // "owning" that shared instance.
     PassportModule.register({ defaultStrategy: 'jwt' }),
-    JwtModule.register({
-      secret: resolveJwtSecret(),
-      signOptions: { expiresIn: '24h' },
+    // registerAsync, not register: a plain `register({ secret: resolveJwtSecret() })` call
+    // evaluates its argument object at module-DECORATION time -- i.e. as soon as this file is
+    // imported, which for AuthModule happens while app.module.ts's own static imports are still
+    // resolving, before its `ConfigModule.forRoot(...)` entry ever runs. JwtStrategy's
+    // constructor, by contrast, only runs later, once Nest actually instantiates that provider
+    // during NestFactory.create() -- well after ConfigModule's dotenv side effect has populated
+    // process.env. The two calls to resolveJwtSecret() would then disagree the moment JWT_SECRET
+    // is supplied only via a .env file (never set as a real process/shell env var before Node
+    // starts): tokens get signed with one secret and verified with another, so every login
+    // succeeds but every subsequent authenticated request 401s. registerAsync's factory isn't
+    // invoked until that same later DI-instantiation phase, matching JwtStrategy's timing exactly.
+    JwtModule.registerAsync({
+      useFactory: () => ({
+        secret: resolveJwtSecret(),
+        signOptions: { expiresIn: '24h' },
+      }),
     }),
     PrismaModule,
   ],
