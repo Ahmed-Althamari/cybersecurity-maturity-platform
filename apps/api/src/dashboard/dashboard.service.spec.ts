@@ -303,6 +303,40 @@ describe('DashboardService', () => {
     });
   });
 
+  describe('getMaturityTrend', () => {
+    it('buckets snapshots by calendar month, averaging same-month submissions', async () => {
+      prisma.assessmentHistory.findMany.mockResolvedValueOnce([
+        { currentMaturity: 2.0, targetMaturity: 4, createdAt: new Date('2026-01-05') },
+        { currentMaturity: 2.4, targetMaturity: 4, createdAt: new Date('2026-02-10') },
+        { currentMaturity: 2.6, targetMaturity: 4, createdAt: new Date('2026-02-20') }, // same month as above
+        { currentMaturity: 3.0, targetMaturity: 4, createdAt: new Date('2026-03-01') },
+      ]);
+
+      const trend = await service.getMaturityTrend('tenant-a', 'org-a');
+
+      expect(trend.series).toEqual([
+        { month: '2026-01', current: 2.0, target: 4 },
+        { month: '2026-02', current: 2.5, target: 4 }, // average of 2.4 and 2.6
+        { month: '2026-03', current: 3.0, target: 4 },
+      ]);
+      expect(trend.direction).toBe('up');
+      expect(trend.changeFromPrevious).toBe(0.5); // 3.0 - 2.5 (rounded average of Feb)
+    });
+
+    it('skips snapshots with no recorded score, and returns a flat/empty trend with fewer than two data points', async () => {
+      prisma.assessmentHistory.findMany.mockResolvedValueOnce([
+        { currentMaturity: null, targetMaturity: null, createdAt: new Date('2026-01-05') },
+        { currentMaturity: 2.0, targetMaturity: 4, createdAt: new Date('2026-02-10') },
+      ]);
+
+      const trend = await service.getMaturityTrend('tenant-a', 'org-a');
+
+      expect(trend.series).toEqual([{ month: '2026-02', current: 2.0, target: 4 }]);
+      expect(trend.direction).toBe('flat');
+      expect(trend.changeFromPrevious).toBeNull();
+    });
+  });
+
   describe('getExecutiveSummary', () => {
     it('composes maturity, gaps, risks, roadmap, and real trend history in one response', async () => {
       prisma.organisation.findFirst.mockResolvedValue({ id: 'org-a' });

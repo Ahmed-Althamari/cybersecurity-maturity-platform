@@ -605,6 +605,23 @@ export function getDashboardRoadmap(accessToken: string, organisationId: string)
   return apiFetch<RoadmapStatus>(`/dashboard/roadmap?${query}`, accessToken);
 }
 
+export interface MaturityTrendPoint {
+  month: string; // 'YYYY-MM'
+  current: number;
+  target: number | null;
+}
+
+export interface MaturityTrendResponse {
+  direction: 'up' | 'down' | 'flat';
+  changeFromPrevious: number | null;
+  series: MaturityTrendPoint[];
+}
+
+export function getDashboardTrend(accessToken: string, organisationId: string) {
+  const query = new URLSearchParams({ organisationId });
+  return apiFetch<MaturityTrendResponse>(`/dashboard/trend?${query}`, accessToken);
+}
+
 // ============================================================================
 // DATA ANALYSIS — isolated feature, unrelated to the assessments/risks/frameworks
 // domain above. See apps/api/src/data-analysis and services/data-analysis.

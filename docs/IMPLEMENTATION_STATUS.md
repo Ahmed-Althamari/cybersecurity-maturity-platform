@@ -3249,6 +3249,48 @@ picker on the risk detail page — so a parallel "Add to Remediation
 Plan" hand-off (mirroring "Add to Risk Register" above) isn't possible
 yet without building that UI first.
 
+## Monthly Maturity Trend Chart (2026-09-13)
+
+Added a "maturity progress by month" line chart to the main dashboard —
+requested directly by the user, not from the master prompt's own spec.
+
+No new data model was needed: `AssessmentHistory` (one row per
+assessment submission, already written by `assessments.service.ts`)
+and `packages/scoring-engine`'s `computeTrend`/`TrendPoint` helper
+(written earlier, exercised only by its own unit test, never actually
+wired to an endpoint) already existed and were sufficient. What was
+missing was calendar-month bucketing and a chart to show it:
+
+- `dashboard.service.ts`: new `getMaturityTrend(tenantId,
+  organisationId)`, alongside a new `GET /dashboard/trend` route —
+  buckets every `AssessmentHistory` snapshot for the org by the
+  calendar month it was recorded in (`createdAt.toISOString().slice(0,
+  7)`), averaging same-month submissions (an org can run more than one
+  assessment/framework at once, same as `getMaturityOverview`'s
+  "combined" rollup — a trend line only needs one point per month, not
+  that rollup's fuller applicable-count weighting). Feeds the bucketed
+  series into the existing `computeTrend` for `direction`/
+  `changeFromPrevious`, rather than re-deriving that logic.
+- `apps/web/components/dashboard/MaturityTrendChart.tsx`: a Recharts
+  `LineChart` (current vs. target, dashed target line), styled to match
+  `MaturityRadarChart.tsx`'s existing current/target color convention
+  (`SERIES_COLORS`) exactly rather than inventing a new palette.
+- Wired into `apps/web/pages/dashboard.tsx` the same
+  best-effort way as `pinnedInsights` — a fetch failure (or a
+  brand-new org with under two months of history) just means the
+  section doesn't render, not a broken dashboard.
+
+Verified against the real running app (not just unit tests): logged in
+via a real NextAuth credentials flow (`curl` against
+`/api/auth/csrf` → `/api/auth/callback/credentials`, not a mocked
+session) and confirmed the server-rendered `/dashboard` HTML actually
+contains the chart's heading, legend, and an SVG. Recharts' own line/
+axis layout needs a client-side measurement pass, same as every other
+chart already on this page (`MaturityRadarChart`, `FunctionGapBarChart`,
+etc.) — not a limitation specific to this addition, and not verifiable
+from raw SSR HTML alone; a real browser session would show the fully
+laid-out line, which this session's tooling can't drive directly.
+
 ## Contact & Questions
 
 - See CONTRIBUTING.md for contribution guidelines

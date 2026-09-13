@@ -1,4 +1,4 @@
-import { combineScores, type MaturityScore } from '@cmmp/scoring-engine';
+import { combineScores, computeTrend, type MaturityScore, type TrendPoint } from '@cmmp/scoring-engine';
 import { Injectable, NotFoundException } from '@nestjs/common';
 
 import { AssessmentsService } from '../assessments/assessments.service';
@@ -20,6 +20,22 @@ function weightedAverage(entries: { value: number; weight: number }[]): number {
   if (withWeight.length === 0) return 0;
   const totalWeight = withWeight.reduce((sum, entry) => sum + entry.weight, 0);
   return round2(withWeight.reduce((sum, entry) => sum + entry.value * entry.weight, 0) / totalWeight);
+}
+
+function average(values: number[]): number {
+  return values.reduce((sum, value) => sum + value, 0) / values.length;
+}
+
+export interface MaturityTrendPoint {
+  month: string; // 'YYYY-MM'
+  current: number;
+  target: number | null;
+}
+
+export interface MaturityTrendResponse {
+  direction: 'up' | 'down' | 'flat';
+  changeFromPrevious: number | null;
+  series: MaturityTrendPoint[];
 }
 
 function worstRiskLevel(levels: string[]): string {
@@ -312,6 +328,51 @@ export class DashboardService {
     }
 
     return { countByStatus, overdueCount, buckets };
+  }
+
+  /**
+   * Buckets every `AssessmentHistory` snapshot for this org into the calendar month it was
+   * recorded in, so "maturity over time" reads as one point per month rather than one per
+   * submission (an org that submits weekly would otherwise produce a noisy, hard-to-read
+   * series). Multiple submissions landing in the same month are averaged rather than picking
+   * just the latest one -- this org may run more than one assessment/framework at once (see
+   * `getMaturityOverview`'s "combined" rollup), and a trend line only needs one representative
+   * point per month, not the fuller per-assessment weighting that rollup does.
+   */
+  async getMaturityTrend(tenantId: string, organisationId: string): Promise<MaturityTrendResponse> {
+    const history = await this.prisma.assessmentHistory.findMany({
+      where: { assessment: { tenantId, organisationId, deletedAt: null } },
+      orderBy: { createdAt: 'asc' },
+      select: { currentMaturity: true, targetMaturity: true, createdAt: true },
+    });
+
+    const monthBuckets = new Map<string, { current: number[]; target: number[] }>();
+    for (const entry of history) {
+      if (entry.currentMaturity === null) continue;
+      const month = entry.createdAt.toISOString().slice(0, 7); // 'YYYY-MM'
+      const bucket = monthBuckets.get(month) ?? { current: [], target: [] };
+      bucket.current.push(entry.currentMaturity);
+      if (entry.targetMaturity !== null) bucket.target.push(entry.targetMaturity);
+      monthBuckets.set(month, bucket);
+    }
+
+    const months = [...monthBuckets.keys()].sort();
+    const series: MaturityTrendPoint[] = months.map((month) => {
+      const bucket = monthBuckets.get(month)!;
+      return {
+        month,
+        current: round2(average(bucket.current)),
+        target: bucket.target.length > 0 ? round2(average(bucket.target)) : null,
+      };
+    });
+
+    // computeTrend only needs `version`/`current` to compare the last two points -- reusing it
+    // here (rather than re-implementing direction/change) keeps this consistent with how
+    // AssessmentHistory's own per-submission trend is computed elsewhere in the scoring engine.
+    const points: TrendPoint[] = series.map((point, index) => ({ version: index, current: point.current }));
+    const trend = computeTrend(points);
+
+    return { direction: trend.direction, changeFromPrevious: trend.changeFromPrevious, series };
   }
 
   /**
