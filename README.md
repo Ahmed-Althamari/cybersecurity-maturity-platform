@@ -131,6 +131,16 @@ cybersecurity-maturity-platform/
 git clone https://github.com/Ahmed-Althamari/cybersecurity-maturity-platform.git
 cd cybersecurity-maturity-platform
 cp .env.example .env   # edit if your local Postgres uses different credentials
+
+# apps/api's NestJS ConfigModule and apps/web's Next.js both only ever look
+# for a .env file in their own directory, not the repo root -- symlinking
+# (rather than copying) keeps both in sync with the root .env automatically.
+# Without this, apps/api silently falls back to Postgres defaults (it'll
+# try to connect to a database named after your OS user) and apps/web's
+# NextAuth sign-in fails with a cryptic "ikm must be an instance of
+# Uint8Array or a string" instead of anything pointing at the real cause.
+ln -s ../../.env apps/api/.env
+ln -s ../../.env apps/web/.env
 ```
 
 ### Option 1: Local Development (verified, recommended)
