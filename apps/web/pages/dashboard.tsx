@@ -10,6 +10,7 @@ import { MaturityDistributionChart } from '../components/dashboard/MaturityDistr
 import { MaturityGauge } from '../components/dashboard/MaturityGauge';
 import { MaturityHeatmap } from '../components/dashboard/MaturityHeatmap';
 import { MaturityRadarChart } from '../components/dashboard/MaturityRadarChart';
+import { MaturityTrendChart } from '../components/dashboard/MaturityTrendChart';
 import { PinnedInsightsSection } from '../components/dashboard/PinnedInsightsSection';
 import { TopGapsTable } from '../components/dashboard/TopGapsTable';
 import { AppHeader } from '../components/layout/AppHeader';
@@ -20,11 +21,13 @@ import {
   getDashboardFunctions,
   getDashboardGaps,
   getDashboardMaturity,
+  getDashboardTrend,
   listPinnedInsights,
   type AssessmentResults,
   type FunctionMaturity,
   type GapAnalysisEntry,
   type MaturityOverview,
+  type MaturityTrendResponse,
   type PinnedInsightRecord,
 } from '../lib/api';
 import { getAuthSession } from '../lib/auth';
@@ -40,6 +43,7 @@ interface DashboardPageProps {
   functions: FunctionMaturity[];
   gaps: GapAnalysisEntry[];
   results: AssessmentResults | null;
+  trend: MaturityTrendResponse | null;
   pinnedInsights: PinnedInsightRecord[];
   errorMessage: string | null;
 }
@@ -52,6 +56,7 @@ export default function DashboardPage({
   functions,
   gaps,
   results,
+  trend,
   pinnedInsights,
   errorMessage,
 }: DashboardPageProps) {
@@ -110,6 +115,12 @@ export default function DashboardPage({
                   accentColor={SERIES_COLORS.current}
                 />
               </div>
+            </div>
+          )}
+
+          {trend && trend.series.length > 0 && (
+            <div className="mb-8">
+              <MaturityTrendChart series={trend.series} />
             </div>
           )}
 
@@ -178,6 +189,7 @@ export const getServerSideProps: GetServerSideProps<DashboardPageProps> = async 
         functions: [],
         gaps: [],
         results: null,
+        trend: null,
         pinnedInsights: [],
         errorMessage: 'Your account has no organisation assigned, so no dashboard data can be shown.',
       },
@@ -191,6 +203,15 @@ export const getServerSideProps: GetServerSideProps<DashboardPageProps> = async 
     pinnedInsights = await listPinnedInsights(session.accessToken, organisationId);
   } catch {
     pinnedInsights = [];
+  }
+
+  // Same best-effort treatment — a brand-new org with under two months of history has nothing
+  // useful to chart yet, and that's not an error worth failing the whole page over.
+  let trend: MaturityTrendResponse | null = null;
+  try {
+    trend = await getDashboardTrend(session.accessToken, organisationId);
+  } catch {
+    trend = null;
   }
 
   try {
@@ -211,6 +232,7 @@ export const getServerSideProps: GetServerSideProps<DashboardPageProps> = async 
         functions,
         gaps,
         results,
+        trend,
         pinnedInsights,
         errorMessage: null,
       },
@@ -227,6 +249,7 @@ export const getServerSideProps: GetServerSideProps<DashboardPageProps> = async 
         functions: [],
         gaps: [],
         results: null,
+        trend,
         pinnedInsights,
         errorMessage: message,
       },

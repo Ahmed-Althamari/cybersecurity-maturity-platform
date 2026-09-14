@@ -74,6 +74,11 @@ export class DashboardController {
     return this.dashboardService.getRoadmapStatus(user.tenantId, requireOrganisationId(organisationId));
   }
 
+  @Get('trend')
+  async getTrend(@CurrentUser() user: RequestUser, @Query('organisationId') organisationId?: string) {
+    return this.dashboardService.getMaturityTrend(user.tenantId, requireOrganisationId(organisationId));
+  }
+
   @Get('executive')
   async getExecutive(
     @CurrentUser() user: RequestUser,
