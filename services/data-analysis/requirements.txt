@@ -9,7 +9,7 @@
 # defined` the moment anything imports autoviz. 79.0.1 is the newest version confirmed to still
 # install and import cleanly; xgboost itself would need a release dropping pkg_resources in favor
 # of importlib.metadata to lift this pin.
-setuptools==79.0.1
+setuptools==83.0.0
 fastapi==0.141.1
 uvicorn[standard]==0.52.4
 python-multipart==0.0.32
