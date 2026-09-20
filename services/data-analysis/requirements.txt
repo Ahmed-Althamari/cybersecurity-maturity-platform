@@ -1,6 +1,15 @@
 # Versions pinned to what was verified installable together in a clean Python 3.11 venv during
 # development (see docs/IMPLEMENTATION_STATUS.md) — pandasai 3.0.0 is a ground-up rewrite of
 # earlier 1.x/2.x releases, so anything older speaks a different, incompatible API.
+#
+# setuptools is pinned explicitly (not just a transitive resolve) because autoviz==0.1.807 pulls
+# in xgboost, whose compat.py does `except pkg_resources.DistributionNotFound` without pkg_resources
+# ever being bound in that scope on newer setuptools — a fresh venv with an unpinned, pip-latest
+# setuptools (verified broken on 84.0.0) fails with `NameError: name 'pkg_resources' is not
+# defined` the moment anything imports autoviz. 79.0.1 is the newest version confirmed to still
+# install and import cleanly; xgboost itself would need a release dropping pkg_resources in favor
+# of importlib.metadata to lift this pin.
+setuptools==79.0.1
 fastapi==0.141.1
 uvicorn[standard]==0.52.4
 python-multipart==0.0.32
