@@ -12,17 +12,21 @@ jest.mock('../../../lib/api', () => ({
   listInitiatives: jest.fn(),
   linkInitiative: jest.fn(),
   unlinkInitiative: jest.fn(),
+  listStrategicInitiativesForLinking: jest.fn(),
+  linkStrategicInitiative: jest.fn(),
+  unlinkStrategicInitiative: jest.fn(),
   updateRisk: jest.fn(),
   deleteRisk: jest.fn(),
 }));
 
-import { linkInitiative, listInitiatives, unlinkInitiative } from '../../../lib/api';
+import { linkInitiative, listInitiatives, listStrategicInitiativesForLinking, unlinkInitiative } from '../../../lib/api';
 import type { PaginatedInitiatives, RiskRecord } from '../../../lib/api';
 import RiskDetailPage from '../../../pages/risks/[id]';
 
 const mockListInitiatives = listInitiatives as jest.Mock;
 const mockLinkInitiative = linkInitiative as jest.Mock;
 const mockUnlinkInitiative = unlinkInitiative as jest.Mock;
+const mockListStrategicInitiativesForLinking = listStrategicInitiativesForLinking as jest.Mock;
 
 function baseRisk(overrides: Partial<RiskRecord> = {}): RiskRecord {
   return {
@@ -59,9 +63,10 @@ function initiativePage(page: number, totalPages: number): PaginatedInitiatives 
 describe('RiskDetailPage initiative picker', () => {
   beforeEach(() => {
     jest.clearAllMocks();
+    mockListStrategicInitiativesForLinking.mockResolvedValue({ data: [], total: 0, page: 1, pageSize: 10, totalPages: 1 });
   });
 
-  const props = { accessToken: 'token-123', canEdit: true, canDelete: false, errorMessage: null };
+  const props = { accessToken: 'token-123', canEdit: true, canDelete: false, canLinkStrategic: true, errorMessage: null };
 
   it('loads the first page of initiatives on mount with no search term', async () => {
     mockListInitiatives.mockResolvedValue(initiativePage(1, 1));
@@ -117,7 +122,9 @@ describe('RiskDetailPage initiative picker', () => {
     render(<RiskDetailPage risk={baseRisk()} {...props} />);
     await waitFor(() => expect(screen.getByText('Initiative on page 1 (PLANNED)')).toBeInTheDocument());
 
-    const linkButton = screen.getByRole('button', { name: 'Link' });
+    // getAllByRole, not getByRole: the page also renders a "Link" button for the Strategic
+    // Initiatives section below this one — [0] is the Remediation Initiatives section's own.
+    const linkButton = screen.getAllByRole('button', { name: 'Link' })[0];
     expect(linkButton).toBeDisabled();
 
     fireEvent.click(screen.getByText('Initiative on page 1 (PLANNED)'));
@@ -148,7 +155,7 @@ describe('RiskDetailPage initiative picker', () => {
     mockListInitiatives.mockResolvedValue(initiativePage(1, 1));
     const linked = { id: 'initiative-linked', title: 'Roll out MFA', status: 'IN_PROGRESS' };
 
-    render(<RiskDetailPage risk={baseRisk({ initiatives: [linked] })} {...props} canEdit={false} />);
+    render(<RiskDetailPage risk={baseRisk({ initiatives: [linked] })} {...props} canEdit={false} canLinkStrategic={false} />);
 
     await waitFor(() => expect(screen.getByText('Roll out MFA')).toBeInTheDocument());
     expect(screen.queryByRole('button', { name: 'Unlink' })).not.toBeInTheDocument();

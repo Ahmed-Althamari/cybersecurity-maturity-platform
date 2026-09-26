@@ -19,6 +19,10 @@ export const DIGEST_MANAGE_ROLES = ['PLATFORM_ADMIN', 'ORGANISATION_ADMIN', 'CIS
 export const REMEDIATION_WRITE_ROLES = ['PLATFORM_ADMIN', 'ORGANISATION_ADMIN', 'CISO', 'GRC_MANAGER', 'SECURITY_ARCHITECT'];
 // Mirrors the @Roles(...) list on RemediationInitiativesController.remove.
 export const REMEDIATION_DELETE_ROLES = ['PLATFORM_ADMIN', 'ORGANISATION_ADMIN'];
+// Mirrors STRATEGIC_WRITE_ROLES in apps/api/src/strategic-initiatives/strategic-initiatives.controller.ts.
+export const STRATEGIC_WRITE_ROLES = ['PLATFORM_ADMIN', 'ORGANISATION_ADMIN', 'CISO', 'GRC_MANAGER', 'SECURITY_ARCHITECT'];
+// Mirrors the @Roles(...) list on StrategicInitiativesController.remove.
+export const STRATEGIC_DELETE_ROLES = ['PLATFORM_ADMIN', 'ORGANISATION_ADMIN'];
 
 export function hasAnyRole(userRoles: string[], allowed: string[]): boolean {
   return userRoles.some((role) => allowed.includes(role));

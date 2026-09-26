@@ -22,6 +22,7 @@ const riskDetailInclude = {
     include: { question: { include: { subcategory: { select: { code: true, name: true } } } } },
   },
   initiatives: { where: { deletedAt: null } },
+  strategicInitiatives: { where: { deletedAt: null } },
   recommendations: true,
 };
 
