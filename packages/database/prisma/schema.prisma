@@ -48,6 +48,16 @@ enum ControlStatus {
   @@map("control_status")
 }
 
+enum StrategicInitiativeStatus {
+  NOT_STARTED
+  IN_PROGRESS
+  ON_HOLD
+  COMPLETED
+  CANCELLED
+
+  @@map("strategic_initiative_status")
+}
+
 enum AuditAction {
   LOGIN
   LOGOUT
@@ -128,6 +138,7 @@ model Organisation {
   assessments            Assessment[]
   risks                  Risk[]
   remediationInitiatives RemediationInitiative[]
+  strategicInitiatives   StrategicInitiative[]
   securityCapabilities   SecurityCapability[]
   benchmarks             Benchmark[]
   pinnedInsights         PinnedInsight[]
@@ -167,9 +178,9 @@ model User {
   deletedAt         DateTime?
 
   // Relations
-  auditEvents        AuditEvent[]
-  assessmentCreated  Assessment[]         @relation("createdBy")
-  assessmentUpdated  Assessment[]         @relation("updatedBy")
+  auditEvents         AuditEvent[]
+  assessmentCreated   Assessment[]         @relation("createdBy")
+  assessmentUpdated   Assessment[]         @relation("updatedBy")
   userRoleAssignments UserRoleAssignment[]
 
   @@unique([tenantId, email])
@@ -558,8 +569,9 @@ model Risk {
   deletedAt DateTime?
 
   // Relations
-  recommendations Recommendation[]
-  initiatives     RemediationInitiative[]
+  recommendations      Recommendation[]
+  initiatives          RemediationInitiative[]
+  strategicInitiatives StrategicInitiative[]
 
   @@index([organisationId])
   @@index([riskLevel])
@@ -640,6 +652,101 @@ model RemediationInitiative {
   @@index([status])
   @@index([priority])
   @@map("remediation_initiatives")
+}
+
+// ============================================================================
+// STRATEGIC PLAN
+// ============================================================================
+
+model StrategicInitiative {
+  id             String       @id @default(uuid())
+  tenantId       String
+  organisationId String
+  organisation   Organisation @relation(fields: [organisationId], references: [id])
+
+  // Human-friendly identifier shown throughout the UI (e.g. "INIT-005") -- generated
+  // sequentially per organisation at create time (see StrategicInitiativesService.nextCode),
+  // unique so it can be searched/referenced without exposing the underlying uuid.
+  code        String
+  title       String
+  description String?
+
+  strategicObjective String?
+  owner              String?
+
+  startDate  DateTime?
+  targetDate DateTime?
+  status     StrategicInitiativeStatus @default(NOT_STARTED)
+  priority   Int                       @default(3) // 1-5 scale, 1 = highest -- same convention as RemediationInitiative.priority
+
+  // Denormalised from the latest StrategicInitiativeProgress row (by month) so list/dashboard
+  // views don't need to join and reduce that history on every read. See
+  // StrategicInitiativesService.recordProgress, the only writer of this field after creation.
+  percentComplete Int @default(0) // 0-100
+
+  // Relative weight in the organisation-wide weighted-average progress rollup (see
+  // StrategicInitiativesService.computeOverallProgress) -- master prompt's "where initiative
+  // weighting is supported" clause. Defaulting every initiative to 1 degrades to a plain average.
+  weight Float @default(1)
+
+  notes String? // free-text comments/notes
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  // Relations
+  risks           Risk[]
+  monthlyProgress StrategicInitiativeProgress[]
+  milestones      StrategicMilestone[]
+
+  @@unique([organisationId, code])
+  @@index([organisationId])
+  @@index([tenantId])
+  @@index([status])
+  @@index([priority])
+  @@map("strategic_initiatives")
+}
+
+/**
+ * One row per calendar month an initiative reported progress in -- retained rather than
+ * overwritten so the organisation's month-by-month strategic-plan trend can be reconstructed.
+ */
+model StrategicInitiativeProgress {
+  id           String              @id @default(uuid())
+  tenantId     String
+  initiativeId String
+  initiative   StrategicInitiative @relation(fields: [initiativeId], references: [id], onDelete: Cascade)
+
+  month           DateTime // normalised to the first day of the month (see toMonthKey)
+  percentComplete Int // 0-100
+  note            String? // this month's update narrative
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([initiativeId, month])
+  @@index([initiativeId])
+  @@map("strategic_initiative_progress")
+}
+
+model StrategicMilestone {
+  id           String              @id @default(uuid())
+  tenantId     String
+  initiativeId String
+  initiative   StrategicInitiative @relation(fields: [initiativeId], references: [id], onDelete: Cascade)
+
+  title       String
+  dueDate     DateTime?
+  completedAt DateTime?
+  status      ControlStatus @default(NOT_STARTED)
+  sortOrder   Int           @default(0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([initiativeId])
+  @@map("strategic_milestones")
 }
 
 // ============================================================================
@@ -893,15 +1000,15 @@ model LlmProviderSetting {
   tenantId String
   tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
-  slot   Int // 1-5
-  format String // "openai" | "anthropic"
+  slot    Int // 1-5
+  format  String // "openai" | "anthropic"
   baseUrl String?
   model   String
 
   /// AES-256-GCM ciphertext (see packages/security's encryptSecret) — never the raw key.
   apiKeyEncrypted String
   /// Last 4 characters of the plaintext key, for masked display ("••••ab12") without decrypting.
-  apiKeyPreview String
+  apiKeyPreview   String
 
   updatedById String?
 

@@ -1,30 +1,37 @@
 import type { GetServerSideProps } from 'next';
 import Head from 'next/head';
+import Link from 'next/link';
 import { useRouter } from 'next/router';
 import React, { useEffect, useState } from 'react';
 
 import { AppHeader } from '../../components/layout/AppHeader';
 import { BackLink } from '../../components/layout/BackLink';
 import { RiskLevelBadge } from '../../components/risks/RiskLevelBadge';
+import { StrategicStatusBadge } from '../../components/strategic-plan/StrategicStatusBadge';
 import {
   ApiError,
   deleteRisk,
   getRisk,
   linkInitiative,
+  linkStrategicInitiative,
   listInitiatives,
+  listStrategicInitiativesForLinking,
   unlinkInitiative,
+  unlinkStrategicInitiative,
   updateRisk,
   type RemediationInitiativeSummary,
   type RiskRecord,
+  type StrategicInitiativeSummary,
 } from '../../lib/api';
 import { getAuthSession } from '../../lib/auth';
-import { hasAnyRole, RISK_DELETE_ROLES, RISK_WRITE_ROLES } from '../../lib/roles';
+import { hasAnyRole, RISK_DELETE_ROLES, RISK_WRITE_ROLES, STRATEGIC_WRITE_ROLES } from '../../lib/roles';
 
 interface RiskDetailPageProps {
   risk: RiskRecord | null;
   accessToken: string;
   canEdit: boolean;
   canDelete: boolean;
+  canLinkStrategic: boolean;
   errorMessage: string | null;
 }
 
@@ -33,7 +40,7 @@ const STATUS_OPTIONS = ['OPEN', 'IN_PROGRESS', 'CLOSED'];
 const TREATMENT_OPTIONS = ['MITIGATE', 'ACCEPT', 'AVOID', 'TRANSFER', 'MONITOR'];
 const INITIATIVE_PAGE_SIZE = 10;
 
-export default function RiskDetailPage({ risk, accessToken, canEdit, canDelete, errorMessage }: RiskDetailPageProps) {
+export default function RiskDetailPage({ risk, accessToken, canEdit, canDelete, canLinkStrategic, errorMessage }: RiskDetailPageProps) {
   const router = useRouter();
   const [title, setTitle] = useState(risk?.title ?? '');
   const [description, setDescription] = useState(risk?.description ?? '');
@@ -98,6 +105,54 @@ export default function RiskDetailPage({ risk, accessToken, canEdit, canDelete, 
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [risk?.organisationId, accessToken, initiativeSearch, initiativePage]);
+
+  const [linkedStrategicInitiatives, setLinkedStrategicInitiatives] = useState<StrategicInitiativeSummary[]>(risk?.strategicInitiatives ?? []);
+  const [availableStrategicInitiatives, setAvailableStrategicInitiatives] = useState<StrategicInitiativeSummary[]>([]);
+  const [strategicLoading, setStrategicLoading] = useState(true);
+  const [strategicSearchInput, setStrategicSearchInput] = useState('');
+  const [strategicSearch, setStrategicSearch] = useState('');
+  const [strategicPage, setStrategicPage] = useState(1);
+  const [strategicTotalPages, setStrategicTotalPages] = useState(1);
+  const [selectedStrategicId, setSelectedStrategicId] = useState('');
+  const [strategicError, setStrategicError] = useState<string | null>(null);
+
+  useEffect(() => {
+    const trimmed = strategicSearchInput.trim();
+    if (trimmed === strategicSearch) {
+      return;
+    }
+    const handle = setTimeout(() => {
+      setStrategicSearch(trimmed);
+      setStrategicPage(1);
+    }, 300);
+    return () => clearTimeout(handle);
+  }, [strategicSearchInput, strategicSearch]);
+
+  useEffect(() => {
+    if (!risk) return;
+    let cancelled = false;
+    setStrategicLoading(true);
+    listStrategicInitiativesForLinking(accessToken, risk.organisationId, {
+      search: strategicSearch,
+      page: strategicPage,
+      pageSize: INITIATIVE_PAGE_SIZE,
+    })
+      .then((result) => {
+        if (cancelled) return;
+        setAvailableStrategicInitiatives(result.data);
+        setStrategicTotalPages(Math.max(1, result.totalPages));
+      })
+      .catch(() => {
+        if (!cancelled) setAvailableStrategicInitiatives([]);
+      })
+      .finally(() => {
+        if (!cancelled) setStrategicLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [risk?.organisationId, accessToken, strategicSearch, strategicPage]);
 
   if (!risk) {
     return (
@@ -167,6 +222,31 @@ export default function RiskDetailPage({ risk, accessToken, canEdit, canDelete, 
       setLinkedInitiatives((current) => current.filter((initiative) => initiative.id !== initiativeId));
     } catch (err) {
       setInitiativeError(err instanceof ApiError ? err.message : 'Failed to unlink initiative.');
+    }
+  }
+
+  async function handleLinkStrategicInitiative() {
+    if (!selectedStrategicId) return;
+    setStrategicError(null);
+    try {
+      await linkStrategicInitiative(accessToken, selectedStrategicId, risk!.id);
+      const linked = availableStrategicInitiatives.find((initiative) => initiative.id === selectedStrategicId);
+      if (linked) {
+        setLinkedStrategicInitiatives((current) => [...current, linked]);
+      }
+      setSelectedStrategicId('');
+    } catch (err) {
+      setStrategicError(err instanceof ApiError ? err.message : 'Failed to link strategic initiative.');
+    }
+  }
+
+  async function handleUnlinkStrategicInitiative(initiativeId: string) {
+    setStrategicError(null);
+    try {
+      await unlinkStrategicInitiative(accessToken, initiativeId, risk!.id);
+      setLinkedStrategicInitiatives((current) => current.filter((initiative) => initiative.id !== initiativeId));
+    } catch (err) {
+      setStrategicError(err instanceof ApiError ? err.message : 'Failed to unlink strategic initiative.');
     }
   }
 
@@ -453,6 +533,123 @@ export default function RiskDetailPage({ risk, accessToken, canEdit, canDelete, 
               </div>
             )}
           </div>
+
+          <div className="bg-slate-800 rounded-lg p-6 border border-slate-700 space-y-4 mt-6">
+            <h2 className="text-lg font-semibold text-white">Strategic Initiatives</h2>
+            <p className="text-xs text-slate-500">
+              Strategic initiatives created to treat, mitigate, or remediate this risk. Progress here is supporting context for this risk&apos;s
+              treatment status.
+            </p>
+
+            {linkedStrategicInitiatives.length === 0 ? (
+              <p className="text-sm text-slate-500">None linked yet.</p>
+            ) : (
+              <ul className="space-y-2">
+                {linkedStrategicInitiatives.map((initiative) => (
+                  <li key={initiative.id}>
+                    <div className="flex items-center justify-between rounded-md border border-slate-700 p-3 text-sm gap-3">
+                      <Link href={`/strategic-plan/${initiative.id}`} className="min-w-0 flex-1 hover:text-blue-400 transition-colors">
+                        <p className="font-medium text-slate-200 truncate">
+                          <span className="text-slate-500">{initiative.code}</span> {initiative.title}
+                        </p>
+                        <div className="flex items-center gap-2 mt-1">
+                          <div className="w-20 rounded-full bg-slate-700 overflow-hidden h-1.5">
+                            <div className="h-full rounded-full bg-blue-500" style={{ width: `${initiative.percentComplete}%` }} />
+                          </div>
+                          <span className="text-xs text-slate-500">{initiative.percentComplete}%</span>
+                        </div>
+                      </Link>
+                      <div className="flex items-center gap-3 shrink-0">
+                        <StrategicStatusBadge status={initiative.status} />
+                        {canLinkStrategic && (
+                          <button
+                            type="button"
+                            onClick={() => handleUnlinkStrategicInitiative(initiative.id)}
+                            className="text-red-400 hover:text-red-300 text-xs font-medium"
+                          >
+                            Unlink
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            )}
+
+            {canLinkStrategic && (
+              <div className="space-y-2 pt-2 border-t border-slate-700">
+                <label htmlFor="strategic-search" className="block text-sm text-slate-300 mb-1">
+                  Link an existing strategic initiative
+                </label>
+                <input
+                  id="strategic-search"
+                  type="text"
+                  value={strategicSearchInput}
+                  onChange={(e) => setStrategicSearchInput(e.target.value)}
+                  placeholder="Search strategic initiatives by title…"
+                  className="w-full rounded-md bg-slate-900 border border-slate-600 px-3 py-2 text-white"
+                />
+                <div className="max-h-48 overflow-y-auto rounded-md border border-slate-700">
+                  {strategicLoading && <p className="p-3 text-sm text-slate-500">Loading initiatives…</p>}
+                  {!strategicLoading &&
+                    availableStrategicInitiatives.filter((initiative) => !linkedStrategicInitiatives.some((linked) => linked.id === initiative.id))
+                      .length === 0 && (
+                      <p className="p-3 text-sm text-slate-500">
+                        {strategicSearch ? 'No matching initiatives.' : 'Every existing strategic initiative is already linked to this risk.'}
+                      </p>
+                    )}
+                  {!strategicLoading &&
+                    availableStrategicInitiatives
+                      .filter((initiative) => !linkedStrategicInitiatives.some((linked) => linked.id === initiative.id))
+                      .map((initiative) => (
+                        <button
+                          key={initiative.id}
+                          type="button"
+                          onClick={() => setSelectedStrategicId(initiative.id)}
+                          className={`block w-full px-3 py-2 text-left text-sm ${
+                            selectedStrategicId === initiative.id ? 'bg-blue-600/30 text-white' : 'text-slate-300 hover:bg-slate-700/40'
+                          }`}
+                        >
+                          {initiative.code} — {initiative.title} ({initiative.status})
+                        </button>
+                      ))}
+                </div>
+                {strategicTotalPages > 1 && (
+                  <div className="flex items-center justify-center gap-3">
+                    <button
+                      type="button"
+                      onClick={() => setStrategicPage((p) => p - 1)}
+                      disabled={strategicPage <= 1}
+                      className="rounded-md border border-slate-600 px-3 py-1 text-xs text-slate-300 disabled:opacity-50"
+                    >
+                      Previous
+                    </button>
+                    <span className="text-xs text-slate-400">
+                      Page {strategicPage} of {strategicTotalPages}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setStrategicPage((p) => p + 1)}
+                      disabled={strategicPage >= strategicTotalPages}
+                      className="rounded-md border border-slate-600 px-3 py-1 text-xs text-slate-300 disabled:opacity-50"
+                    >
+                      Next
+                    </button>
+                  </div>
+                )}
+                {strategicError && <p className="text-sm text-red-400">{strategicError}</p>}
+                <button
+                  type="button"
+                  onClick={handleLinkStrategicInitiative}
+                  disabled={!selectedStrategicId}
+                  className="rounded-md border border-slate-600 px-4 py-2 text-sm font-medium text-slate-200 disabled:opacity-50"
+                >
+                  Link
+                </button>
+              </div>
+            )}
+          </div>
         </div>
       </div>
     </>
@@ -472,15 +669,16 @@ export const getServerSideProps: GetServerSideProps<RiskDetailPageProps> = async
 
   const canEdit = hasAnyRole(session.roles ?? [], RISK_WRITE_ROLES);
   const canDelete = hasAnyRole(session.roles ?? [], RISK_DELETE_ROLES);
+  const canLinkStrategic = hasAnyRole(session.roles ?? [], STRATEGIC_WRITE_ROLES);
 
   try {
     const risk = await getRisk(session.accessToken, id);
-    return { props: { risk, accessToken: session.accessToken, canEdit, canDelete, errorMessage: null } };
+    return { props: { risk, accessToken: session.accessToken, canEdit, canDelete, canLinkStrategic, errorMessage: null } };
   } catch (error) {
     if (error instanceof ApiError && error.status === 404) {
       return { notFound: true };
     }
     const message = error instanceof ApiError ? error.message : 'Failed to load this risk.';
-    return { props: { risk: null, accessToken: session.accessToken, canEdit, canDelete, errorMessage: message } };
+    return { props: { risk: null, accessToken: session.accessToken, canEdit, canDelete, canLinkStrategic, errorMessage: message } };
   }
 };

@@ -20,6 +20,7 @@ import { PinnedInsightsModule } from './pinned-insights/pinned-insights.module';
 import { PrismaModule } from './prisma/prisma.module';
 import { RemediationInitiativesModule } from './remediation-initiatives/remediation-initiatives.module';
 import { RisksModule } from './risks/risks.module';
+import { StrategicInitiativesModule } from './strategic-initiatives/strategic-initiatives.module';
 import { UsersModule } from './users/users.module';
 
 @Module({
@@ -53,6 +54,7 @@ import { UsersModule } from './users/users.module';
     DashboardModule,
     RisksModule,
     RemediationInitiativesModule,
+    StrategicInitiativesModule,
     NotificationsModule,
     PinnedInsightsModule,
     LlmSettingsModule,

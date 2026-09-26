@@ -240,6 +240,14 @@ export interface RemediationInitiativeSummary {
   status: string;
 }
 
+export interface StrategicInitiativeSummary {
+  id: string;
+  code: string;
+  title: string;
+  status: string;
+  percentComplete: number;
+}
+
 export interface RiskRecord {
   id: string;
   organisationId: string;
@@ -259,6 +267,9 @@ export interface RiskRecord {
   // renders summary fields) don't need this populated, but the risk-detail
   // page's initiative picker does — the API includes it on GET /risks/:id.
   initiatives?: RemediationInitiativeSummary[];
+  // Same story as `initiatives` above, one field over — the Strategic Plan's Risk Register
+  // cross-link (see apps/api/src/risks/risks.service.ts's riskDetailInclude).
+  strategicInitiatives?: StrategicInitiativeSummary[];
   status: string;
 }
 
@@ -499,6 +510,38 @@ export function linkInitiative(accessToken: string, initiativeId: string, riskId
 
 export function unlinkInitiative(accessToken: string, initiativeId: string, riskId: string) {
   return apiFetch<unknown>(`/remediation-initiatives/${initiativeId}/risks/${riskId}`, accessToken, { method: 'DELETE' });
+}
+
+export interface PaginatedStrategicInitiatives {
+  data: StrategicInitiativeSummary[];
+  total: number;
+  page: number;
+  pageSize: number;
+  totalPages: number;
+}
+
+/** Lightweight search used by the risk-detail page's "link a strategic initiative" picker — mirrors listInitiatives above. */
+export function listStrategicInitiativesForLinking(
+  accessToken: string,
+  organisationId: string,
+  options: { search?: string; page?: number; pageSize?: number } = {},
+) {
+  const params: Record<string, string> = { organisationId };
+  if (options.search) params.search = options.search;
+  if (options.page) params.page = String(options.page);
+  if (options.pageSize) params.pageSize = String(options.pageSize);
+  const query = new URLSearchParams(params);
+  return apiFetch<PaginatedStrategicInitiatives>(`/strategic-initiatives?${query}`, accessToken);
+}
+
+// Linking is modelled on the initiative, not the risk (`POST/DELETE
+// /strategic-initiatives/:id/risks/:riskId`) — same pattern as linkInitiative/unlinkInitiative above.
+export function linkStrategicInitiative(accessToken: string, initiativeId: string, riskId: string) {
+  return apiFetch<unknown>(`/strategic-initiatives/${initiativeId}/risks/${riskId}`, accessToken, { method: 'POST' });
+}
+
+export function unlinkStrategicInitiative(accessToken: string, initiativeId: string, riskId: string) {
+  return apiFetch<unknown>(`/strategic-initiatives/${initiativeId}/risks/${riskId}`, accessToken, { method: 'DELETE' });
 }
 
 // ============================================================================
@@ -1009,4 +1052,223 @@ export function listAssistantDigests(accessToken: string, organisationId: string
 
 export function generateAssistantDigest(accessToken: string, organisationId: string) {
   return apiFetch<AssistantDigestRecord>(`/assistant-digests/${organisationId}/generate`, accessToken, { method: 'POST' });
+}
+
+// ============================================================================
+// STRATEGIC PLAN — organisation-wide strategic initiatives, each optionally linked to one or
+// more Risk Register items. See apps/api/src/strategic-initiatives. LinkedRiskSummary above
+// (declared alongside RemediationInitiativeRecord) is reused here for the same cross-link shape.
+// ============================================================================
+
+export interface StrategicMilestoneRecord {
+  id: string;
+  title: string;
+  dueDate: string | null;
+  completedAt: string | null;
+  status: string;
+  sortOrder: number;
+}
+
+export interface StrategicProgressEntry {
+  id: string;
+  month: string; // ISO date, first of month
+  percentComplete: number;
+  note: string | null;
+}
+
+export interface StrategicInitiativeRecord {
+  id: string;
+  organisationId: string;
+  code: string;
+  title: string;
+  description: string | null;
+  strategicObjective: string | null;
+  owner: string | null;
+  startDate: string | null;
+  targetDate: string | null;
+  status: string;
+  priority: number;
+  weight: number;
+  percentComplete: number;
+  notes: string | null;
+  risks: LinkedRiskSummary[];
+  milestones: StrategicMilestoneRecord[];
+  monthlyProgress: StrategicProgressEntry[];
+}
+
+export interface CreateStrategicInitiativeInput {
+  organisationId: string;
+  title: string;
+  description?: string;
+  strategicObjective?: string;
+  owner?: string;
+  priority?: number;
+  weight?: number;
+  startDate?: string;
+  targetDate?: string;
+  notes?: string;
+  riskIds?: string[];
+}
+
+export interface UpdateStrategicInitiativeInput {
+  title?: string;
+  description?: string;
+  strategicObjective?: string;
+  owner?: string;
+  priority?: number;
+  weight?: number;
+  startDate?: string;
+  targetDate?: string;
+  status?: string;
+  notes?: string;
+}
+
+export interface StrategicPlanFilters {
+  status?: string;
+  owner?: string;
+  strategicObjective?: string;
+  priority?: number;
+  riskLevel?: string;
+  linked?: 'true' | 'false';
+  year?: number;
+  month?: number;
+  search?: string;
+  sort?: 'priority' | 'recent' | 'targetDate';
+  page?: number;
+  pageSize?: number;
+}
+
+export interface PaginatedStrategicInitiativeRecords {
+  data: StrategicInitiativeRecord[];
+  total: number;
+  page: number;
+  pageSize: number;
+  totalPages: number;
+}
+
+function strategicPlanQuery(organisationId: string, filters: StrategicPlanFilters): URLSearchParams {
+  const params: Record<string, string> = { organisationId };
+  if (filters.status) params.status = filters.status;
+  if (filters.owner) params.owner = filters.owner;
+  if (filters.strategicObjective) params.strategicObjective = filters.strategicObjective;
+  if (filters.priority) params.priority = String(filters.priority);
+  if (filters.riskLevel) params.riskLevel = filters.riskLevel;
+  if (filters.linked) params.linked = filters.linked;
+  if (filters.year) params.year = String(filters.year);
+  if (filters.month) params.month = String(filters.month);
+  if (filters.search) params.search = filters.search;
+  if (filters.sort) params.sort = filters.sort;
+  if (filters.page) params.page = String(filters.page);
+  if (filters.pageSize) params.pageSize = String(filters.pageSize);
+  return new URLSearchParams(params);
+}
+
+export function listStrategicInitiatives(accessToken: string, organisationId: string, filters: StrategicPlanFilters = {}) {
+  const query = strategicPlanQuery(organisationId, filters);
+  return apiFetch<PaginatedStrategicInitiativeRecords>(`/strategic-initiatives?${query}`, accessToken);
+}
+
+export function getStrategicInitiative(accessToken: string, id: string) {
+  return apiFetch<StrategicInitiativeRecord>(`/strategic-initiatives/${id}`, accessToken);
+}
+
+export function createStrategicInitiative(accessToken: string, input: CreateStrategicInitiativeInput) {
+  return apiFetch<StrategicInitiativeRecord>('/strategic-initiatives', accessToken, { method: 'POST', body: JSON.stringify(input) });
+}
+
+export function updateStrategicInitiative(accessToken: string, id: string, input: UpdateStrategicInitiativeInput) {
+  return apiFetch<StrategicInitiativeRecord>(`/strategic-initiatives/${id}`, accessToken, { method: 'PATCH', body: JSON.stringify(input) });
+}
+
+export function deleteStrategicInitiative(accessToken: string, id: string) {
+  return apiFetch<{ message: string }>(`/strategic-initiatives/${id}`, accessToken, { method: 'DELETE' });
+}
+
+export interface CreateMilestoneInput {
+  title: string;
+  dueDate?: string;
+  status?: string;
+  sortOrder?: number;
+}
+
+export interface UpdateMilestoneInput {
+  title?: string;
+  dueDate?: string;
+  completedAt?: string;
+  status?: string;
+  sortOrder?: number;
+}
+
+export function addMilestone(accessToken: string, initiativeId: string, input: CreateMilestoneInput) {
+  return apiFetch<StrategicInitiativeRecord>(`/strategic-initiatives/${initiativeId}/milestones`, accessToken, {
+    method: 'POST',
+    body: JSON.stringify(input),
+  });
+}
+
+export function updateMilestone(accessToken: string, initiativeId: string, milestoneId: string, input: UpdateMilestoneInput) {
+  return apiFetch<StrategicMilestoneRecord>(`/strategic-initiatives/${initiativeId}/milestones/${milestoneId}`, accessToken, {
+    method: 'PATCH',
+    body: JSON.stringify(input),
+  });
+}
+
+export function deleteMilestone(accessToken: string, initiativeId: string, milestoneId: string) {
+  return apiFetch<{ message: string }>(`/strategic-initiatives/${initiativeId}/milestones/${milestoneId}`, accessToken, {
+    method: 'DELETE',
+  });
+}
+
+export interface RecordProgressInput {
+  /** 'YYYY-MM' or a full date — normalised server-side to that month's first day. */
+  month: string;
+  percentComplete: number;
+  note?: string;
+}
+
+/** Upserts this month's progress entry — safe to call again for the same month to correct a mistake, it never appends a duplicate row (see StrategicInitiativesService.recordProgress). */
+export function recordStrategicProgress(accessToken: string, initiativeId: string, input: RecordProgressInput) {
+  return apiFetch<StrategicInitiativeRecord>(`/strategic-initiatives/${initiativeId}/progress`, accessToken, {
+    method: 'POST',
+    body: JSON.stringify(input),
+  });
+}
+
+export function deleteStrategicProgress(accessToken: string, initiativeId: string, progressId: string) {
+  return apiFetch<StrategicInitiativeRecord>(`/strategic-initiatives/${initiativeId}/progress/${progressId}`, accessToken, {
+    method: 'DELETE',
+  });
+}
+
+export interface StrategicMonthlyTrendPoint {
+  month: string; // 'YYYY-MM'
+  actual: number;
+  planned: number | null;
+}
+
+export interface StrategicObjectiveProgress {
+  objective: string;
+  progress: number;
+  count: number;
+}
+
+export interface StrategicPlanDashboard {
+  overallProgress: number;
+  totalInitiatives: number;
+  completed: number;
+  inProgress: number;
+  notStarted: number;
+  onHold: number;
+  cancelled: number;
+  overdueCount: number;
+  atRiskCount: number;
+  linkedToRiskCount: number;
+  highRiskWithInitiatives: number;
+  monthlyTrend: StrategicMonthlyTrendPoint[];
+  progressByObjective: StrategicObjectiveProgress[];
+}
+
+export function getStrategicPlanDashboard(accessToken: string, organisationId: string) {
+  const query = new URLSearchParams({ organisationId });
+  return apiFetch<StrategicPlanDashboard>(`/strategic-initiatives/dashboard?${query}`, accessToken);
 }
