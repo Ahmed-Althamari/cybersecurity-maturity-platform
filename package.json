@@ -31,7 +31,7 @@
     "docker:down": "docker compose down"
   },
   "devDependencies": {
-    "prettier": "^3.0.2",
+    "prettier": "^3.9.8",
     "turbo": "^2.9.14",
     "typescript": "^5.2.2"
   },
